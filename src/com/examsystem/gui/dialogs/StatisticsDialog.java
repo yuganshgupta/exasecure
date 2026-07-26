@@ -3,12 +3,11 @@ package com.examsystem.gui.dialogs;
 import com.examsystem.models.AttemptSummary;
 import com.examsystem.models.QuestionStatistic;
 import com.examsystem.services.AdminService;
-
-import javax.swing.*;
 import java.awt.*;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import javax.swing.*;
 
 public class StatisticsDialog extends JDialog {
 
@@ -149,7 +148,7 @@ public class StatisticsDialog extends JDialog {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
             int w = getWidth();
-            int h = getHeight();
+            // Variable 'h' removed here
             
             g2.setFont(new Font("SansSerif", Font.BOLD, 14));
             String title = "Question Analysis (Green = Correct, Gray = Total)";

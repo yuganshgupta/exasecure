@@ -1,16 +1,11 @@
 package com.examsystem.gui.panels;
 
 import com.examsystem.gui.dialogs.AttemptDetailsDialog;
-import com.examsystem.gui.dialogs.ProctorDialog;
-import com.examsystem.gui.dialogs.StatisticsDialog;
-import com.examsystem.gui.dialogs.ScreenshotViewer; // Import the new dialog
+import com.examsystem.gui.dialogs.ScreenshotViewer;
+import com.examsystem.gui.dialogs.StatisticsDialog; // Import the new dialog
 import com.examsystem.models.AttemptSummary;
 import com.examsystem.models.Exam;
-import com.examsystem.models.StudentAnswer;
 import com.examsystem.services.AdminService;
-
-import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -18,6 +13,8 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
 
 public class ReviewPanel extends JPanel {
 

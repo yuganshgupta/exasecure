@@ -1,12 +1,12 @@
 package com.examsystem.gui;
 
+import com.examsystem.gui.panels.AdminDashboard;
 import com.examsystem.models.User;
-import com.examsystem.services.AuthService;
-
-import javax.swing.*;
+import com.examsystem.services.AuthService; // Added this import
 import java.awt.*;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import javax.swing.*;
 
 /**
  * Login window (JFrame). On success, opens AdminDashboard or StudentDashboard.

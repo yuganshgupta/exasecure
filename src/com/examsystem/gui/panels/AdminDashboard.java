@@ -1,24 +1,18 @@
-package com.examsystem.gui;
+package com.examsystem.gui.panels;
 
 import com.examsystem.models.User;
 import com.examsystem.services.AdminService;
-import com.examsystem.gui.panels.AddQuestionPanel;
-import com.examsystem.gui.panels.CreateExamPanel;
-import com.examsystem.gui.panels.ReviewPanel;
-import com.examsystem.gui.panels.UserManagementPanel;
-
-import javax.swing.*;
 import java.awt.*;
+import javax.swing.*;
 
 /** Admin Dashboard with a tabbed interface. */
 public class AdminDashboard extends JFrame {
 
-    private final User adminUser;
     private final AdminService adminService = new AdminService();
 
     public AdminDashboard(User adminUser) {
+        // Here adminUser refers directly to the constructor parameter, which is perfectly fine.
         super("Admin Dashboard - " + adminUser.getFullName());
-        this.adminUser = adminUser;
 
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1000, 700);

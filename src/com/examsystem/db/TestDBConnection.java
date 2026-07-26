@@ -3,6 +3,8 @@ package com.examsystem.db;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.SQLException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Simple test program that uses DatabaseConnector.getConnection()
@@ -11,6 +13,10 @@ import java.sql.SQLException;
  * Run after you set the DB credentials in DatabaseConnector.java
  */
 public class TestDBConnection {
+    
+    // Create a logger for this class
+    private static final Logger LOGGER = Logger.getLogger(TestDBConnection.class.getName());
+
     public static void main(String[] args) {
         System.out.println("Testing DB connection via DatabaseConnector...");
         try (Connection conn = DatabaseConnector.getConnection()) {
@@ -25,8 +31,8 @@ public class TestDBConnection {
                 System.err.println("ERROR: Connection was null or closed.");
             }
         } catch (SQLException e) {
-            System.err.println("ERROR: JDBC connection failed:");
-            e.printStackTrace();
+            // Use the logger instead of e.printStackTrace()
+            LOGGER.log(Level.SEVERE, "ERROR: JDBC connection failed", e);
             System.exit(2);
         }
     }
