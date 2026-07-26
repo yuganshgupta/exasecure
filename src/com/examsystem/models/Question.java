@@ -1,0 +1,28 @@
+package com.examsystem.models;
+
+/** Represents a multiple-choice question. */
+public class Question {
+    private int id;
+    private int examId;
+    private String questionText;
+    private int correctOptionNumber; // 1..4
+
+    public Question() {}
+
+    public Question(int id, int examId, String questionText, int correctOptionNumber) {
+        this.id = id;
+        this.examId = examId;
+        this.questionText = questionText;
+        this.correctOptionNumber = correctOptionNumber;
+    }
+
+    public int getId() { return id; }
+    public int getExamId() { return examId; }
+    public String getQuestionText() { return questionText; }
+    public int getCorrectOptionNumber() { return correctOptionNumber; }
+
+    public void setId(int id) { this.id = id; }
+    public void setExamId(int examId) { this.examId = examId; }
+    public void setQuestionText(String questionText) { this.questionText = questionText; }
+    public void setCorrectOptionNumber(int correctOptionNumber) { this.correctOptionNumber = correctOptionNumber; }
+}
