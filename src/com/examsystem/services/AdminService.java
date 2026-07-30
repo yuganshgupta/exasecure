@@ -90,19 +90,7 @@ public class AdminService {
         return examAttemptDAO.getProctorLogs(attemptId);
     }
 
-    // --- NEW METHOD: Get Screenshots from Disk ---
-    public List<File> getProctorScreenshots(int attemptId) {
-        File dir = new File("proctor_logs/" + attemptId);
-        if (dir.exists() && dir.isDirectory()) {
-            File[] files = dir.listFiles((d, name) -> name.toLowerCase().endsWith(".jpg"));
-            if (files != null) {
-                // Sort by last modified (timestamp)
-                Arrays.sort(files, Comparator.comparingLong(File::lastModified));
-                return Arrays.asList(files);
-            }
-        }
-        return new ArrayList<>();
-    }
+
 
     public void saveStudentAnswer(int attemptId, int questionId, int optionNum, boolean correct) {
         studentAnswerDAO.saveAnswer(attemptId, questionId, optionNum, correct, new java.sql.Timestamp(System.currentTimeMillis()));

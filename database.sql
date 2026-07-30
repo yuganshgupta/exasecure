@@ -79,7 +79,7 @@ CREATE TABLE proctor_logs (
   id INT AUTO_INCREMENT PRIMARY KEY,
   attempt_id INT NOT NULL,
   violation_type VARCHAR(100) NOT NULL, -- e.g., "FOCUS_LOST"
-  screenshot_path VARCHAR(255),
+  screenshot_data LONGBLOB,
   violation_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_logs_attempt FOREIGN KEY (attempt_id) REFERENCES exam_attempts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

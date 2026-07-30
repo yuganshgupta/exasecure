@@ -139,6 +139,11 @@ public class UserManagementPanel extends JPanel {
             JOptionPane.showMessageDialog(this, "Username, Password, and Name are required.", "Validation", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        
+        if ("student".equalsIgnoreCase(role) && enrollment.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Enrollment number is required for students.", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
 
         int id = adminService.registerUser(username, password, fullName, enrollment, section, role);
         if (id > 0) {
@@ -166,6 +171,11 @@ public class UserManagementPanel extends JPanel {
 
         if (username.isEmpty() || fullName.isEmpty()) {
             JOptionPane.showMessageDialog(this, "Username and Name required.", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        if ("student".equalsIgnoreCase(role) && enrollment.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Enrollment number is required for students.", "Validation", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
