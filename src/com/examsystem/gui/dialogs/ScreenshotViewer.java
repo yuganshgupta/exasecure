@@ -1,16 +1,16 @@
 package com.examsystem.gui.dialogs;
 
+import com.examsystem.models.ProctorLog;
 import com.examsystem.services.AdminService;
 
 import javax.swing.*;
 import java.awt.*;
-import java.io.File;
 import java.util.List;
 
 public class ScreenshotViewer extends JDialog {
 
     private final JLabel imageLabel = new JLabel();
-    private final JList<File> fileList = new JList<>();
+    private final JList<ProctorLog> fileList = new JList<>();
 
     public ScreenshotViewer(Window owner, AdminService service, int attemptId) {
         super(owner, "Proctor Evidence - Attempt " + attemptId, Dialog.ModalityType.APPLICATION_MODAL);
@@ -19,24 +19,30 @@ public class ScreenshotViewer extends JDialog {
         setLocationRelativeTo(owner);
         setLayout(new BorderLayout());
 
-        // Get files
-        List<File> files = service.getProctorScreenshots(attemptId);
+        // Get logs
+        List<ProctorLog> logs = service.getProctorLogs(attemptId);
+        List<ProctorLog> screenshotLogs = new java.util.ArrayList<>();
+        for (ProctorLog log : logs) {
+            if (log.getScreenshotData() != null) {
+                screenshotLogs.add(log);
+            }
+        }
 
-        if (files.isEmpty()) {
+        if (screenshotLogs.isEmpty()) {
             add(new JLabel("No screenshots found for this attempt.", SwingConstants.CENTER), BorderLayout.CENTER);
             return;
         }
 
-        // --- Left Panel: List of Files ---
-        fileList.setListData(files.toArray(new File[0]));
+        // --- Left Panel: List of Logs ---
+        fileList.setListData(screenshotLogs.toArray(new ProctorLog[0]));
         fileList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        // Custom renderer to show just the name, not the full path
+        // Custom renderer to show timestamp
         fileList.setCellRenderer(new DefaultListCellRenderer() {
             @Override
             public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
                 super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-                if (value instanceof File) {
-                    setText(((File) value).getName());
+                if (value instanceof ProctorLog) {
+                    setText(((ProctorLog) value).getTimestamp().toString());
                 }
                 return this;
             }
@@ -62,11 +68,11 @@ public class ScreenshotViewer extends JDialog {
         fileList.setSelectedIndex(0);
     }
 
-    private void showImage(File file) {
-        if (file == null || !file.exists()) return;
+    private void showImage(ProctorLog log) {
+        if (log == null || log.getScreenshotData() == null) return;
         
         try {
-            ImageIcon originalIcon = new ImageIcon(file.getPath());
+            ImageIcon originalIcon = new ImageIcon(log.getScreenshotData());
             // Scale image to fit reasonably if huge
             Image img = originalIcon.getImage();
             

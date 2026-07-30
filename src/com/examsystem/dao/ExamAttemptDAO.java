@@ -47,13 +47,18 @@ public class ExamAttemptDAO {
     }
 
     // --- NEW: Insert a proctoring log event ---
-    public void logEvent(int attemptId, String message) {
-        String sql = "INSERT INTO proctor_logs (attempt_id, log_message) VALUES (?, ?)";
+    public void logEvent(int attemptId, String message, byte[] screenshotData) {
+        String sql = "INSERT INTO proctor_logs (attempt_id, violation_type, screenshot_data) VALUES (?, ?, ?)";
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             
             ps.setInt(1, attemptId);
             ps.setString(2, message);
+            if (screenshotData != null) {
+                ps.setBytes(3, screenshotData);
+            } else {
+                ps.setNull(3, Types.BLOB);
+            }
             ps.executeUpdate();
             
         } catch (SQLException e) {
@@ -63,7 +68,7 @@ public class ExamAttemptDAO {
 
     // --- NEW: Fetch logs for review ---
     public List<ProctorLog> getProctorLogs(int attemptId) {
-        String sql = "SELECT log_message, created_at FROM proctor_logs WHERE attempt_id=? ORDER BY created_at ASC";
+        String sql = "SELECT violation_type, screenshot_data, violation_time FROM proctor_logs WHERE attempt_id=? ORDER BY violation_time ASC";
         List<ProctorLog> logs = new ArrayList<>();
         
         try (Connection conn = DatabaseConnector.getConnection();
@@ -73,8 +78,9 @@ public class ExamAttemptDAO {
             try (ResultSet rs = ps.executeQuery()) {
                 while(rs.next()) {
                     logs.add(new ProctorLog(
-                        rs.getString("log_message"),
-                        rs.getTimestamp("created_at")
+                        rs.getString("violation_type"),
+                        rs.getTimestamp("violation_time"),
+                        rs.getBytes("screenshot_data")
                     ));
                 }
             }

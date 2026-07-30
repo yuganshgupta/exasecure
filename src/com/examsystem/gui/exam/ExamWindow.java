@@ -110,7 +110,7 @@ public class ExamWindow extends JDialog {
                         
                         // LOG THE LONG ABSENCE
                         String msg = "Long Absence: " + (timeAway/1000) + "s while on Q" + (currentIndex+1);
-                        examAttemptDAO.logEvent(attemptId, msg);
+                        examAttemptDAO.logEvent(attemptId, msg, null);
                         
                         JOptionPane.showMessageDialog(ExamWindow.this, 
                             "You were away for " + (timeAway/1000) + " seconds!", 
@@ -130,16 +130,15 @@ public class ExamWindow extends JDialog {
                 
                 // --- NEW: LOG SPECIFIC QUESTION ---
                 String msg = "Focus lost while viewing Q" + (currentIndex + 1);
-                examAttemptDAO.logEvent(attemptId, msg);
+                byte[] screenshotData = takeScreenshotBytes();
+                examAttemptDAO.logEvent(attemptId, msg, screenshotData);
                 // ----------------------------------
-                
-                takeScreenshot();
 
                 int remaining = MAX_FOCUS_LOST - focusLostCount;
                 isOverlayVisible = true; 
                 
                 if (remaining < 0) {
-                    examAttemptDAO.logEvent(attemptId, "Limit exceeded. Auto-submitting.");
+                    examAttemptDAO.logEvent(attemptId, "Limit exceeded. Auto-submitting.", null);
                     JOptionPane.showMessageDialog(ExamWindow.this, 
                         "Suspicious activity detected! Auto-submitting.", 
                         "Alert", JOptionPane.ERROR_MESSAGE);
@@ -169,15 +168,17 @@ public class ExamWindow extends JDialog {
         loadContentAndStart();
     }
 
-    private void takeScreenshot() {
+    private byte[] takeScreenshotBytes() {
         try {
             Robot robot = new Robot();
             Rectangle screenRect = new Rectangle(Toolkit.getDefaultToolkit().getScreenSize());
             BufferedImage screenFullImage = robot.createScreenCapture(screenRect);
-            File dir = new File("proctor_logs/" + attemptId);
-            if (!dir.exists()) dir.mkdirs();
-            ImageIO.write(screenFullImage, "jpg", new File(dir, "violation_" + System.currentTimeMillis() + ".jpg"));
-        } catch (Exception ignored) {}
+            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+            ImageIO.write(screenFullImage, "jpg", baos);
+            return baos.toByteArray();
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private void loadContentAndStart() {
