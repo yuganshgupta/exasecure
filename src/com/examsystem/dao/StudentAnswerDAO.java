@@ -37,6 +37,7 @@ public class StudentAnswerDAO {
 
         } catch (SQLException e) {
             System.err.println("StudentAnswerDAO.saveAnswer error: " + e.getMessage());
+            throw new RuntimeException("Failed to save answer. Please check your network or contact administrator.", e);
         }
     }
 

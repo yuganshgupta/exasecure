@@ -43,6 +43,7 @@ public class ExamAttemptDAO {
             ps.executeUpdate();
         } catch (SQLException e) {
             System.err.println("ExamAttemptDAO.completeAttempt error: " + e.getMessage());
+            throw new RuntimeException("Failed to finalize exam attempt in database.", e);
         }
     }
 
@@ -212,6 +213,7 @@ public class ExamAttemptDAO {
             score = answerDAO.countCorrectAnswersByAttempt(attemptId);
         } catch (Exception e) {
             System.err.println("ExamAttemptDAO.calculateAndSetScore error: " + e.getMessage());
+            throw new RuntimeException("Failed to calculate score.", e);
         }
         completeAttempt(attemptId, new Timestamp(System.currentTimeMillis()), score, focusLostCount);
     }
