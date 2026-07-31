@@ -90,12 +90,23 @@ public class AddQuestionPanel extends JPanel {
             JOptionPane.showMessageDialog(this, "Question text is required.", "Validation", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        
+        if (qText.length() > 65535) {
+            JOptionPane.showMessageDialog(this, "Question text is too long.", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
 
         // Collect only non-empty options
         List<String> validOpts = new ArrayList<>();
         for(JTextField field : optionFields) {
             String txt = field.getText().trim();
-            if(!txt.isEmpty()) validOpts.add(txt);
+            if(!txt.isEmpty()) {
+                if (txt.length() > 500) {
+                    JOptionPane.showMessageDialog(this, "Option text too long (max 500).", "Validation", JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                validOpts.add(txt);
+            }
         }
 
         if (validOpts.size() < 2) {

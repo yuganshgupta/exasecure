@@ -56,6 +56,11 @@ public class CreateExamPanel extends JPanel {
             JOptionPane.showMessageDialog(this, "Title cannot be empty.", "Validation", JOptionPane.WARNING_MESSAGE);
             return;
         }
+        
+        if (title.length() > 255) {
+            JOptionPane.showMessageDialog(this, "Title is too long (max 255).", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
 
         int examId = adminService.createExam(title, duration, adminUser.getId());
         if (examId > 0) {

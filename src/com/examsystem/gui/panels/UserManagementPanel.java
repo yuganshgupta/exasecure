@@ -140,6 +140,11 @@ public class UserManagementPanel extends JPanel {
             return;
         }
         
+        if (username.length() > 50 || password.length() > 100 || fullName.length() > 100 || enrollment.length() > 50) {
+            JOptionPane.showMessageDialog(this, "Input too long. Max lengths: Username(50), Password(100), Name(100), Enrollment(50).", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
         if ("student".equalsIgnoreCase(role) && enrollment.isEmpty()) {
             JOptionPane.showMessageDialog(this, "Enrollment number is required for students.", "Validation", JOptionPane.WARNING_MESSAGE);
             return;
@@ -171,6 +176,11 @@ public class UserManagementPanel extends JPanel {
 
         if (username.isEmpty() || fullName.isEmpty()) {
             JOptionPane.showMessageDialog(this, "Username and Name required.", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
+        if (username.length() > 50 || password.length() > 100 || fullName.length() > 100 || enrollment.length() > 50) {
+            JOptionPane.showMessageDialog(this, "Input too long. Max lengths: Username(50), Password(100), Name(100), Enrollment(50).", "Validation", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
