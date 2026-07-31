@@ -34,10 +34,14 @@ public class DatabaseConnector {
     }
 
     public static Connection getConnection() throws SQLException {
-        return DriverManager.getConnection(
-                props.getProperty("db.url"),
-                props.getProperty("db.user"),
-                props.getProperty("db.password")
-        );
+        try {
+            return DriverManager.getConnection(
+                    props.getProperty("db.url"),
+                    props.getProperty("db.user"),
+                    props.getProperty("db.password")
+            );
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to connect to the database. Please check your network or database server.", e);
+        }
     }
 }

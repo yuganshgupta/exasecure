@@ -17,7 +17,11 @@ public class Main {
         // Show unhandled exceptions to help troubleshooting
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
             LOGGER.log(Level.SEVERE, "Unhandled Exception caught in thread " + t.getName(), e);
-            JOptionPane.showMessageDialog(null, e.toString(), "Unhandled Error", JOptionPane.ERROR_MESSAGE);
+            String msg = e.getMessage() != null ? e.getMessage() : e.toString();
+            if (e instanceof RuntimeException && e.getCause() instanceof java.sql.SQLException) {
+                msg = "Database Error:\n" + e.getMessage();
+            }
+            JOptionPane.showMessageDialog(null, msg, "Application Error", JOptionPane.ERROR_MESSAGE);
         });
 
         try {
