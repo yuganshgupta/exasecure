@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # POSIX-friendly launcher for macOS (handles paths with spaces)
 set -eu
-
+  
 BASE="$(cd "$(dirname "$0")" && pwd)"
 SRC="$BASE/src"
 BIN="$BASE/bin"
