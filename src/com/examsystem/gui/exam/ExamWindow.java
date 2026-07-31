@@ -81,6 +81,8 @@ public class ExamWindow extends JDialog {
         for (JRadioButton rb : optionButtons) {
             optionGroup.add(rb);
             optionsPanel.add(rb);
+            // NEW: Persist immediately when the student clicks an option
+            rb.addActionListener(e -> saveCurrentAnswer());
         }
         center.add(optionsPanel);
         add(center, BorderLayout.CENTER);
@@ -107,17 +109,19 @@ public class ExamWindow extends JDialog {
                     long timeAway = System.currentTimeMillis() - lastFocusLostTime;
                     if (timeAway > 5000) {
                         isOverlayVisible = true;
-                        
-                        // LOG THE LONG ABSENCE
-                        String msg = "Long Absence: " + (timeAway/1000) + "s while on Q" + (currentIndex+1);
-                        examAttemptDAO.logEvent(attemptId, msg, null);
-                        
-                        JOptionPane.showMessageDialog(ExamWindow.this, 
-                            "You were away for " + (timeAway/1000) + " seconds!", 
-                            "Proctoring Warning", JOptionPane.WARNING_MESSAGE);
-                        isOverlayVisible = false;
-                        lastFocusLostTime = 0; 
+                        try {
+                            // LOG THE LONG ABSENCE
+                            String msg = "Long Absence: " + (timeAway/1000) + "s while on Q" + (currentIndex+1);
+                            examAttemptDAO.logEvent(attemptId, msg, null);
+                            
+                            JOptionPane.showMessageDialog(ExamWindow.this, 
+                                "You were away for " + (timeAway/1000) + " seconds!", 
+                                "Proctoring Warning", JOptionPane.WARNING_MESSAGE);
+                        } finally {
+                            isOverlayVisible = false;
+                        }
                     }
+                    lastFocusLostTime = 0; 
                 }
             }
 
@@ -136,19 +140,20 @@ public class ExamWindow extends JDialog {
 
                 int remaining = MAX_FOCUS_LOST - focusLostCount;
                 isOverlayVisible = true; 
-                
-                if (remaining < 0) {
-                    examAttemptDAO.logEvent(attemptId, "Limit exceeded. Auto-submitting.", null);
-                    JOptionPane.showMessageDialog(ExamWindow.this, 
-                        "Suspicious activity detected! Auto-submitting.", 
-                        "Alert", JOptionPane.ERROR_MESSAGE);
-                    finalizeAttemptAndClose();
-                } else {
-                    JOptionPane.showMessageDialog(ExamWindow.this, 
-                        "Warning: Focus lost! " + remaining + " attempts left.", 
-                        "Warning", JOptionPane.WARNING_MESSAGE);
+                try {
+                    if (remaining < 0) {
+                        examAttemptDAO.logEvent(attemptId, "Limit exceeded. Auto-submitting.", null);
+                        JOptionPane.showMessageDialog(ExamWindow.this, 
+                            "Suspicious activity detected! Auto-submitting.", 
+                            "Alert", JOptionPane.ERROR_MESSAGE);
+                        finalizeAttemptAndClose();
+                    } else {
+                        JOptionPane.showMessageDialog(ExamWindow.this, 
+                            "Warning: Focus lost! " + remaining + " attempts left.", 
+                            "Warning", JOptionPane.WARNING_MESSAGE);
+                    }
+                } finally {
                     isOverlayVisible = false;
-                    lastFocusLostTime = 0; 
                 }
             }
         });
@@ -157,10 +162,13 @@ public class ExamWindow extends JDialog {
             @Override public void windowClosing(WindowEvent e) {
                 if (!finalized) {
                     isOverlayVisible = true; 
-                    int opt = JOptionPane.showConfirmDialog(ExamWindow.this, "Close and submit?", "Confirm", JOptionPane.YES_NO_OPTION);
-                    isOverlayVisible = false;
-                    if (opt == JOptionPane.YES_OPTION) finalizeAttemptAndClose();
-                    else setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+                    try {
+                        int opt = JOptionPane.showConfirmDialog(ExamWindow.this, "Close and submit?", "Confirm", JOptionPane.YES_NO_OPTION);
+                        if (opt == JOptionPane.YES_OPTION) finalizeAttemptAndClose();
+                        else setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
+                    } finally {
+                        isOverlayVisible = false;
+                    }
                 }
             }
         });
@@ -190,6 +198,12 @@ public class ExamWindow extends JDialog {
         }
 
         attemptId = examAttemptDAO.createAttempt(exam.getId(), student.getId(), new Timestamp(System.currentTimeMillis()));
+        if (attemptId <= 0) {
+            JOptionPane.showMessageDialog(this, "Failed to start exam. Please try again or contact administrator.", "Error", JOptionPane.ERROR_MESSAGE);
+            dispose();
+            return;
+        }
+        
         remainingSeconds = exam.getDurationMinutes() * 60;
         
         swingTimer = new Timer(1000, e -> {
@@ -266,10 +280,13 @@ public class ExamWindow extends JDialog {
 
     private void onSubmitEarly() {
         isOverlayVisible = true;
-        if (JOptionPane.showConfirmDialog(this, "Submit early?", "Confirm", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-            finalizeAttemptAndClose();
+        try {
+            if (JOptionPane.showConfirmDialog(this, "Submit early?", "Confirm", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+                finalizeAttemptAndClose();
+            }
+        } finally {
+            isOverlayVisible = false;
         }
-        isOverlayVisible = false;
     }
 
     private void finalizeAttemptAndClose() {

@@ -70,7 +70,8 @@ CREATE TABLE student_answers (
   is_correct TINYINT(1) NOT NULL,
   answer_timestamp DATETIME NOT NULL,
   CONSTRAINT fk_answers_attempt FOREIGN KEY (attempt_id) REFERENCES exam_attempts(id) ON DELETE CASCADE,
-  CONSTRAINT fk_answers_question FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
+  CONSTRAINT fk_answers_question FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE,
+  CONSTRAINT uq_attempt_question UNIQUE (attempt_id, question_id)
 ) ENGINE=InnoDB;
 
 -- 7. Proctor Logs Table
