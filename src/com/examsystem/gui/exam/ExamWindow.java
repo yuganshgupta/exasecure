@@ -247,10 +247,10 @@ public class ExamWindow extends JDialog {
     }
 
     private void onNext() {
-        saveCurrentAnswer();
         if (currentIndex == questions.size() - 1) {
             finalizeAttemptAndClose();
         } else {
+            saveCurrentAnswer();
             currentIndex++;
             showCurrentQuestion();
         }
@@ -267,7 +267,6 @@ public class ExamWindow extends JDialog {
     private void onSubmitEarly() {
         isOverlayVisible = true;
         if (JOptionPane.showConfirmDialog(this, "Submit early?", "Confirm", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-            saveCurrentAnswer();
             finalizeAttemptAndClose();
         }
         isOverlayVisible = false;
@@ -275,6 +274,10 @@ public class ExamWindow extends JDialog {
 
     private void finalizeAttemptAndClose() {
         if (finalized) return;
+        
+        // Ensure the answer on the current screen is saved before closing
+        saveCurrentAnswer();
+        
         finalized = true;
         if (swingTimer != null) swingTimer.stop();
 
