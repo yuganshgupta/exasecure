@@ -4,7 +4,6 @@ import com.examsystem.db.DatabaseConnector;
 import com.examsystem.models.AttemptSummary;
 import com.examsystem.models.ExamAttempt;
 import com.examsystem.models.ProctorLog; // Import the new model
-
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
@@ -216,5 +215,24 @@ public class ExamAttemptDAO {
             throw new RuntimeException("Failed to calculate score.", e);
         }
         completeAttempt(attemptId, new Timestamp(System.currentTimeMillis()), score, focusLostCount);
+    }
+
+
+    // --- NEW: Count previous attempts for attempt limit logic ---
+    public int getAttemptCount(int studentId, int examId) {
+        String sql = "SELECT COUNT(*) FROM exam_attempts WHERE student_id=? AND exam_id=?";
+        try (Connection conn = DatabaseConnector.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setInt(1, studentId);
+            ps.setInt(2, examId);
+            
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return rs.getInt(1);
+            }
+        } catch (SQLException e) {
+            System.err.println("ExamAttemptDAO.getAttemptCount error: " + e.getMessage());
+        }
+        return 0; // Default to 0 if there's an error
     }
 }

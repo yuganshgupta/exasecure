@@ -57,14 +57,20 @@ public class ExamWindow extends JDialog {
         this.exam = exam;
         this.student = student;
 
-        // --- NEW: FULL SCREEN & KIOSK MODE ---
-        setUndecorated(true); // Removes OS borders, minimize, and close buttons for strict proctoring
+        // --- FIXED: macOS MENU BAR / NOTCH INSETS ---
+        setUndecorated(true);
         Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
-        setSize(screenSize.width, screenSize.height);
-        setLocation(0, 0);
-        setLayout(new BorderLayout(20, 20)); // Added spacing between main areas
+        Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(getGraphicsConfiguration());
+        
+        // Calculate safe area by subtracting dock/menu bar heights
+        int safeWidth = screenSize.width - insets.left - insets.right;
+        int safeHeight = screenSize.height - insets.top - insets.bottom;
+        
+        setSize(safeWidth, safeHeight);
+        setLocation(insets.left, insets.top);
+        setLayout(new BorderLayout(20, 20));
 
-        // --- NEW: READABLE FONTS ---
+        // Fonts
         Font timerFont = new Font("SansSerif", Font.BOLD, 36);
         Font questionFont = new Font("SansSerif", Font.PLAIN, 28);
         Font optionFont = new Font("SansSerif", Font.PLAIN, 24);
@@ -72,33 +78,46 @@ public class ExamWindow extends JDialog {
 
         // Top: Timer
         JPanel top = new JPanel(new BorderLayout());
-        top.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20)); // Added Padding
+        top.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
         timerLabel.setHorizontalAlignment(SwingConstants.CENTER);
-        timerLabel.setFont(timerFont); // Applied large font
-        timerLabel.setForeground(Color.RED); // Make timer stand out
+        timerLabel.setFont(timerFont);
+        timerLabel.setForeground(Color.RED);
         top.add(timerLabel, BorderLayout.CENTER);
         add(top, BorderLayout.NORTH);
 
-        // Center: Question
-        JPanel center = new JPanel();
-        center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
-        center.setBorder(BorderFactory.createEmptyBorder(40, 80, 40, 80)); // Heavy padding for readability
+        // --- FIXED: ALIGNMENT & STRETCHING ---
+        // Outer center panel to anchor content to the top
+        JPanel centerOuter = new JPanel(new BorderLayout());
+        
+        // Inner container to hold Question and Options neatly
+        JPanel contentContainer = new JPanel();
+        contentContainer.setLayout(new BoxLayout(contentContainer, BoxLayout.Y_AXIS));
+        contentContainer.setBorder(BorderFactory.createEmptyBorder(40, 80, 40, 80));
 
-        // Wrap question text in HTML so it wraps automatically if it's too long
         questionLabel.setFont(questionFont);
-        questionLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 30, 0)); // Space between Q and Options
-        center.add(questionLabel);
+        questionLabel.setAlignmentX(Component.LEFT_ALIGNMENT); // Left align text
 
-        JPanel optionsPanel = new JPanel(new GridLayout(0, 1, 10, 15)); // Added vertical gaps between options
+        // Changed from GridLayout to BoxLayout to prevent vertical stretching
+        JPanel optionsPanel = new JPanel();
+        optionsPanel.setLayout(new BoxLayout(optionsPanel, BoxLayout.Y_AXIS));
+        optionsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        
         for (JRadioButton rb : optionButtons) {
-            rb.setFont(optionFont); // Applied readable option font
+            rb.setFont(optionFont);
             optionGroup.add(rb);
             optionsPanel.add(rb);
-            // Persist immediately when the student clicks an option
+            optionsPanel.add(Box.createVerticalStrut(15)); // Strict 15px gap between options
             rb.addActionListener(e -> saveCurrentAnswer());
         }
-        center.add(optionsPanel);
-        add(center, BorderLayout.CENTER);
+
+        // Add to inner container with strict spacing
+        contentContainer.add(questionLabel);
+        contentContainer.add(Box.createVerticalStrut(40)); // 40px space between question and options
+        contentContainer.add(optionsPanel);
+
+        // Anchor inner container to the NORTH (Top) so it never stretches downward
+        centerOuter.add(contentContainer, BorderLayout.NORTH);
+        add(centerOuter, BorderLayout.CENTER);
 
         // Bottom: Navigation
         JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 20, 20));
@@ -240,8 +259,7 @@ public class ExamWindow extends JDialog {
     private void showCurrentQuestion() {
         Question q = questions.get(currentIndex);
         
-        // Wrap question text in HTML tags so long questions automatically wrap to the next line 
-        questionLabel.setText("<html>Q" + (currentIndex + 1) + ": " + q.getQuestionText() + "</html>");
+        questionLabel.setText("<html><div style='width: 600px;'>Q" + (currentIndex + 1) + ": " + q.getQuestionText() + "</div></html>");
 
         List<Option> opts = optionDAO.getOptionsByQuestionId(q.getId());
         optionGroup.clearSelection();
@@ -249,7 +267,7 @@ public class ExamWindow extends JDialog {
 
         for (int i = 0; i < 4; i++) {
             if (i < opts.size()) {
-                optionButtons[i].setText(opts.get(i).getOptionText());
+                optionButtons[i].setText("<html><div style='width: 600px;'>" + opts.get(i).getOptionText() + "</div></html>");
                 optionButtons[i].setVisible(true);
                 if ((i + 1) == savedSelection) {
                     optionButtons[i].setSelected(true);

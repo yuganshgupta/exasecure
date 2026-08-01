@@ -1,20 +1,21 @@
 package com.examsystem.gui;
 
+import com.examsystem.dao.ExamAttemptDAO;
 import com.examsystem.dao.ExamDAO;
 import com.examsystem.gui.exam.ExamWindow;
 import com.examsystem.models.Exam;
 import com.examsystem.models.User;
-
-import javax.swing.*;
-import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.util.List;
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
 
 /** Student Dashboard: lists exams and opens the ExamWindow. */
 public class StudentDashboard extends JFrame {
 
     private final User student;
     private final ExamDAO examDAO = new ExamDAO();
+    private final ExamAttemptDAO attemptDAO = new ExamAttemptDAO();
 
     private final DefaultTableModel model = new DefaultTableModel(new Object[]{"ID", "Title", "Duration (min)", "Created"}, 0) {
         @Override public boolean isCellEditable(int row, int column) { return false; }
@@ -63,6 +64,20 @@ public class StudentDashboard extends JFrame {
             return;
         }
         Exam exam = currentExams.get(table.convertRowIndexToModel(row));
+        
+        // --- NEW ATTEMPT LIMIT LOGIC ---
+        int maxAttempts = 1; // Set your maximum allowed attempts here
+        int currentAttempts = attemptDAO.getAttemptCount(student.getId(), exam.getId());
+        
+        if (currentAttempts >= maxAttempts) {
+            JOptionPane.showMessageDialog(this, 
+                "Access Denied: You have already used your maximum attempts (" + maxAttempts + ") for this exam.", 
+                "Limit Reached", 
+                JOptionPane.ERROR_MESSAGE);
+            return; // Stops the ExamWindow from opening
+        }
+        // -------------------------------
+
         new ExamWindow(this, exam, student).setVisible(true);
-    }
+    }   
 }
