@@ -8,17 +8,15 @@ import com.examsystem.models.Exam;
 import com.examsystem.models.Option;
 import com.examsystem.models.Question;
 import com.examsystem.models.User;
-
-import javax.imageio.ImageIO;
-import javax.swing.*;
 import java.awt.*;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.event.WindowFocusListener;
 import java.awt.image.BufferedImage;
-import java.io.File;
 import java.sql.Timestamp;
 import java.util.List;
+import javax.imageio.ImageIO;
+import javax.swing.*;
 
 public class ExamWindow extends JDialog {
 
@@ -59,36 +57,57 @@ public class ExamWindow extends JDialog {
         this.exam = exam;
         this.student = student;
 
-        setSize(800, 500);
-        setLocationRelativeTo(owner);
-        setLayout(new BorderLayout(10, 10));
+        // --- NEW: FULL SCREEN & KIOSK MODE ---
+        setUndecorated(true); // Removes OS borders, minimize, and close buttons for strict proctoring
+        Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
+        setSize(screenSize.width, screenSize.height);
+        setLocation(0, 0);
+        setLayout(new BorderLayout(20, 20)); // Added spacing between main areas
+
+        // --- NEW: READABLE FONTS ---
+        Font timerFont = new Font("SansSerif", Font.BOLD, 36);
+        Font questionFont = new Font("SansSerif", Font.PLAIN, 28);
+        Font optionFont = new Font("SansSerif", Font.PLAIN, 24);
+        Font buttonFont = new Font("SansSerif", Font.BOLD, 22);
 
         // Top: Timer
         JPanel top = new JPanel(new BorderLayout());
+        top.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20)); // Added Padding
         timerLabel.setHorizontalAlignment(SwingConstants.CENTER);
-        timerLabel.setFont(timerLabel.getFont().deriveFont(Font.BOLD, 18f));
+        timerLabel.setFont(timerFont); // Applied large font
+        timerLabel.setForeground(Color.RED); // Make timer stand out
         top.add(timerLabel, BorderLayout.CENTER);
         add(top, BorderLayout.NORTH);
 
         // Center: Question
         JPanel center = new JPanel();
         center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
-        questionLabel.setFont(questionLabel.getFont().deriveFont(Font.PLAIN, 16f));
-        questionLabel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        center.setBorder(BorderFactory.createEmptyBorder(40, 80, 40, 80)); // Heavy padding for readability
+
+        // Wrap question text in HTML so it wraps automatically if it's too long
+        questionLabel.setFont(questionFont);
+        questionLabel.setBorder(BorderFactory.createEmptyBorder(0, 0, 30, 0)); // Space between Q and Options
         center.add(questionLabel);
 
-        JPanel optionsPanel = new JPanel(new GridLayout(0, 1, 4, 4));
+        JPanel optionsPanel = new JPanel(new GridLayout(0, 1, 10, 15)); // Added vertical gaps between options
         for (JRadioButton rb : optionButtons) {
+            rb.setFont(optionFont); // Applied readable option font
             optionGroup.add(rb);
             optionsPanel.add(rb);
-            // NEW: Persist immediately when the student clicks an option
+            // Persist immediately when the student clicks an option
             rb.addActionListener(e -> saveCurrentAnswer());
         }
         center.add(optionsPanel);
         add(center, BorderLayout.CENTER);
 
         // Bottom: Navigation
-        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT, 20, 20));
+        bottom.setBorder(BorderFactory.createEmptyBorder(20, 20, 40, 40));
+        
+        submitEarlyButton.setFont(buttonFont);
+        prevButton.setFont(buttonFont);
+        nextButton.setFont(buttonFont);
+        
         bottom.add(submitEarlyButton);
         bottom.add(prevButton);
         bottom.add(nextButton);
@@ -110,7 +129,6 @@ public class ExamWindow extends JDialog {
                     if (timeAway > 5000) {
                         isOverlayVisible = true;
                         try {
-                            // LOG THE LONG ABSENCE
                             String msg = "Long Absence: " + (timeAway/1000) + "s while on Q" + (currentIndex+1);
                             examAttemptDAO.logEvent(attemptId, msg, null);
                             
@@ -132,11 +150,9 @@ public class ExamWindow extends JDialog {
                 focusLostCount++;
                 lastFocusLostTime = System.currentTimeMillis();
                 
-                // --- NEW: LOG SPECIFIC QUESTION ---
                 String msg = "Focus lost while viewing Q" + (currentIndex + 1);
                 byte[] screenshotData = takeScreenshotBytes();
                 examAttemptDAO.logEvent(attemptId, msg, screenshotData);
-                // ----------------------------------
 
                 int remaining = MAX_FOCUS_LOST - focusLostCount;
                 isOverlayVisible = true; 
@@ -223,7 +239,9 @@ public class ExamWindow extends JDialog {
 
     private void showCurrentQuestion() {
         Question q = questions.get(currentIndex);
-        questionLabel.setText("Q" + (currentIndex + 1) + ": " + q.getQuestionText());
+        
+        // Wrap question text in HTML tags so long questions automatically wrap to the next line 
+        questionLabel.setText("<html>Q" + (currentIndex + 1) + ": " + q.getQuestionText() + "</html>");
 
         List<Option> opts = optionDAO.getOptionsByQuestionId(q.getId());
         optionGroup.clearSelection();
@@ -281,7 +299,9 @@ public class ExamWindow extends JDialog {
     private void onSubmitEarly() {
         isOverlayVisible = true;
         try {
-            if (JOptionPane.showConfirmDialog(this, "Submit early?", "Confirm", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+            UIManager.put("OptionPane.messageFont", new Font("SansSerif", Font.PLAIN, 20));
+            UIManager.put("OptionPane.buttonFont", new Font("SansSerif", Font.BOLD, 18));
+            if (JOptionPane.showConfirmDialog(this, "Are you sure you want to submit early?", "Confirm Submit", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
                 finalizeAttemptAndClose();
             }
         } finally {
@@ -292,16 +312,16 @@ public class ExamWindow extends JDialog {
     private void finalizeAttemptAndClose() {
         if (finalized) return;
         
-        // Ensure the answer on the current screen is saved before closing
         saveCurrentAnswer();
-        
         finalized = true;
         if (swingTimer != null) swingTimer.stop();
 
         examAttemptDAO.calculateAndSetScore(attemptId, focusLostCount);
         int total = questions.size();
         int correct = studentAnswerDAO.countCorrectAnswersByAttempt(attemptId);
-        JOptionPane.showMessageDialog(this, "Exam Submitted!\nScore: " + correct + "/" + total);
+        
+        UIManager.put("OptionPane.messageFont", new Font("SansSerif", Font.BOLD, 24));
+        JOptionPane.showMessageDialog(this, "Exam Submitted!\nFinal Score: " + correct + " / " + total);
         dispose();
     }
 }

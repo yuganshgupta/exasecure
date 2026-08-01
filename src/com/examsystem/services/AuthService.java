@@ -3,10 +3,8 @@ package com.examsystem.services;
 import com.examsystem.dao.UserDAO;
 import com.examsystem.models.User;
 
-/**
- * Simple authentication service.
- * WARNING: Uses plain-text password check for academic demonstration only.
- */
+
+//  Simple authentication service
 public class AuthService {
     private final UserDAO userDAO = new UserDAO();
 
