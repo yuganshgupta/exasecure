@@ -18,7 +18,8 @@ public class QuestionManagementPanel extends JPanel {
     // "Add Question" form fields (basic for now, will be updated to dynamic in Phase 3)
     private final JTextArea newQuestionArea = new JTextArea(3, 40);
     private final JTextField[] newOptionFields = { new JTextField(20), new JTextField(20), new JTextField(20), new JTextField(20) };
-    private final JComboBox<Integer> correctCombo = new JComboBox<>(new Integer[]{1,2,3,4});
+    private final JToggleButton[] correctToggles = new JToggleButton[4];
+    private final JPanel optionsContainer = new JPanel(new GridBagLayout());
     private final JComboBox<String> typeCombo = new JComboBox<>(new String[]{"SINGLE", "MULTI"});
 
     private final DefaultTableModel model = new DefaultTableModel(
@@ -51,23 +52,17 @@ public class QuestionManagementPanel extends JPanel {
         gbc.gridx = 0; gbc.gridy = 0; addForm.add(new JLabel("Text:"), gbc);
         gbc.gridx = 1; gbc.gridwidth = 3; addForm.add(new JScrollPane(newQuestionArea), gbc);
         
+        gbc.gridwidth = 4;
+        gbc.gridy = 1; gbc.gridx = 0;
+        addForm.add(optionsContainer, gbc);
+        buildOptionsUI(); // Initialize toggles based on typeCombo
+
         gbc.gridwidth = 1;
-        for (int i = 0; i < 4; i++) {
-            gbc.gridy = 1 + (i / 2);
-            gbc.gridx = (i % 2) * 2;
-            addForm.add(new JLabel("Opt " + (i + 1) + ":"), gbc);
-            gbc.gridx = (i % 2) * 2 + 1;
-            addForm.add(newOptionFields[i], gbc);
-        }
-
-        gbc.gridy = 3; gbc.gridx = 0; addForm.add(new JLabel("Type:"), gbc);
+        gbc.gridy = 2; gbc.gridx = 0; addForm.add(new JLabel("Type:"), gbc);
         gbc.gridx = 1; addForm.add(typeCombo, gbc);
-
-        gbc.gridy = 3; gbc.gridx = 2; addForm.add(new JLabel("Correct:"), gbc);
-        gbc.gridx = 3; addForm.add(correctCombo, gbc);
         
         JButton addBtn = new JButton("Add Question");
-        gbc.gridy = 4; gbc.gridx = 2; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.EAST;
+        gbc.gridy = 3; gbc.gridx = 2; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.EAST;
         addForm.add(addBtn, gbc);
 
         topPanel.add(addForm, BorderLayout.CENTER);
@@ -92,6 +87,8 @@ public class QuestionManagementPanel extends JPanel {
         addBtn.addActionListener(e -> onAddQuestion());
         editBtn.addActionListener(e -> onEditQuestion());
         deleteBtn.addActionListener(e -> onDeleteQuestion());
+        
+        typeCombo.addActionListener(e -> buildOptionsUI());
 
         loadExams();
     }
@@ -102,6 +99,40 @@ public class QuestionManagementPanel extends JPanel {
         for (Exam ex : exams) {
             examCombo.addItem(new ExamItem(ex.getId(), ex.getTitle(), ex.getDurationMinutes()));
         }
+    }
+
+    private void buildOptionsUI() {
+        optionsContainer.removeAll();
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(4, 4, 4, 4);
+        gbc.anchor = GridBagConstraints.WEST;
+
+        boolean isMulti = "MULTI".equals(typeCombo.getSelectedItem());
+        ButtonGroup group = new ButtonGroup();
+
+        for (int i = 0; i < 4; i++) {
+            gbc.gridy = i / 2;
+            gbc.gridx = (i % 2) * 3;
+            
+            // Re-create toggle to ensure proper type
+            boolean wasSelected = (correctToggles[i] != null && correctToggles[i].isSelected());
+            if (i == 0 && correctToggles[i] == null) wasSelected = true; // default first option to correct
+            
+            correctToggles[i] = isMulti ? new JCheckBox() : new JRadioButton();
+            correctToggles[i].setSelected(wasSelected);
+            if (!isMulti) group.add(correctToggles[i]);
+
+            optionsContainer.add(correctToggles[i], gbc);
+            
+            gbc.gridx = (i % 2) * 3 + 1;
+            optionsContainer.add(new JLabel("Opt " + (i + 1) + ":"), gbc);
+            
+            gbc.gridx = (i % 2) * 3 + 2;
+            optionsContainer.add(newOptionFields[i], gbc);
+        }
+
+        optionsContainer.revalidate();
+        optionsContainer.repaint();
     }
 
     private void loadQuestions() {
@@ -141,21 +172,32 @@ public class QuestionManagementPanel extends JPanel {
             return;
         }
 
-        int correct = (Integer) correctCombo.getSelectedItem();
-        if (correct > validOpts.size()) {
-            JOptionPane.showMessageDialog(this, "Correct option exceeds number of entered options.", "Validation", JOptionPane.WARNING_MESSAGE);
-            return;
+        boolean[] isCorrectArray = new boolean[validOpts.size()];
+        int correctCount = 0;
+        for (int i = 0; i < validOpts.size(); i++) {
+            if (correctToggles[i].isSelected()) {
+                isCorrectArray[i] = true;
+                correctCount++;
+            }
         }
 
         String type = (String) typeCombo.getSelectedItem();
+        
+        if ("SINGLE".equals(type) && correctCount != 1) {
+            JOptionPane.showMessageDialog(this, "SINGLE questions must have exactly one correct option.", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        } else if ("MULTI".equals(type) && correctCount < 1) {
+            JOptionPane.showMessageDialog(this, "MULTI questions must have at least one correct option.", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
 
-        boolean ok = adminService.addQuestionToExam(selected.id, qText, validOpts.toArray(new String[0]), correct, type);
+        boolean ok = adminService.addQuestionToExam(selected.id, qText, validOpts.toArray(new String[0]), isCorrectArray, type);
         if (ok) {
             JOptionPane.showMessageDialog(this, "Question added.", "Success", JOptionPane.INFORMATION_MESSAGE);
             newQuestionArea.setText("");
             for (JTextField f : newOptionFields) f.setText("");
-            correctCombo.setSelectedIndex(0);
             typeCombo.setSelectedIndex(0);
+            buildOptionsUI();
             loadQuestions();
         } else {
             JOptionPane.showMessageDialog(this, "Failed to add question.", "Error", JOptionPane.ERROR_MESSAGE);

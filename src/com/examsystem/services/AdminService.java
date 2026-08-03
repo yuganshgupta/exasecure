@@ -39,25 +39,41 @@ public class AdminService {
     }
 
     // --- Question Management ---
-    public boolean addQuestionWithOptions(int examId, String questionText, String[] optionsText, int correctOptionNumber, String questionType) {
+    public boolean addQuestionWithOptions(int examId, String questionText, String[] optionsText, boolean[] isCorrectArray, String questionType) {
         if (optionsText == null || optionsText.length == 0) return false;
         
         List<String> validOptions = new ArrayList<>();
-        for (String opt : optionsText) {
+        List<Boolean> validIsCorrect = new ArrayList<>();
+        
+        for (int i = 0; i < optionsText.length; i++) {
+            String opt = optionsText[i];
             if (opt != null && !opt.trim().isEmpty()) {
                 validOptions.add(opt.trim());
+                validIsCorrect.add(isCorrectArray != null && i < isCorrectArray.length ? isCorrectArray[i] : false);
             }
         }
         
         if (validOptions.size() < 2) return false; 
-        if (correctOptionNumber > validOptions.size()) return false; 
+        
+        // Validation for SINGLE vs MULTI
+        long correctCount = validIsCorrect.stream().filter(b -> b).count();
+        if ("SINGLE".equals(questionType) && correctCount != 1) return false;
+        if ("MULTI".equals(questionType) && correctCount < 1) return false;
 
-        int qId = questionDAO.addQuestion(examId, questionText, correctOptionNumber, questionType);
+        // Note: For legacy correctOptionNumber column in questions table, we just store the first correct option (or 1)
+        int primaryCorrectOption = 1;
+        for (int i = 0; i < validIsCorrect.size(); i++) {
+            if (validIsCorrect.get(i)) {
+                primaryCorrectOption = i + 1;
+                break;
+            }
+        }
+
+        int qId = questionDAO.addQuestion(examId, questionText, primaryCorrectOption, questionType);
         if (qId <= 0) return false;
 
         for (int i = 0; i < validOptions.size(); i++) {
-            boolean isCorrect = (i + 1 == correctOptionNumber);
-            optionDAO.addOption(qId, i + 1, validOptions.get(i), isCorrect);
+            optionDAO.addOption(qId, i + 1, validOptions.get(i), validIsCorrect.get(i));
         }
         return true;
     }
@@ -78,8 +94,8 @@ public class AdminService {
         return optionDAO.updateOption(option);
     }
 
-    public boolean addQuestionToExam(int examId, String questionText, String[] optionsText, int correctOptionNumber, String questionType) {
-        return addQuestionWithOptions(examId, questionText, optionsText, correctOptionNumber, questionType);
+    public boolean addQuestionToExam(int examId, String questionText, String[] optionsText, boolean[] isCorrectArray, String questionType) {
+        return addQuestionWithOptions(examId, questionText, optionsText, isCorrectArray, questionType);
     }
 
     public List<Question> getQuestionsForExam(int examId) {
