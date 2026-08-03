@@ -15,6 +15,7 @@ CREATE TABLE users (
   enrollment_number VARCHAR(50),  -- Added for Student identification
   section VARCHAR(10),            -- Added for class section (e.g., 'A', 'B')
   role ENUM('admin','student') NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
@@ -24,6 +25,7 @@ CREATE TABLE exams (
   title VARCHAR(255) NOT NULL,
   duration_minutes INT NOT NULL,
   created_by INT NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_exams_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;

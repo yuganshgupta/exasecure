@@ -22,7 +22,7 @@ public class UserDAO {
     }
 
     public User findByUsernameAndPassword(String username, String password) {
-        String sql = "SELECT * FROM users WHERE username=? AND password=? LIMIT 1";
+        String sql = "SELECT * FROM users WHERE username=? AND password=? AND is_active=TRUE LIMIT 1";
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
@@ -111,7 +111,7 @@ public class UserDAO {
 
     public List<User> findAll() {
         List<User> list = new ArrayList<>();
-        String sql = "SELECT * FROM users ORDER BY id ASC";
+        String sql = "SELECT * FROM users WHERE is_active=TRUE ORDER BY id ASC";
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
              ResultSet rs = ps.executeQuery()) {
@@ -121,5 +121,18 @@ public class UserDAO {
             System.err.println("UserDAO.findAll error: " + e.getMessage());
         }
         return list;
+    }
+
+    public boolean softDeleteUser(int id) {
+        String sql = "UPDATE users SET is_active = FALSE WHERE id = ?";
+        try (Connection conn = DatabaseConnector.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setInt(1, id);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            System.err.println("UserDAO.softDeleteUser error: " + e.getMessage());
+        }
+        return false;
     }
 }

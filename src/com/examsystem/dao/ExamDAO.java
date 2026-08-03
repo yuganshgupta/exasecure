@@ -54,7 +54,7 @@ public class ExamDAO {
     }
 
     public List<Exam> getAllExams() {
-        String sql = "SELECT id, title, duration_minutes, created_by, created_at FROM exams ORDER BY created_at DESC";
+        String sql = "SELECT id, title, duration_minutes, created_by, created_at FROM exams WHERE is_active=TRUE ORDER BY created_at DESC";
         List<Exam> list = new ArrayList<>();
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql);
@@ -73,5 +73,33 @@ public class ExamDAO {
             System.err.println("ExamDAO.getAllExams error: " + e.getMessage());
         }
         return list;
+    }
+
+    public boolean softDeleteExam(int examId) {
+        String sql = "UPDATE exams SET is_active = FALSE WHERE id = ?";
+        try (Connection conn = DatabaseConnector.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setInt(1, examId);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            System.err.println("ExamDAO.softDeleteExam error: " + e.getMessage());
+        }
+        return false;
+    }
+
+    public boolean updateExam(int examId, String title, int durationMinutes) {
+        String sql = "UPDATE exams SET title = ?, duration_minutes = ? WHERE id = ?";
+        try (Connection conn = DatabaseConnector.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            
+            ps.setString(1, title);
+            ps.setInt(2, durationMinutes);
+            ps.setInt(3, examId);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            System.err.println("ExamDAO.updateExam error: " + e.getMessage());
+        }
+        return false;
     }
 }

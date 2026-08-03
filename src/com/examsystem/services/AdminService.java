@@ -30,6 +30,14 @@ public class AdminService {
         return examDAO.getExamById(examId); 
     }
 
+    public boolean softDeleteExam(int examId) {
+        return examDAO.softDeleteExam(examId);
+    }
+
+    public boolean updateExam(int examId, String title, int durationMinutes) {
+        return examDAO.updateExam(examId, title, durationMinutes);
+    }
+
     // --- Question Management ---
     public boolean addQuestionWithOptions(int examId, String questionText, String[] optionsText, int correctOptionNumber) {
         if (optionsText == null || optionsText.length == 0) return false;
@@ -119,5 +127,9 @@ public class AdminService {
 
     public List<User> getAllUsers() {
         return userDAO.findAll();
+    }
+
+    public boolean softDeleteUser(int id) {
+        return userDAO.softDeleteUser(id);
     }
 }

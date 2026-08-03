@@ -69,10 +69,13 @@ public class UserManagementPanel extends JPanel {
         JPanel btnPanel = new JPanel(new FlowLayout());
         JButton registerBtn = new JButton("Register User");
         JButton updateBtn = new JButton("Update Selected");
+        JButton deleteBtn = new JButton("Delete Selected"); // NEW
+        deleteBtn.setForeground(Color.RED);
         JButton clearBtn = new JButton("Clear Form");
         
         btnPanel.add(registerBtn);
         btnPanel.add(updateBtn);
+        btnPanel.add(deleteBtn);
         btnPanel.add(clearBtn);
         form.add(btnPanel, gbc);
 
@@ -123,6 +126,7 @@ public class UserManagementPanel extends JPanel {
         });
 
         updateBtn.addActionListener(e -> onUpdate());
+        deleteBtn.addActionListener(e -> onDelete());
 
         loadUsers();
     }
@@ -194,6 +198,26 @@ public class UserManagementPanel extends JPanel {
             loadUsers();
         } else {
             JOptionPane.showMessageDialog(this, "Update failed.", "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    private void onDelete() {
+        int row = table.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "Select a user to delete.", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+
+        int id = (Integer) model.getValueAt(row, 0);
+        String username = model.getValueAt(row, 1).toString();
+
+        if (JOptionPane.showConfirmDialog(this, "Delete user '" + username + "'?", "Confirm Deletion", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+            if (adminService.softDeleteUser(id)) {
+                JOptionPane.showMessageDialog(this, "User deleted.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                loadUsers();
+            } else {
+                JOptionPane.showMessageDialog(this, "Failed to delete user.", "Error", JOptionPane.ERROR_MESSAGE);
+            }
         }
     }
 
