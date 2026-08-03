@@ -42,9 +42,8 @@ public class ExamWindow extends JDialog {
 
     // UI Components
     private final JLabel timerLabel = new JLabel("Time: 00:00");
-    private final JLabel questionLabel = new JLabel("Question text");
-    private final JPanel optionsPanel = new JPanel(); // NEW instance var
-    private final ButtonGroup optionGroup = new ButtonGroup();
+    private final JPanel contentContainer = new JPanel();
+    private ButtonGroup optionGroup = new ButtonGroup();
     private final List<JToggleButton> dynamicOptionButtons = new java.util.ArrayList<>();
     private final JButton prevButton = new JButton("Previous");
     private final JButton nextButton = new JButton("Next");
@@ -86,26 +85,12 @@ public class ExamWindow extends JDialog {
         top.add(timerLabel, BorderLayout.CENTER);
         add(top, BorderLayout.NORTH);
 
-        // --- FIXED: ALIGNMENT & STRETCHING ---
         // Outer center panel to anchor content to the top
         JPanel centerOuter = new JPanel(new BorderLayout());
         
         // Inner container to hold Question and Options neatly
-        JPanel contentContainer = new JPanel();
         contentContainer.setLayout(new BoxLayout(contentContainer, BoxLayout.Y_AXIS));
         contentContainer.setBorder(BorderFactory.createEmptyBorder(40, 80, 40, 80));
-
-        questionLabel.setFont(questionFont);
-        questionLabel.setAlignmentX(Component.LEFT_ALIGNMENT); // Left align text
-
-        // Changed from GridLayout to BoxLayout to prevent vertical stretching
-        optionsPanel.setLayout(new BoxLayout(optionsPanel, BoxLayout.Y_AXIS));
-        optionsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-        // Add to inner container with strict spacing
-        contentContainer.add(questionLabel);
-        contentContainer.add(Box.createVerticalStrut(40)); // 40px space between question and options
-        contentContainer.add(optionsPanel);
 
         // Anchor inner container to the NORTH (Top) so it never stretches downward
         centerOuter.add(contentContainer, BorderLayout.NORTH);
@@ -172,7 +157,7 @@ public class ExamWindow extends JDialog {
                 int remaining = MAX_FOCUS_LOST - focusLostCount;
                 isOverlayVisible = true; 
                 try {
-                    if (remaining < 0) {
+                    if (focusLostCount >= MAX_FOCUS_LOST) {
                         examAttemptDAO.logEvent(attemptId, "Limit exceeded. Auto-submitting.", null);
                         JOptionPane.showMessageDialog(ExamWindow.this, 
                             "Suspicious activity detected! Auto-submitting.", 
@@ -180,7 +165,7 @@ public class ExamWindow extends JDialog {
                         finalizeAttemptAndClose();
                     } else {
                         JOptionPane.showMessageDialog(ExamWindow.this, 
-                            "Warning: Focus lost! " + remaining + " attempts left.", 
+                            "Warning: You navigated away from the exam. (Strike " + focusLostCount + "/3)", 
                             "Warning", JOptionPane.WARNING_MESSAGE);
                     }
                 } finally {
@@ -274,7 +259,7 @@ public class ExamWindow extends JDialog {
                     swingTimer.start();
                     showCurrentQuestion();
                 } catch (Exception ex) {
-                    JOptionPane.showMessageDialog(ExamWindow.this, "Error initializing exam.", "Error", JOptionPane.ERROR_MESSAGE);
+                    JOptionPane.showMessageDialog(ExamWindow.this, "Error initializing exam: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
                     dispose();
                 }
             }
@@ -285,11 +270,23 @@ public class ExamWindow extends JDialog {
     private void showCurrentQuestion() {
         Question q = questions.get(currentIndex);
         
-        questionLabel.setText("<html><div style='width: 600px;'>Q" + (currentIndex + 1) + ": " + escapeHtml(q.getQuestionText()) + "</div></html>");
+        JPanel newQuestionPanel = new JPanel();
+        newQuestionPanel.setLayout(new BoxLayout(newQuestionPanel, BoxLayout.Y_AXIS));
+        newQuestionPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+        JLabel qLabel = new JLabel("<html><div style='width: 600px;'>Q" + (currentIndex + 1) + ": " + escapeHtml(q.getQuestionText()) + "</div></html>");
+        qLabel.setFont(new Font("SansSerif", Font.PLAIN, 28));
+        qLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+        
+        newQuestionPanel.add(qLabel);
+        newQuestionPanel.add(Box.createVerticalStrut(40));
+        
+        JPanel optsPanel = new JPanel();
+        optsPanel.setLayout(new BoxLayout(optsPanel, BoxLayout.Y_AXIS));
+        optsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         List<Option> opts = q.getOptions();
-        optionGroup.clearSelection();
-        optionsPanel.removeAll();
+        optionGroup = new ButtonGroup();
         dynamicOptionButtons.clear();
         
         List<Integer> savedSelections = studentAnswerDAO.getStudentSelectedOptions(attemptId, q.getId());
@@ -307,22 +304,27 @@ public class ExamWindow extends JDialog {
             if (savedSelections.contains(i + 1)) {
                 btn.setSelected(true);
             }
-            btn.addActionListener(e -> saveCurrentAnswer());
             
             dynamicOptionButtons.add(btn);
-            optionsPanel.add(btn);
-            optionsPanel.add(Box.createVerticalStrut(15));
+            optsPanel.add(btn);
+            optsPanel.add(Box.createVerticalStrut(15));
         }
         
-        optionsPanel.revalidate();
-        optionsPanel.repaint();
+        newQuestionPanel.add(optsPanel);
+
+        contentContainer.removeAll();
+        contentContainer.add(newQuestionPanel);
+        contentContainer.revalidate();
+        contentContainer.repaint();
 
         prevButton.setEnabled(currentIndex > 0);
+        nextButton.setEnabled(true);
         nextButton.setText(currentIndex == questions.size() - 1 ? "Submit" : "Next");
     }
 
-    private void saveCurrentAnswer() {
-        Question q = questions.get(currentIndex);
+    private boolean saveCurrentAnswer() {
+        try {
+            Question q = questions.get(currentIndex);
         List<Integer> selectedOptions = new java.util.ArrayList<>();
         
         for (int i = 0; i < dynamicOptionButtons.size(); i++) {
@@ -349,27 +351,78 @@ public class ExamWindow extends JDialog {
             }
         }
         
+        
         String selectedCsv = selectedOptions.isEmpty() ? ""
             : String.join(",", selectedOptions.stream().map(String::valueOf).toArray(String[]::new));
         studentAnswerDAO.saveAnswer(attemptId, q.getId(), selectedCsv, correct, new Timestamp(System.currentTimeMillis()));
+        return true;
+        } catch(Exception e) {
+            System.err.println("DEBUG: Error in saveCurrentAnswer: " + e.getMessage());
+            e.printStackTrace();
+            return false;
+        }
     }
 
     private void onNext() {
-        if (currentIndex == questions.size() - 1) {
-            finalizeAttemptAndClose();
-        } else {
-            saveCurrentAnswer();
-            currentIndex++;
-            showCurrentQuestion();
-        }
+        prevButton.setEnabled(false);
+        nextButton.setEnabled(false);
+        
+        new SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() throws Exception {
+                return saveCurrentAnswer();
+            }
+            
+            @Override
+            protected void done() {
+                try {
+                    boolean success = get();
+                    if (success) {
+                        if (currentIndex == questions.size() - 1) {
+                            finalizeAttemptAndClose();
+                        } else {
+                            currentIndex++;
+                            showCurrentQuestion();
+                        }
+                    } else {
+                        JOptionPane.showMessageDialog(ExamWindow.this, "Failed to save answer.", "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch(Exception e) {
+                    JOptionPane.showMessageDialog(ExamWindow.this, "Error processing next question: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    prevButton.setEnabled(currentIndex > 0);
+                    nextButton.setEnabled(true);
+                }
+            }
+        }.execute();
     }
 
     private void onPrevious() {
-        saveCurrentAnswer();
-        if (currentIndex > 0) {
-            currentIndex--;
-            showCurrentQuestion();
-        }
+        prevButton.setEnabled(false);
+        nextButton.setEnabled(false);
+
+        new SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() throws Exception {
+                return saveCurrentAnswer();
+            }
+            
+            @Override
+            protected void done() {
+                try {
+                    boolean success = get();
+                    if (success && currentIndex > 0) {
+                        currentIndex--;
+                        showCurrentQuestion();
+                    }
+                } catch(Exception e) {
+                    JOptionPane.showMessageDialog(ExamWindow.this, "Error processing previous question: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                } finally {
+                    prevButton.setEnabled(currentIndex > 0);
+                    nextButton.setEnabled(true);
+                }
+            }
+        }.execute();
     }
 
     private void onSubmitEarly() {
@@ -388,7 +441,7 @@ public class ExamWindow extends JDialog {
     private void finalizeAttemptAndClose() {
         if (finalized) return;
         
-        saveCurrentAnswer();
+        if (!saveCurrentAnswer()) return;
         finalized = true;
         if (swingTimer != null) swingTimer.stop();
 

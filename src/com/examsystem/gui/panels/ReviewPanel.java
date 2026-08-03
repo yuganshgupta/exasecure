@@ -165,7 +165,7 @@ public class ReviewPanel extends JPanel {
                     for (Exam ex : get()) {
                         examCombo.addItem(new ExamItem(ex.getId(), ex.getTitle()));
                     }
-                } catch(Exception ex) {}
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
             }
         };
         worker.execute();
@@ -201,7 +201,7 @@ public class ReviewPanel extends JPanel {
                     
                     sectionFilterCombo.setSelectedIndex(0);
                     updateTable(allSummaries);
-                } catch(Exception ex) {}
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
             }
         };
         worker.execute();
@@ -266,7 +266,7 @@ public class ReviewPanel extends JPanel {
                         } else {
                             JOptionPane.showMessageDialog(ReviewPanel.this, "Failed to delete.");
                         }
-                    } catch(Exception ex) {}
+                    } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
                 }
             };
             worker.execute();

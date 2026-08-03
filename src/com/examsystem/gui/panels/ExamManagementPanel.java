@@ -118,7 +118,7 @@ public class ExamManagementPanel extends JPanel {
                     } else {
                         JOptionPane.showMessageDialog(ExamManagementPanel.this, "Failed to create exam.", "Error", JOptionPane.ERROR_MESSAGE);
                     }
-                } catch(Exception ex) {}
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
             }
         };
         worker.execute();
@@ -150,7 +150,7 @@ public class ExamManagementPanel extends JPanel {
                     } else {
                         JOptionPane.showMessageDialog(ExamManagementPanel.this, "Failed to load exam details.", "Error", JOptionPane.ERROR_MESSAGE);
                     }
-                } catch(Exception ex) {}
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
             }
         };
         worker.execute();
@@ -180,7 +180,7 @@ public class ExamManagementPanel extends JPanel {
                         } else {
                             JOptionPane.showMessageDialog(ExamManagementPanel.this, "Failed to delete exam.", "Error", JOptionPane.ERROR_MESSAGE);
                         }
-                    } catch(Exception ex) {}
+                    } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
                 }
             };
             worker.execute();
@@ -206,7 +206,7 @@ public class ExamManagementPanel extends JPanel {
                             ex.getCreatedAt()
                         });
                     }
-                } catch(Exception ex) {}
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
             }
         };
         worker.execute();

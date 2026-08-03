@@ -109,7 +109,7 @@ public class QuestionManagementPanel extends JPanel {
                     for (Exam ex : get()) {
                         examCombo.addItem(new ExamItem(ex.getId(), ex.getTitle(), ex.getDurationMinutes()));
                     }
-                } catch(Exception ex) {}
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
             }
         };
         worker.execute();
@@ -166,7 +166,7 @@ public class QuestionManagementPanel extends JPanel {
                     for (Question q : get()) {
                         model.addRow(new Object[]{q.getId(), q.getQuestionType(), q.getQuestionText(), q.getCorrectOptionNumber()});
                     }
-                } catch(Exception ex) {}
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
             }
         };
         worker.execute();
@@ -235,7 +235,7 @@ public class QuestionManagementPanel extends JPanel {
                     } else {
                         JOptionPane.showMessageDialog(QuestionManagementPanel.this, "Failed to add question.", "Error", JOptionPane.ERROR_MESSAGE);
                     }
-                } catch(Exception ex) {}
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
             }
         };
         worker.execute();
@@ -269,7 +269,7 @@ public class QuestionManagementPanel extends JPanel {
                     } else {
                         JOptionPane.showMessageDialog(QuestionManagementPanel.this, "Failed to load question details.", "Error", JOptionPane.ERROR_MESSAGE);
                     }
-                } catch(Exception ex) {}
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
             }
         };
         worker.execute();
@@ -298,7 +298,7 @@ public class QuestionManagementPanel extends JPanel {
                         } else {
                             JOptionPane.showMessageDialog(QuestionManagementPanel.this, "Failed to delete question.", "Error", JOptionPane.ERROR_MESSAGE);
                         }
-                    } catch(Exception ex) {}
+                    } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
                 }
             };
             worker.execute();

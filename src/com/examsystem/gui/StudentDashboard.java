@@ -32,6 +32,21 @@ public class StudentDashboard extends JFrame {
         setLocationRelativeTo(null);
         setLayout(new BorderLayout());
         
+        JPanel topBar = new JPanel(new BorderLayout());
+        JLabel welcomeLabel = new JLabel("  Student Dashboard - " + student.getFullName());
+        welcomeLabel.setFont(new Font("SansSerif", Font.BOLD, 18));
+        topBar.add(welcomeLabel, BorderLayout.WEST);
+
+        JPanel logoutWrapper = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton logoutBtn = new JButton("Logout");
+        logoutBtn.addActionListener(e -> {
+            dispose();
+            new LoginWindow().setVisible(true);
+        });
+        logoutWrapper.add(logoutBtn);
+        topBar.add(logoutWrapper, BorderLayout.EAST);
+        add(topBar, BorderLayout.NORTH);
+        
         JTabbedPane tabbedPane = new JTabbedPane();
 
         // --- Tab 1: Available Exams (Existing functionality) ---

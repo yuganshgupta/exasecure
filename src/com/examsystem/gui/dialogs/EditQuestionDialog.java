@@ -18,6 +18,7 @@ public class EditQuestionDialog extends JDialog {
     private final JTextArea questionArea = new JTextArea(4, 40);
     private final JComboBox<String> typeCombo = new JComboBox<>(new String[]{"SINGLE", "MULTI"});
     private final JPanel optionsPanel = new JPanel();
+    private ButtonGroup correctGroup = new ButtonGroup();
     
     private final List<OptionRow> optionRows = new ArrayList<>();
 
@@ -60,6 +61,8 @@ public class EditQuestionDialog extends JDialog {
         optionsScroll.setPreferredSize(new Dimension(500, 200));
         add(optionsScroll, BorderLayout.CENTER);
 
+        typeCombo.addActionListener(e -> updateOptionTypes());
+
         // Bottom: Action Buttons
         JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         JButton addOptionBtn = new JButton("Add Option");
@@ -88,6 +91,23 @@ public class EditQuestionDialog extends JDialog {
         OptionRow row = new OptionRow(opt);
         optionRows.add(row);
         optionsPanel.add(row.panel);
+    }
+
+    private void updateOptionTypes() {
+        boolean isMulti = "MULTI".equals(typeCombo.getSelectedItem());
+        correctGroup = new ButtonGroup();
+        for (OptionRow row : optionRows) {
+            boolean wasSelected = row.check.isSelected();
+            JToggleButton newCheck = isMulti ? new JCheckBox() : new JRadioButton();
+            newCheck.setSelected(wasSelected);
+            if (!isMulti) correctGroup.add(newCheck);
+            
+            row.leftPanel.remove(row.check);
+            row.check = newCheck;
+            row.leftPanel.add(row.check, 0);
+        }
+        optionsPanel.revalidate();
+        optionsPanel.repaint();
     }
 
     private void onSave() {
@@ -180,8 +200,9 @@ public class EditQuestionDialog extends JDialog {
     private class OptionRow {
         Option option;
         JPanel panel;
+        JPanel leftPanel;
         JTextField field;
-        JCheckBox check;
+        JToggleButton check;
         JButton deleteBtn;
         boolean isDeleted = false;
 
@@ -190,8 +211,10 @@ public class EditQuestionDialog extends JDialog {
             panel = new JPanel(new BorderLayout(5, 5));
             panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
             
-            check = new JCheckBox();
+            boolean isMulti = "MULTI".equals(typeCombo.getSelectedItem());
+            check = isMulti ? new JCheckBox() : new JRadioButton();
             check.setSelected(opt.isCorrect());
+            if (!isMulti) correctGroup.add(check);
             
             field = new JTextField(opt.getOptionText(), 30);
             
@@ -204,11 +227,11 @@ public class EditQuestionDialog extends JDialog {
                 panel.setVisible(false);
             });
 
-            JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-            left.add(check);
-            left.add(new JLabel(" Opt: "));
+            leftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+            leftPanel.add(check);
+            leftPanel.add(new JLabel(" Opt: "));
             
-            panel.add(left, BorderLayout.WEST);
+            panel.add(leftPanel, BorderLayout.WEST);
             panel.add(field, BorderLayout.CENTER);
             panel.add(deleteBtn, BorderLayout.EAST);
         }
