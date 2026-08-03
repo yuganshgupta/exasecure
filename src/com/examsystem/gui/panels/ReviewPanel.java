@@ -147,27 +147,60 @@ public class ReviewPanel extends JPanel {
 
     private void loadExams() {
         examCombo.removeAllItems();
-        for (Exam ex : adminService.listAllExams()) {
-            examCombo.addItem(new ExamItem(ex.getId(), ex.getTitle()));
-        }
+        examCombo.addItem(new ExamItem(-1, "Loading..."));
+        
+        SwingWorker<List<Exam>, Void> worker = new SwingWorker<List<Exam>, Void>() {
+            @Override
+            protected List<Exam> doInBackground() {
+                return adminService.listAllExams();
+            }
+            @Override
+            protected void done() {
+                try {
+                    examCombo.removeAllItems();
+                    for (Exam ex : get()) {
+                        examCombo.addItem(new ExamItem(ex.getId(), ex.getTitle()));
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 
     private void loadSummariesAndDates() {
         ExamItem item = (ExamItem) examCombo.getSelectedItem();
-        if (item == null) {
-            JOptionPane.showMessageDialog(this, "Select an exam first.", "Validation", JOptionPane.WARNING_MESSAGE);
+        if (item == null || item.id == -1) {
+            JOptionPane.showMessageDialog(this, "Select a valid exam first.", "Validation", JOptionPane.WARNING_MESSAGE);
             return;
         }
         
-        allSummaries = adminService.getExamAttemptSummaries(item.id);
-        List<String> dates = adminService.getDistinctDatesForExam(item.id);
+        summaryModel.setRowCount(0);
         
-        dateFilterCombo.removeAllItems();
-        dateFilterCombo.addItem("All Dates");
-        for (String d : dates) dateFilterCombo.addItem(d);
-        
-        sectionFilterCombo.setSelectedIndex(0);
-        updateTable(allSummaries);
+        SwingWorker<Object[], Void> worker = new SwingWorker<Object[], Void>() {
+            @Override
+            protected Object[] doInBackground() {
+                List<AttemptSummary> summaries = adminService.getExamAttemptSummaries(item.id);
+                List<String> dates = adminService.getDistinctDatesForExam(item.id);
+                return new Object[]{summaries, dates};
+            }
+            @Override
+            @SuppressWarnings("unchecked")
+            protected void done() {
+                try {
+                    Object[] results = get();
+                    allSummaries = (List<AttemptSummary>) results[0];
+                    List<String> dates = (List<String>) results[1];
+                    
+                    dateFilterCombo.removeAllItems();
+                    dateFilterCombo.addItem("All Dates");
+                    for (String d : dates) dateFilterCombo.addItem(d);
+                    
+                    sectionFilterCombo.setSelectedIndex(0);
+                    updateTable(allSummaries);
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 
     private void applyFilters() {
@@ -215,12 +248,24 @@ public class ReviewPanel extends JPanel {
         String name = (String) summaryTable.getValueAt(row, 2);
 
         if (JOptionPane.showConfirmDialog(this, "Delete result for " + name + "?", "Confirm", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-            if (adminService.deleteExamAttempt(attemptId)) {
-                JOptionPane.showMessageDialog(this, "Deleted.");
-                loadSummariesAndDates();
-            } else {
-                JOptionPane.showMessageDialog(this, "Failed to delete.");
-            }
+            SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+                @Override
+                protected Boolean doInBackground() {
+                    return adminService.deleteExamAttempt(attemptId);
+                }
+                @Override
+                protected void done() {
+                    try {
+                        if (get()) {
+                            JOptionPane.showMessageDialog(ReviewPanel.this, "Deleted.");
+                            loadSummariesAndDates();
+                        } else {
+                            JOptionPane.showMessageDialog(ReviewPanel.this, "Failed to delete.");
+                        }
+                    } catch(Exception ex) {}
+                }
+            };
+            worker.execute();
         }
     }
 

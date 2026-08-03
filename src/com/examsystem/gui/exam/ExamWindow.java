@@ -228,35 +228,58 @@ public class ExamWindow extends JDialog {
     }
 
     private void loadContentAndStart() {
-        questions = questionDAO.getQuestionsByExamId(exam.getId());
-        if (questions.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "No questions found.");
-            dispose();
-            return;
-        }
+        timerLabel.setText("Loading...");
+        prevButton.setEnabled(false);
+        nextButton.setEnabled(false);
+        submitEarlyButton.setEnabled(false);
 
-        attemptId = examAttemptDAO.createAttempt(exam.getId(), student.getId(), new Timestamp(System.currentTimeMillis()));
-        if (attemptId <= 0) {
-            JOptionPane.showMessageDialog(this, "Failed to start exam. Please try again or contact administrator.", "Error", JOptionPane.ERROR_MESSAGE);
-            dispose();
-            return;
-        }
-        
-        remainingSeconds = exam.getDurationMinutes() * 60;
-        
-        swingTimer = new Timer(1000, e -> {
-            remainingSeconds--;
-            if (remainingSeconds <= 0) {
-                timerLabel.setText("Time: 00:00");
-                swingTimer.stop();
-                JOptionPane.showMessageDialog(this, "Time Up!");
-                finalizeAttemptAndClose();
-            } else {
-                timerLabel.setText(String.format("Time: %02d:%02d", remainingSeconds / 60, remainingSeconds % 60));
+        SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() throws Exception {
+                questions = questionDAO.getQuestionsByExamId(exam.getId());
+                if (questions.isEmpty()) return false;
+
+                attemptId = examAttemptDAO.createAttempt(exam.getId(), student.getId(), new Timestamp(System.currentTimeMillis()));
+                return attemptId > 0;
             }
-        });
-        swingTimer.start();
-        showCurrentQuestion();
+
+            @Override
+            protected void done() {
+                try {
+                    boolean success = get();
+                    if (!success) {
+                        if (questions.isEmpty()) {
+                            JOptionPane.showMessageDialog(ExamWindow.this, "No questions found.");
+                        } else {
+                            JOptionPane.showMessageDialog(ExamWindow.this, "Failed to start exam.", "Error", JOptionPane.ERROR_MESSAGE);
+                        }
+                        dispose();
+                        return;
+                    }
+
+                    submitEarlyButton.setEnabled(true);
+                    remainingSeconds = exam.getDurationMinutes() * 60;
+                    
+                    swingTimer = new Timer(1000, e -> {
+                        remainingSeconds--;
+                        if (remainingSeconds <= 0) {
+                            timerLabel.setText("Time: 00:00");
+                            swingTimer.stop();
+                            JOptionPane.showMessageDialog(ExamWindow.this, "Time Up!");
+                            finalizeAttemptAndClose();
+                        } else {
+                            timerLabel.setText(String.format("Time: %02d:%02d", remainingSeconds / 60, remainingSeconds % 60));
+                        }
+                    });
+                    swingTimer.start();
+                    showCurrentQuestion();
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(ExamWindow.this, "Error initializing exam.", "Error", JOptionPane.ERROR_MESSAGE);
+                    dispose();
+                }
+            }
+        };
+        worker.execute();
     }
 
     private void showCurrentQuestion() {

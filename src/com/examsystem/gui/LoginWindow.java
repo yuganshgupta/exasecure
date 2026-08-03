@@ -64,19 +64,37 @@ public class LoginWindow extends JFrame {
             return;
         }
 
-        User user = authService.login(username, password);
-        if (user == null) {
-            JOptionPane.showMessageDialog(this, "Invalid credentials.", "Login Failed", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
+        loginButton.setEnabled(false);
+        loginButton.setText("Logging in...");
 
-        SwingUtilities.invokeLater(() -> {
-            dispose();
-            if ("admin".equalsIgnoreCase(user.getRole())) {
-                new AdminDashboard(user).setVisible(true);
-            } else {
-                new StudentDashboard(user).setVisible(true);
+        SwingWorker<User, Void> worker = new SwingWorker<User, Void>() {
+            @Override
+            protected User doInBackground() throws Exception {
+                return authService.login(username, password);
             }
-        });
+
+            @Override
+            protected void done() {
+                loginButton.setEnabled(true);
+                loginButton.setText("Login");
+                try {
+                    User user = get();
+                    if (user == null) {
+                        JOptionPane.showMessageDialog(LoginWindow.this, "Invalid credentials.", "Login Failed", JOptionPane.ERROR_MESSAGE);
+                        return;
+                    }
+                    dispose();
+                    if ("admin".equalsIgnoreCase(user.getRole())) {
+                        new AdminDashboard(user).setVisible(true);
+                    } else {
+                        new StudentDashboard(user).setVisible(true);
+                    }
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(LoginWindow.this, "Error during login.", "Error", JOptionPane.ERROR_MESSAGE);
+                    ex.printStackTrace();
+                }
+            }
+        };
+        worker.execute();
     }
 }

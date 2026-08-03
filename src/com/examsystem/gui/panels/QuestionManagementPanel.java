@@ -95,10 +95,24 @@ public class QuestionManagementPanel extends JPanel {
 
     private void loadExams() {
         examCombo.removeAllItems();
-        List<Exam> exams = adminService.listAllExams();
-        for (Exam ex : exams) {
-            examCombo.addItem(new ExamItem(ex.getId(), ex.getTitle(), ex.getDurationMinutes()));
-        }
+        examCombo.addItem(new ExamItem(-1, "Loading...", 0));
+        
+        SwingWorker<List<Exam>, Void> worker = new SwingWorker<List<Exam>, Void>() {
+            @Override
+            protected List<Exam> doInBackground() {
+                return adminService.listAllExams();
+            }
+            @Override
+            protected void done() {
+                try {
+                    examCombo.removeAllItems();
+                    for (Exam ex : get()) {
+                        examCombo.addItem(new ExamItem(ex.getId(), ex.getTitle(), ex.getDurationMinutes()));
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 
     private void buildOptionsUI() {
@@ -138,12 +152,24 @@ public class QuestionManagementPanel extends JPanel {
     private void loadQuestions() {
         model.setRowCount(0);
         ExamItem selected = (ExamItem) examCombo.getSelectedItem();
-        if (selected == null) return;
+        if (selected == null || selected.id == -1) return;
 
-        List<Question> questions = adminService.getQuestionsForExam(selected.id);
-        for (Question q : questions) {
-            model.addRow(new Object[]{q.getId(), q.getQuestionType(), q.getQuestionText(), q.getCorrectOptionNumber()});
-        }
+        SwingWorker<List<Question>, Void> worker = new SwingWorker<List<Question>, Void>() {
+            @Override
+            protected List<Question> doInBackground() {
+                return adminService.getQuestionsForExam(selected.id);
+            }
+            @Override
+            protected void done() {
+                try {
+                    model.setRowCount(0);
+                    for (Question q : get()) {
+                        model.addRow(new Object[]{q.getId(), q.getQuestionType(), q.getQuestionText(), q.getCorrectOptionNumber()});
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 
     private void onAddQuestion() {
@@ -191,17 +217,28 @@ public class QuestionManagementPanel extends JPanel {
             return;
         }
 
-        boolean ok = adminService.addQuestionToExam(selected.id, qText, validOpts.toArray(new String[0]), isCorrectArray, type);
-        if (ok) {
-            JOptionPane.showMessageDialog(this, "Question added.", "Success", JOptionPane.INFORMATION_MESSAGE);
-            newQuestionArea.setText("");
-            for (JTextField f : newOptionFields) f.setText("");
-            typeCombo.setSelectedIndex(0);
-            buildOptionsUI();
-            loadQuestions();
-        } else {
-            JOptionPane.showMessageDialog(this, "Failed to add question.", "Error", JOptionPane.ERROR_MESSAGE);
-        }
+        SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() {
+                return adminService.addQuestionToExam(selected.id, qText, validOpts.toArray(new String[0]), isCorrectArray, type);
+            }
+            @Override
+            protected void done() {
+                try {
+                    if (get()) {
+                        JOptionPane.showMessageDialog(QuestionManagementPanel.this, "Question added.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                        newQuestionArea.setText("");
+                        for (JTextField f : newOptionFields) f.setText("");
+                        typeCombo.setSelectedIndex(0);
+                        buildOptionsUI();
+                        loadQuestions();
+                    } else {
+                        JOptionPane.showMessageDialog(QuestionManagementPanel.this, "Failed to add question.", "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 
     private void onEditQuestion() {
@@ -213,18 +250,29 @@ public class QuestionManagementPanel extends JPanel {
         int qId = (Integer) model.getValueAt(row, 0);
         
         // We need to fetch the full question with options. The list in the table only has basic info.
-        com.examsystem.dao.QuestionDAO qDao = new com.examsystem.dao.QuestionDAO();
-        Question q = qDao.getById(qId);
-        
-        if (q != null) {
-            EditQuestionDialog dialog = new EditQuestionDialog(SwingUtilities.getWindowAncestor(this), adminService, q);
-            dialog.setVisible(true);
-            if (dialog.isUpdated()) {
-                loadQuestions();
+        SwingWorker<Question, Void> worker = new SwingWorker<Question, Void>() {
+            @Override
+            protected Question doInBackground() {
+                com.examsystem.dao.QuestionDAO qDao = new com.examsystem.dao.QuestionDAO();
+                return qDao.getById(qId);
             }
-        } else {
-            JOptionPane.showMessageDialog(this, "Failed to load question details.", "Error", JOptionPane.ERROR_MESSAGE);
-        }
+            @Override
+            protected void done() {
+                try {
+                    Question q = get();
+                    if (q != null) {
+                        EditQuestionDialog dialog = new EditQuestionDialog(SwingUtilities.getWindowAncestor(QuestionManagementPanel.this), adminService, q);
+                        dialog.setVisible(true);
+                        if (dialog.isUpdated()) {
+                            loadQuestions();
+                        }
+                    } else {
+                        JOptionPane.showMessageDialog(QuestionManagementPanel.this, "Failed to load question details.", "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 
     private void onDeleteQuestion() {
@@ -236,12 +284,24 @@ public class QuestionManagementPanel extends JPanel {
         int qId = (Integer) model.getValueAt(row, 0);
 
         if (JOptionPane.showConfirmDialog(this, "Delete question ID " + qId + "?", "Confirm", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-            if (adminService.softDeleteQuestion(qId)) {
-                JOptionPane.showMessageDialog(this, "Question deleted.", "Success", JOptionPane.INFORMATION_MESSAGE);
-                loadQuestions();
-            } else {
-                JOptionPane.showMessageDialog(this, "Failed to delete question.", "Error", JOptionPane.ERROR_MESSAGE);
-            }
+            SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+                @Override
+                protected Boolean doInBackground() {
+                    return adminService.softDeleteQuestion(qId);
+                }
+                @Override
+                protected void done() {
+                    try {
+                        if (get()) {
+                            JOptionPane.showMessageDialog(QuestionManagementPanel.this, "Question deleted.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                            loadQuestions();
+                        } else {
+                            JOptionPane.showMessageDialog(QuestionManagementPanel.this, "Failed to delete question.", "Error", JOptionPane.ERROR_MESSAGE);
+                        }
+                    } catch(Exception ex) {}
+                }
+            };
+            worker.execute();
         }
     }
 

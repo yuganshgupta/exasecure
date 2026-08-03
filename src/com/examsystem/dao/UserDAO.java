@@ -54,7 +54,7 @@ public class UserDAO {
     }
 
     public User findById(int id) {
-        String sql = "SELECT * FROM users WHERE id=?";
+        String sql = "SELECT * FROM users WHERE id=? AND is_active=TRUE";
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 

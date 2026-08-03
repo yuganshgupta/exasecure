@@ -152,6 +152,9 @@ public class ExamAttemptDAO {
     }
 
     public List<AttemptSummary> getAttemptSummariesByExamId(int examId) {
+        // NOTE: We intentionally do NOT filter by 'u.is_active = TRUE' here.
+        // Business Logic: Historical exam attempts and scores must be retained and visible
+        // for reporting, even if the student's user account has been soft-deleted.
         String sql =
             "SELECT ea.id AS attempt_id, u.full_name, u.username, u.enrollment_number, u.section, " +
             "IFNULL(ea.score,0) AS score, ea.start_time, ea.end_time, IFNULL(ea.focus_lost_count, 0) as focus_lost " +

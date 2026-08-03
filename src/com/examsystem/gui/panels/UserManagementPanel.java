@@ -154,13 +154,25 @@ public class UserManagementPanel extends JPanel {
             return;
         }
 
-        int id = adminService.registerUser(username, password, fullName, enrollment, section, role);
-        if (id > 0) {
-            JOptionPane.showMessageDialog(this, "User registered! ID: " + id, "Success", JOptionPane.INFORMATION_MESSAGE);
-            loadUsers();
-        } else {
-            JOptionPane.showMessageDialog(this, "Registration failed (Duplicate username?).", "Error", JOptionPane.ERROR_MESSAGE);
-        }
+        SwingWorker<Integer, Void> worker = new SwingWorker<Integer, Void>() {
+            @Override
+            protected Integer doInBackground() {
+                return adminService.registerUser(username, password, fullName, enrollment, section, role);
+            }
+            @Override
+            protected void done() {
+                try {
+                    int id = get();
+                    if (id > 0) {
+                        JOptionPane.showMessageDialog(UserManagementPanel.this, "User registered! ID: " + id, "Success", JOptionPane.INFORMATION_MESSAGE);
+                        loadUsers();
+                    } else {
+                        JOptionPane.showMessageDialog(UserManagementPanel.this, "Registration failed (Duplicate username?).", "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 
     private void onUpdate() {
@@ -193,12 +205,24 @@ public class UserManagementPanel extends JPanel {
             return;
         }
 
-        if (adminService.updateUser(id, username, password, fullName, enrollment, section, role)) {
-            JOptionPane.showMessageDialog(this, "User updated!", "Success", JOptionPane.INFORMATION_MESSAGE);
-            loadUsers();
-        } else {
-            JOptionPane.showMessageDialog(this, "Update failed.", "Error", JOptionPane.ERROR_MESSAGE);
-        }
+        SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+            @Override
+            protected Boolean doInBackground() {
+                return adminService.updateUser(id, username, password, fullName, enrollment, section, role);
+            }
+            @Override
+            protected void done() {
+                try {
+                    if (get()) {
+                        JOptionPane.showMessageDialog(UserManagementPanel.this, "User updated!", "Success", JOptionPane.INFORMATION_MESSAGE);
+                        loadUsers();
+                    } else {
+                        JOptionPane.showMessageDialog(UserManagementPanel.this, "Update failed.", "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 
     private void onDelete() {
@@ -212,27 +236,51 @@ public class UserManagementPanel extends JPanel {
         String username = model.getValueAt(row, 1).toString();
 
         if (JOptionPane.showConfirmDialog(this, "Delete user '" + username + "'?", "Confirm Deletion", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-            if (adminService.softDeleteUser(id)) {
-                JOptionPane.showMessageDialog(this, "User deleted.", "Success", JOptionPane.INFORMATION_MESSAGE);
-                loadUsers();
-            } else {
-                JOptionPane.showMessageDialog(this, "Failed to delete user.", "Error", JOptionPane.ERROR_MESSAGE);
-            }
+            SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+                @Override
+                protected Boolean doInBackground() {
+                    return adminService.softDeleteUser(id);
+                }
+                @Override
+                protected void done() {
+                    try {
+                        if (get()) {
+                            JOptionPane.showMessageDialog(UserManagementPanel.this, "User deleted.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                            loadUsers();
+                        } else {
+                            JOptionPane.showMessageDialog(UserManagementPanel.this, "Failed to delete user.", "Error", JOptionPane.ERROR_MESSAGE);
+                        }
+                    } catch(Exception ex) {}
+                }
+            };
+            worker.execute();
         }
     }
 
     private void loadUsers() {
-        List<User> users = adminService.getAllUsers();
-        model.setRowCount(0);
-        for (User u : users) {
-            model.addRow(new Object[]{
-                u.getId(), 
-                u.getUsername(), 
-                u.getFullName(), 
-                u.getEnrollmentNumber(), 
-                u.getSection(), 
-                u.getRole()
-            });
-        }
+        SwingWorker<List<User>, Void> worker = new SwingWorker<List<User>, Void>() {
+            @Override
+            protected List<User> doInBackground() {
+                return adminService.getAllUsers();
+            }
+            @Override
+            protected void done() {
+                try {
+                    List<User> users = get();
+                    model.setRowCount(0);
+                    for (User u : users) {
+                        model.addRow(new Object[]{
+                            u.getId(), 
+                            u.getUsername(), 
+                            u.getFullName(), 
+                            u.getEnrollmentNumber(), 
+                            u.getSection(), 
+                            u.getRole()
+                        });
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 }

@@ -101,15 +101,27 @@ public class ExamManagementPanel extends JPanel {
             return;
         }
 
-        int examId = adminService.createExam(title, duration, adminUser.getId());
-        if (examId > 0) {
-            JOptionPane.showMessageDialog(this, "Exam created with ID: " + examId, "Success", JOptionPane.INFORMATION_MESSAGE);
-            titleField.setText("");
-            durationSpinner.setValue(2);
-            loadExams();
-        } else {
-            JOptionPane.showMessageDialog(this, "Failed to create exam.", "Error", JOptionPane.ERROR_MESSAGE);
-        }
+        SwingWorker<Integer, Void> worker = new SwingWorker<Integer, Void>() {
+            @Override
+            protected Integer doInBackground() {
+                return adminService.createExam(title, duration, adminUser.getId());
+            }
+            @Override
+            protected void done() {
+                try {
+                    int examId = get();
+                    if (examId > 0) {
+                        JOptionPane.showMessageDialog(ExamManagementPanel.this, "Exam created with ID: " + examId, "Success", JOptionPane.INFORMATION_MESSAGE);
+                        titleField.setText("");
+                        durationSpinner.setValue(2);
+                        loadExams();
+                    } else {
+                        JOptionPane.showMessageDialog(ExamManagementPanel.this, "Failed to create exam.", "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 
     private void onEdit() {
@@ -120,17 +132,28 @@ public class ExamManagementPanel extends JPanel {
         }
         
         int examId = (Integer) model.getValueAt(row, 0);
-        Exam exam = adminService.getExamById(examId);
-        
-        if (exam != null) {
-            EditExamDialog dialog = new EditExamDialog(SwingUtilities.getWindowAncestor(this), adminService, exam);
-            dialog.setVisible(true);
-            if (dialog.isUpdated()) {
-                loadExams();
+        SwingWorker<Exam, Void> worker = new SwingWorker<Exam, Void>() {
+            @Override
+            protected Exam doInBackground() {
+                return adminService.getExamById(examId);
             }
-        } else {
-            JOptionPane.showMessageDialog(this, "Failed to load exam details.", "Error", JOptionPane.ERROR_MESSAGE);
-        }
+            @Override
+            protected void done() {
+                try {
+                    Exam exam = get();
+                    if (exam != null) {
+                        EditExamDialog dialog = new EditExamDialog(SwingUtilities.getWindowAncestor(ExamManagementPanel.this), adminService, exam);
+                        dialog.setVisible(true);
+                        if (dialog.isUpdated()) {
+                            loadExams();
+                        }
+                    } else {
+                        JOptionPane.showMessageDialog(ExamManagementPanel.this, "Failed to load exam details.", "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 
     private void onDelete() {
@@ -143,25 +166,49 @@ public class ExamManagementPanel extends JPanel {
         String title = (String) model.getValueAt(row, 1);
 
         if (JOptionPane.showConfirmDialog(this, "Delete exam '" + title + "'?", "Confirm Deletion", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
-            if (adminService.softDeleteExam(examId)) {
-                JOptionPane.showMessageDialog(this, "Exam deleted.", "Success", JOptionPane.INFORMATION_MESSAGE);
-                loadExams();
-            } else {
-                JOptionPane.showMessageDialog(this, "Failed to delete exam.", "Error", JOptionPane.ERROR_MESSAGE);
-            }
+            SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+                @Override
+                protected Boolean doInBackground() {
+                    return adminService.softDeleteExam(examId);
+                }
+                @Override
+                protected void done() {
+                    try {
+                        if (get()) {
+                            JOptionPane.showMessageDialog(ExamManagementPanel.this, "Exam deleted.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                            loadExams();
+                        } else {
+                            JOptionPane.showMessageDialog(ExamManagementPanel.this, "Failed to delete exam.", "Error", JOptionPane.ERROR_MESSAGE);
+                        }
+                    } catch(Exception ex) {}
+                }
+            };
+            worker.execute();
         }
     }
 
     private void loadExams() {
-        List<Exam> exams = adminService.listAllExams();
-        model.setRowCount(0);
-        for (Exam ex : exams) {
-            model.addRow(new Object[]{
-                ex.getId(), 
-                ex.getTitle(), 
-                ex.getDurationMinutes(),
-                ex.getCreatedAt()
-            });
-        }
+        SwingWorker<List<Exam>, Void> worker = new SwingWorker<List<Exam>, Void>() {
+            @Override
+            protected List<Exam> doInBackground() {
+                return adminService.listAllExams();
+            }
+            @Override
+            protected void done() {
+                try {
+                    List<Exam> exams = get();
+                    model.setRowCount(0);
+                    for (Exam ex : exams) {
+                        model.addRow(new Object[]{
+                            ex.getId(), 
+                            ex.getTitle(), 
+                            ex.getDurationMinutes(),
+                            ex.getCreatedAt()
+                        });
+                    }
+                } catch(Exception ex) {}
+            }
+        };
+        worker.execute();
     }
 }
