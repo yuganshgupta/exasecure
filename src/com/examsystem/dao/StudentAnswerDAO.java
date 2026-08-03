@@ -111,12 +111,13 @@ public class StudentAnswerDAO {
     public List<StudentAnswerDetail> getDetailedAnswers(int attemptId) {
         String sql = 
             "SELECT q.question_text, " +
-            "       sa.selected_options AS selected_text, " + // Use raw CSV string for now
-            "       o_correct.option_text AS correct_text, " +
+            "       sa.selected_options AS selected_text, " +
+            "       (SELECT GROUP_CONCAT(o.option_text ORDER BY o.option_number SEPARATOR ', ') " +
+            "        FROM options o WHERE o.question_id = q.id AND o.is_correct = TRUE AND o.is_active = TRUE" +
+            "       ) AS correct_text, " +
             "       sa.is_correct " +
             "FROM student_answers sa " +
             "JOIN questions q ON sa.question_id = q.id " +
-            "LEFT JOIN options o_correct ON (o_correct.question_id = q.id AND o_correct.option_number = q.correct_option_number) " +
             "WHERE sa.attempt_id = ? " +
             "ORDER BY sa.id ASC";
 
@@ -151,7 +152,7 @@ public class StudentAnswerDAO {
             "JOIN exam_attempts ea ON sa.attempt_id = ea.id " +
             "JOIN users u ON ea.student_id = u.id " +
             "JOIN questions q ON sa.question_id = q.id " +
-            "WHERE ea.exam_id = ? "
+            "WHERE ea.exam_id = ? AND q.is_active = TRUE "
         );
 
         boolean filterDate = dateFilter != null && !dateFilter.equals("All Dates");

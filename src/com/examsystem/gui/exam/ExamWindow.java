@@ -160,10 +160,14 @@ public class ExamWindow extends JDialog {
 
                 focusLostCount++;
                 lastFocusLostTime = System.currentTimeMillis();
+                final int qIdx = currentIndex;
                 
-                String msg = "Focus lost while viewing Q" + (currentIndex + 1);
-                byte[] screenshotData = takeScreenshotBytes();
-                examAttemptDAO.logEvent(attemptId, msg, screenshotData);
+                // M3 FIX: Offload screenshot capture + BLOB insert to background thread
+                new Thread(() -> {
+                    String msg = "Focus lost while viewing Q" + (qIdx + 1);
+                    byte[] screenshotData = takeScreenshotBytes();
+                    examAttemptDAO.logEvent(attemptId, msg, screenshotData);
+                }).start();
 
                 int remaining = MAX_FOCUS_LOST - focusLostCount;
                 isOverlayVisible = true; 
@@ -216,6 +220,13 @@ public class ExamWindow extends JDialog {
         }
     }
 
+    /** Escape HTML entities to prevent injection via question/option text. */
+    private static String escapeHtml(String text) {
+        if (text == null) return "";
+        return text.replace("&", "&amp;").replace("<", "&lt;")
+                   .replace(">", "&gt;").replace("\"", "&quot;");
+    }
+
     private void loadContentAndStart() {
         questions = questionDAO.getQuestionsByExamId(exam.getId());
         if (questions.isEmpty()) {
@@ -251,7 +262,7 @@ public class ExamWindow extends JDialog {
     private void showCurrentQuestion() {
         Question q = questions.get(currentIndex);
         
-        questionLabel.setText("<html><div style='width: 600px;'>Q" + (currentIndex + 1) + ": " + q.getQuestionText() + "</div></html>");
+        questionLabel.setText("<html><div style='width: 600px;'>Q" + (currentIndex + 1) + ": " + escapeHtml(q.getQuestionText()) + "</div></html>");
 
         List<Option> opts = q.getOptions();
         optionGroup.clearSelection();
@@ -266,7 +277,7 @@ public class ExamWindow extends JDialog {
         for (int i = 0; i < opts.size(); i++) {
             JToggleButton btn = isMulti ? new JCheckBox() : new JRadioButton();
             btn.setFont(optionFont);
-            btn.setText("<html><div style='width: 600px;'>" + opts.get(i).getOptionText() + "</div></html>");
+            btn.setText("<html><div style='width: 600px;'>" + escapeHtml(opts.get(i).getOptionText()) + "</div></html>");
             if (!isMulti) {
                 optionGroup.add(btn);
             }
@@ -297,23 +308,27 @@ public class ExamWindow extends JDialog {
             }
         }
         
+        // ALWAYS save, even if empty — prevents preserving a stale correct answer
+        boolean correct = false;
         if (!selectedOptions.isEmpty()) {
-            boolean correct = false;
             if ("MULTI".equals(q.getQuestionType())) {
-                List<Integer> correctOptions = new java.util.ArrayList<>();
+                // Use Sets for deduplication and order-independent comparison
+                java.util.Set<Integer> selectedSet = new java.util.TreeSet<>(selectedOptions);
+                java.util.Set<Integer> correctSet = new java.util.TreeSet<>();
                 for (int i = 0; i < q.getOptions().size(); i++) {
                     if (q.getOptions().get(i).isCorrect()) {
-                        correctOptions.add(i + 1);
+                        correctSet.add(i + 1);
                     }
                 }
-                correct = selectedOptions.containsAll(correctOptions) && correctOptions.containsAll(selectedOptions);
+                correct = selectedSet.equals(correctSet);
             } else {
                 correct = selectedOptions.size() == 1 && selectedOptions.get(0) == q.getCorrectOptionNumber();
             }
-            
-            String selectedCsv = String.join(",", selectedOptions.stream().map(String::valueOf).toArray(String[]::new));
-            studentAnswerDAO.saveAnswer(attemptId, q.getId(), selectedCsv, correct, new Timestamp(System.currentTimeMillis()));
         }
+        
+        String selectedCsv = selectedOptions.isEmpty() ? ""
+            : String.join(",", selectedOptions.stream().map(String::valueOf).toArray(String[]::new));
+        studentAnswerDAO.saveAnswer(attemptId, q.getId(), selectedCsv, correct, new Timestamp(System.currentTimeMillis()));
     }
 
     private void onNext() {

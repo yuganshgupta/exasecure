@@ -31,7 +31,7 @@ public class ExamDAO {
     }
 
     public Exam getExamById(int id) {
-        String sql = "SELECT id, title, duration_minutes, created_by, created_at FROM exams WHERE id=?";
+        String sql = "SELECT id, title, duration_minutes, created_by, created_at FROM exams WHERE id=? AND is_active=TRUE";
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 

@@ -48,13 +48,23 @@ public class StudentDashboard extends JFrame {
     }
 
     private void loadExams() {
-        SwingUtilities.invokeLater(() -> {
-            model.setRowCount(0);
-            currentExams = examDAO.getAllExams();
-            for (Exam ex : currentExams) {
-                model.addRow(new Object[]{ex.getId(), ex.getTitle(), ex.getDurationMinutes(), ex.getCreatedAt()});
+        new javax.swing.SwingWorker<List<Exam>, Void>() {
+            @Override protected List<Exam> doInBackground() {
+                return examDAO.getAllExams();
             }
-        });
+            @Override protected void done() {
+                try {
+                    model.setRowCount(0);
+                    currentExams = get();
+                    for (Exam ex : currentExams) {
+                        model.addRow(new Object[]{ex.getId(), ex.getTitle(), ex.getDurationMinutes(), ex.getCreatedAt()});
+                    }
+                } catch (Exception e) {
+                    JOptionPane.showMessageDialog(StudentDashboard.this,
+                        "Failed to load exams: " + e.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void onTakeExam() {
