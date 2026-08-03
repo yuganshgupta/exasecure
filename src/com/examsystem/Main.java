@@ -14,6 +14,9 @@ public class Main {
     private static final Logger LOGGER = Logger.getLogger(Main.class.getName());
 
     public static void main(String[] args) {
+        // Run database migrations first
+        com.examsystem.db.DatabaseMigrator.migrate();
+
         // Show unhandled exceptions to help troubleshooting
         Thread.setDefaultUncaughtExceptionHandler((t, e) -> {
             LOGGER.log(Level.SEVERE, "Unhandled Exception caught in thread " + t.getName(), e);

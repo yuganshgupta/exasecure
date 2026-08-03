@@ -20,7 +20,7 @@ public class AdminDashboard extends JFrame {
 
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Exam Management", new ExamManagementPanel(adminUser, adminService));
-        tabs.addTab("Add Question", new AddQuestionPanel(adminService));
+        tabs.addTab("Question Management", new QuestionManagementPanel(adminService));
         tabs.addTab("Review Results", new ReviewPanel(adminService));
         tabs.addTab("User Management", new UserManagementPanel(adminService));
 

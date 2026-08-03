@@ -6,6 +6,7 @@ public class Option {
     private int questionId;
     private int optionNumber; // 1..4
     private String optionText;
+    private boolean isCorrect; // NEW
 
     public Option() {}
 
@@ -16,13 +17,20 @@ public class Option {
         this.optionText = optionText;
     }
 
+    public Option(int id, int questionId, int optionNumber, String optionText, boolean isCorrect) {
+        this(id, questionId, optionNumber, optionText);
+        this.isCorrect = isCorrect;
+    }
+
     public int getId() { return id; }
     public int getQuestionId() { return questionId; }
     public int getOptionNumber() { return optionNumber; }
     public String getOptionText() { return optionText; }
+    public boolean isCorrect() { return isCorrect; }
 
     public void setId(int id) { this.id = id; }
     public void setQuestionId(int questionId) { this.questionId = questionId; }
     public void setOptionNumber(int optionNumber) { this.optionNumber = optionNumber; }
     public void setOptionText(String optionText) { this.optionText = optionText; }
+    public void setCorrect(boolean isCorrect) { this.isCorrect = isCorrect; }
 }

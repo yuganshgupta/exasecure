@@ -56,9 +56,26 @@ public class AdminService {
         if (qId <= 0) return false;
 
         for (int i = 0; i < validOptions.size(); i++) {
-            optionDAO.addOption(qId, i + 1, validOptions.get(i));
+            boolean isCorrect = (i + 1 == correctOptionNumber);
+            optionDAO.addOption(qId, i + 1, validOptions.get(i), isCorrect);
         }
         return true;
+    }
+
+    public boolean softDeleteQuestion(int questionId) {
+        return questionDAO.softDeleteQuestion(questionId);
+    }
+
+    public boolean updateQuestion(Question question) {
+        return questionDAO.updateQuestion(question);
+    }
+
+    public boolean softDeleteOption(int optionId) {
+        return optionDAO.softDeleteOption(optionId);
+    }
+
+    public boolean updateOption(Option option) {
+        return optionDAO.updateOption(option);
     }
 
     public boolean addQuestionToExam(int examId, String questionText, String[] optionsText, int correctOptionNumber) {

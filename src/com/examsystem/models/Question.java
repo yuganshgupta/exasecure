@@ -6,6 +6,7 @@ public class Question {
     private int examId;
     private String questionText;
     private int correctOptionNumber; // 1..4
+    private java.util.List<Option> options = new java.util.ArrayList<>(); // NEW
 
     public Question() {}
 
@@ -20,9 +21,11 @@ public class Question {
     public int getExamId() { return examId; }
     public String getQuestionText() { return questionText; }
     public int getCorrectOptionNumber() { return correctOptionNumber; }
+    public java.util.List<Option> getOptions() { return options; }
 
     public void setId(int id) { this.id = id; }
     public void setExamId(int examId) { this.examId = examId; }
     public void setQuestionText(String questionText) { this.questionText = questionText; }
     public void setCorrectOptionNumber(int correctOptionNumber) { this.correctOptionNumber = correctOptionNumber; }
+    public void setOptions(java.util.List<Option> options) { this.options = options; }
 }
