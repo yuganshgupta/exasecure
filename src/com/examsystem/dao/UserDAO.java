@@ -6,6 +6,7 @@ import com.examsystem.models.User;
 import java.sql.*;
 import java.util.ArrayList;
 import java.util.List;
+import org.mindrot.jbcrypt.BCrypt;
 
 public class UserDAO {
 
@@ -37,6 +38,21 @@ public class UserDAO {
         return null;
     }
 
+    public User findByUsername(String username) {
+        String sql = "SELECT * FROM users WHERE username=? AND is_active=TRUE LIMIT 1";
+        try (Connection conn = DatabaseConnector.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setString(1, username);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) return mapRowToUser(rs);
+            }
+        } catch (SQLException e) {
+            System.err.println("UserDAO.findByUsername error: " + e.getMessage());
+        }
+        return null;
+    }
+
     public User findById(int id) {
         String sql = "SELECT * FROM users WHERE id=?";
         try (Connection conn = DatabaseConnector.getConnection();
@@ -59,7 +75,7 @@ public class UserDAO {
              PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
 
             ps.setString(1, username);
-            ps.setString(2, password);
+            ps.setString(2, BCrypt.hashpw(password, BCrypt.gensalt()));
             ps.setString(3, fullName);
             ps.setString(4, enrollment);
             ps.setString(5, section);
@@ -98,7 +114,7 @@ public class UserDAO {
 
             int paramIndex = 6;
             if (!password.isEmpty()) {
-                ps.setString(paramIndex++, password);
+                ps.setString(paramIndex++, BCrypt.hashpw(password, BCrypt.gensalt()));
             }
             ps.setInt(paramIndex, id);
 

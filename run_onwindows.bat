@@ -97,7 +97,7 @@ REM ------------------------------------------------------------
 REM  Compile
 REM ------------------------------------------------------------
 echo [INFO] Compiling...
-javac -encoding UTF-8 -cp ".;%MYSQL_JAR_FULL%" -d "%BIN%" @%SRC_LIST%
+javac -encoding UTF-8 -cp ".;%LIB%\*" -d "%BIN%" @%SRC_LIST%
 if errorlevel 1 (
   echo.
   echo [ERROR] Compilation failed. See messages above.
@@ -114,7 +114,7 @@ REM  Run
 REM ------------------------------------------------------------
 echo [INFO] Launching GUI...
 echo.
-java -cp "%BIN%;%MYSQL_JAR_FULL%" %MAIN_CLASS%
+java -cp "%BIN%;%LIB%\*" %MAIN_CLASS%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.
