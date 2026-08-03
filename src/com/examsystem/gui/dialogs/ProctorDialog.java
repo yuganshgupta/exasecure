@@ -38,7 +38,7 @@ public class ProctorDialog extends JDialog {
             prev = ts;
 
             model.addRow(new Object[]{
-                    i + 1, a.getQuestionId(), a.getSelectedOptionNumber(),
+                    i + 1, a.getQuestionId(), a.getSelectedOptions(),
                     a.isCorrect() ? "YES" : "NO", ts, deltaSec
             });
         }

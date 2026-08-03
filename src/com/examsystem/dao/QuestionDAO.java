@@ -10,14 +10,15 @@ import java.util.List;
 /** DAO for questions. */
 public class QuestionDAO {
 
-    public int addQuestion(int examId, String questionText, int correctOptionNumber) {
-        String sql = "INSERT INTO questions (exam_id, question_text, correct_option_number) VALUES (?, ?, ?)";
+    public int addQuestion(int examId, String questionText, int correctOptionNumber, String questionType) {
+        String sql = "INSERT INTO questions (exam_id, question_text, correct_option_number, question_type) VALUES (?, ?, ?, ?)";
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
 
             ps.setInt(1, examId);
             ps.setString(2, questionText);
             ps.setInt(3, correctOptionNumber);
+            ps.setString(4, questionType != null ? questionType : "SINGLE");
             int rows = ps.executeUpdate();
             if (rows > 0) {
                 try (ResultSet rs = ps.getGeneratedKeys()) {
@@ -43,12 +44,13 @@ public class QuestionDAO {
     }
 
     public boolean updateQuestion(Question question) {
-        String sql = "UPDATE questions SET question_text = ?, correct_option_number = ? WHERE id = ?";
+        String sql = "UPDATE questions SET question_text = ?, correct_option_number = ?, question_type = ? WHERE id = ?";
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, question.getQuestionText());
             ps.setInt(2, question.getCorrectOptionNumber());
-            ps.setInt(3, question.getId());
+            ps.setString(3, question.getQuestionType() != null ? question.getQuestionType() : "SINGLE");
+            ps.setInt(4, question.getId());
             return ps.executeUpdate() > 0;
         } catch (SQLException e) {
             System.err.println("QuestionDAO.updateQuestion error: " + e.getMessage());
@@ -57,7 +59,7 @@ public class QuestionDAO {
     }
 
     public List<Question> getQuestionsByExamId(int examId) {
-        String sql = "SELECT id, exam_id, question_text, correct_option_number FROM questions WHERE exam_id=? AND is_active=TRUE ORDER BY id ASC";
+        String sql = "SELECT id, exam_id, question_text, correct_option_number, question_type FROM questions WHERE exam_id=? AND is_active=TRUE ORDER BY id ASC";
         List<Question> list = new ArrayList<>();
         OptionDAO optionDAO = new OptionDAO(); // For fetching options
         
@@ -71,7 +73,8 @@ public class QuestionDAO {
                             rs.getInt("id"),
                             rs.getInt("exam_id"),
                             rs.getString("question_text"),
-                            rs.getInt("correct_option_number")
+                            rs.getInt("correct_option_number"),
+                            rs.getString("question_type")
                     );
                     q.setOptions(optionDAO.getOptionsByQuestionId(q.getId()));
                     list.add(q);
@@ -84,7 +87,7 @@ public class QuestionDAO {
     }
 
     public Question getById(int id) {
-        String sql = "SELECT id, exam_id, question_text, correct_option_number FROM questions WHERE id=?";
+        String sql = "SELECT id, exam_id, question_text, correct_option_number, question_type FROM questions WHERE id=?";
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
@@ -95,7 +98,8 @@ public class QuestionDAO {
                             rs.getInt("id"),
                             rs.getInt("exam_id"),
                             rs.getString("question_text"),
-                            rs.getInt("correct_option_number")
+                            rs.getInt("correct_option_number"),
+                            rs.getString("question_type")
                     );
                     OptionDAO optionDAO = new OptionDAO();
                     q.setOptions(optionDAO.getOptionsByQuestionId(q.getId()));

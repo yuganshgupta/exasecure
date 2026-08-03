@@ -39,7 +39,7 @@ public class AdminService {
     }
 
     // --- Question Management ---
-    public boolean addQuestionWithOptions(int examId, String questionText, String[] optionsText, int correctOptionNumber) {
+    public boolean addQuestionWithOptions(int examId, String questionText, String[] optionsText, int correctOptionNumber, String questionType) {
         if (optionsText == null || optionsText.length == 0) return false;
         
         List<String> validOptions = new ArrayList<>();
@@ -52,7 +52,7 @@ public class AdminService {
         if (validOptions.size() < 2) return false; 
         if (correctOptionNumber > validOptions.size()) return false; 
 
-        int qId = questionDAO.addQuestion(examId, questionText, correctOptionNumber);
+        int qId = questionDAO.addQuestion(examId, questionText, correctOptionNumber, questionType);
         if (qId <= 0) return false;
 
         for (int i = 0; i < validOptions.size(); i++) {
@@ -78,8 +78,8 @@ public class AdminService {
         return optionDAO.updateOption(option);
     }
 
-    public boolean addQuestionToExam(int examId, String questionText, String[] optionsText, int correctOptionNumber) {
-        return addQuestionWithOptions(examId, questionText, optionsText, correctOptionNumber);
+    public boolean addQuestionToExam(int examId, String questionText, String[] optionsText, int correctOptionNumber, String questionType) {
+        return addQuestionWithOptions(examId, questionText, optionsText, correctOptionNumber, questionType);
     }
 
     public List<Question> getQuestionsForExam(int examId) {
@@ -117,12 +117,12 @@ public class AdminService {
 
 
 
-    public void saveStudentAnswer(int attemptId, int questionId, int optionNum, boolean correct) {
-        studentAnswerDAO.saveAnswer(attemptId, questionId, optionNum, correct, new java.sql.Timestamp(System.currentTimeMillis()));
+    public void saveStudentAnswer(int attemptId, int questionId, String optionsCsv, boolean correct) {
+        studentAnswerDAO.saveAnswer(attemptId, questionId, optionsCsv, correct, new java.sql.Timestamp(System.currentTimeMillis()));
     }
 
-    public int getStudentSelectedOption(int attemptId, int questionId) {
-        return studentAnswerDAO.getStudentSelectedOption(attemptId, questionId);
+    public List<Integer> getStudentSelectedOptions(int attemptId, int questionId) {
+        return studentAnswerDAO.getStudentSelectedOptions(attemptId, questionId);
     }
 
     public List<StudentAnswerDetail> getDetailedAnswers(int attemptId) {

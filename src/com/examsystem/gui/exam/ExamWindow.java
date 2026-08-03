@@ -43,8 +43,9 @@ public class ExamWindow extends JDialog {
     // UI Components
     private final JLabel timerLabel = new JLabel("Time: 00:00");
     private final JLabel questionLabel = new JLabel("Question text");
-    private final JRadioButton[] optionButtons = { new JRadioButton(), new JRadioButton(), new JRadioButton(), new JRadioButton() };
+    private final JPanel optionsPanel = new JPanel(); // NEW instance var
     private final ButtonGroup optionGroup = new ButtonGroup();
+    private final List<JToggleButton> dynamicOptionButtons = new java.util.ArrayList<>();
     private final JButton prevButton = new JButton("Previous");
     private final JButton nextButton = new JButton("Next");
     private final JButton submitEarlyButton = new JButton("Submit Early");
@@ -98,17 +99,8 @@ public class ExamWindow extends JDialog {
         questionLabel.setAlignmentX(Component.LEFT_ALIGNMENT); // Left align text
 
         // Changed from GridLayout to BoxLayout to prevent vertical stretching
-        JPanel optionsPanel = new JPanel();
         optionsPanel.setLayout(new BoxLayout(optionsPanel, BoxLayout.Y_AXIS));
         optionsPanel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        
-        for (JRadioButton rb : optionButtons) {
-            rb.setFont(optionFont);
-            optionGroup.add(rb);
-            optionsPanel.add(rb);
-            optionsPanel.add(Box.createVerticalStrut(15)); // Strict 15px gap between options
-            rb.addActionListener(e -> saveCurrentAnswer());
-        }
 
         // Add to inner container with strict spacing
         contentContainer.add(questionLabel);
@@ -261,38 +253,66 @@ public class ExamWindow extends JDialog {
         
         questionLabel.setText("<html><div style='width: 600px;'>Q" + (currentIndex + 1) + ": " + q.getQuestionText() + "</div></html>");
 
-        List<Option> opts = optionDAO.getOptionsByQuestionId(q.getId());
+        List<Option> opts = q.getOptions();
         optionGroup.clearSelection();
-        int savedSelection = studentAnswerDAO.getStudentSelectedOption(attemptId, q.getId());
+        optionsPanel.removeAll();
+        dynamicOptionButtons.clear();
+        
+        List<Integer> savedSelections = studentAnswerDAO.getStudentSelectedOptions(attemptId, q.getId());
+        Font optionFont = new Font("SansSerif", Font.PLAIN, 24);
+        
+        boolean isMulti = "MULTI".equals(q.getQuestionType());
 
-        for (int i = 0; i < 4; i++) {
-            if (i < opts.size()) {
-                optionButtons[i].setText("<html><div style='width: 600px;'>" + opts.get(i).getOptionText() + "</div></html>");
-                optionButtons[i].setVisible(true);
-                if ((i + 1) == savedSelection) {
-                    optionButtons[i].setSelected(true);
-                }
-            } else {
-                optionButtons[i].setVisible(false);
+        for (int i = 0; i < opts.size(); i++) {
+            JToggleButton btn = isMulti ? new JCheckBox() : new JRadioButton();
+            btn.setFont(optionFont);
+            btn.setText("<html><div style='width: 600px;'>" + opts.get(i).getOptionText() + "</div></html>");
+            if (!isMulti) {
+                optionGroup.add(btn);
             }
+            if (savedSelections.contains(i + 1)) {
+                btn.setSelected(true);
+            }
+            btn.addActionListener(e -> saveCurrentAnswer());
+            
+            dynamicOptionButtons.add(btn);
+            optionsPanel.add(btn);
+            optionsPanel.add(Box.createVerticalStrut(15));
         }
+        
+        optionsPanel.revalidate();
+        optionsPanel.repaint();
+
         prevButton.setEnabled(currentIndex > 0);
         nextButton.setText(currentIndex == questions.size() - 1 ? "Submit" : "Next");
     }
 
     private void saveCurrentAnswer() {
-        int selectedIndex = -1;
-        for (int i = 0; i < 4; i++) {
-            if (optionButtons[i].isVisible() && optionButtons[i].isSelected()) {
-                selectedIndex = i + 1;
-                break;
+        Question q = questions.get(currentIndex);
+        List<Integer> selectedOptions = new java.util.ArrayList<>();
+        
+        for (int i = 0; i < dynamicOptionButtons.size(); i++) {
+            if (dynamicOptionButtons.get(i).isSelected()) {
+                selectedOptions.add(i + 1);
             }
         }
         
-        if (selectedIndex != -1) {
-            Question q = questions.get(currentIndex);
-            boolean correct = (selectedIndex == q.getCorrectOptionNumber());
-            studentAnswerDAO.saveAnswer(attemptId, q.getId(), selectedIndex, correct, new Timestamp(System.currentTimeMillis()));
+        if (!selectedOptions.isEmpty()) {
+            boolean correct = false;
+            if ("MULTI".equals(q.getQuestionType())) {
+                List<Integer> correctOptions = new java.util.ArrayList<>();
+                for (int i = 0; i < q.getOptions().size(); i++) {
+                    if (q.getOptions().get(i).isCorrect()) {
+                        correctOptions.add(i + 1);
+                    }
+                }
+                correct = selectedOptions.containsAll(correctOptions) && correctOptions.containsAll(selectedOptions);
+            } else {
+                correct = selectedOptions.size() == 1 && selectedOptions.get(0) == q.getCorrectOptionNumber();
+            }
+            
+            String selectedCsv = String.join(",", selectedOptions.stream().map(String::valueOf).toArray(String[]::new));
+            studentAnswerDAO.saveAnswer(attemptId, q.getId(), selectedCsv, correct, new Timestamp(System.currentTimeMillis()));
         }
     }
 

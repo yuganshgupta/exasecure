@@ -25,6 +25,12 @@ public class DatabaseMigrator {
                 setVersion(conn, 2);
                 currentVersion = 2;
             }
+
+            if (currentVersion < 3) {
+                runV3Migration(conn);
+                setVersion(conn, 3);
+                currentVersion = 3;
+            }
             
             System.out.println("Database migration completed. Current version: " + currentVersion);
         } catch (SQLException e) {
@@ -97,6 +103,30 @@ public class DatabaseMigrator {
                     // Ignore duplicate column errors if they were already added in Phase 1
                     if (e.getMessage() != null && e.getMessage().contains("Duplicate column name")) {
                         System.out.println("Column already exists, skipping: " + sql);
+                    } else {
+                        throw e;
+                    }
+                }
+            }
+        }
+    }
+
+    private static void runV3Migration(Connection conn) throws SQLException {
+        String[] stmts = {
+            "ALTER TABLE questions ADD COLUMN question_type VARCHAR(20) DEFAULT 'SINGLE'",
+            "ALTER TABLE student_answers CHANGE selected_option_number selected_options VARCHAR(255)"
+        };
+        
+        try (Statement stmt = conn.createStatement()) {
+            for (String sql : stmts) {
+                try {
+                    stmt.execute(sql);
+                } catch (SQLException e) {
+                    if (e.getMessage() != null && e.getMessage().contains("Duplicate column name")) {
+                        System.out.println("Column already exists, skipping: " + sql);
+                    } else if (e.getMessage() != null && e.getMessage().contains("Unknown column")) {
+                        // This might happen if 'selected_option_number' was already renamed.
+                        System.out.println("Column might already be renamed, skipping: " + sql);
                     } else {
                         throw e;
                     }

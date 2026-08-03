@@ -12,24 +12,21 @@ import java.util.List;
 public class StudentAnswerDAO {
 
     // --- UPDATED: Upsert (Insert or Update) ---
-    public void saveAnswer(int attemptId, int questionId, int selectedOptionNumber, boolean isCorrect, Timestamp answerTimestamp) {
-        // This syntax works if you added the UNIQUE constraint.
-        // If not, it will just insert. Ideally, run the SQL command I provided.
-        String sql = "INSERT INTO student_answers (attempt_id, question_id, selected_option_number, is_correct, answer_timestamp) " +
+    public void saveAnswer(int attemptId, int questionId, String selectedOptions, boolean isCorrect, Timestamp answerTimestamp) {
+        String sql = "INSERT INTO student_answers (attempt_id, question_id, selected_options, is_correct, answer_timestamp) " +
                      "VALUES (?,?,?,?,?) " +
-                     "ON DUPLICATE KEY UPDATE selected_option_number=?, is_correct=?, answer_timestamp=?";
+                     "ON DUPLICATE KEY UPDATE selected_options=?, is_correct=?, answer_timestamp=?";
         
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, attemptId);
             ps.setInt(2, questionId);
-            ps.setInt(3, selectedOptionNumber);
+            ps.setString(3, selectedOptions);
             ps.setBoolean(4, isCorrect);
             ps.setTimestamp(5, answerTimestamp);
             
-            // Update part
-            ps.setInt(6, selectedOptionNumber);
+            ps.setString(6, selectedOptions);
             ps.setBoolean(7, isCorrect);
             ps.setTimestamp(8, answerTimestamp);
             
@@ -42,24 +39,35 @@ public class StudentAnswerDAO {
     }
 
     // --- NEW: Get single answer for navigation ---
-    public int getStudentSelectedOption(int attemptId, int questionId) {
-        String sql = "SELECT selected_option_number FROM student_answers WHERE attempt_id=? AND question_id=?";
+    public List<Integer> getStudentSelectedOptions(int attemptId, int questionId) {
+        String sql = "SELECT selected_options FROM student_answers WHERE attempt_id=? AND question_id=?";
+        List<Integer> selectedList = new ArrayList<>();
         try (Connection conn = DatabaseConnector.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
 
             ps.setInt(1, attemptId);
             ps.setInt(2, questionId);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) return rs.getInt("selected_option_number");
+                if (rs.next()) {
+                    String sel = rs.getString("selected_options");
+                    if (sel != null && !sel.isEmpty()) {
+                        String[] parts = sel.split(",");
+                        for (String p : parts) {
+                            try {
+                                selectedList.add(Integer.parseInt(p.trim()));
+                            } catch (NumberFormatException ignored) {}
+                        }
+                    }
+                }
             }
         } catch (SQLException e) {
-            System.err.println("StudentAnswerDAO.getStudentSelectedOption error: " + e.getMessage());
+            System.err.println("StudentAnswerDAO.getStudentSelectedOptions error: " + e.getMessage());
         }
-        return -1; // Not answered yet
+        return selectedList;
     }
 
     public List<StudentAnswer> getAnswersForAttemptOrderedByTimestamp(int attemptId) {
-        String sql = "SELECT id, attempt_id, question_id, selected_option_number, is_correct, answer_timestamp " +
+        String sql = "SELECT id, attempt_id, question_id, selected_options, is_correct, answer_timestamp " +
                      "FROM student_answers WHERE attempt_id=? ORDER BY answer_timestamp ASC";
         List<StudentAnswer> list = new ArrayList<>();
 
@@ -73,7 +81,7 @@ public class StudentAnswerDAO {
                             rs.getInt("id"),
                             rs.getInt("attempt_id"),
                             rs.getInt("question_id"),
-                            rs.getInt("selected_option_number"),
+                            rs.getString("selected_options"),
                             rs.getBoolean("is_correct"),
                             rs.getTimestamp("answer_timestamp")
                     ));
@@ -103,12 +111,11 @@ public class StudentAnswerDAO {
     public List<StudentAnswerDetail> getDetailedAnswers(int attemptId) {
         String sql = 
             "SELECT q.question_text, " +
-            "       o_selected.option_text AS selected_text, " +
+            "       sa.selected_options AS selected_text, " + // Use raw CSV string for now
             "       o_correct.option_text AS correct_text, " +
             "       sa.is_correct " +
             "FROM student_answers sa " +
             "JOIN questions q ON sa.question_id = q.id " +
-            "LEFT JOIN options o_selected ON (o_selected.question_id = q.id AND o_selected.option_number = sa.selected_option_number) " +
             "LEFT JOIN options o_correct ON (o_correct.question_id = q.id AND o_correct.option_number = q.correct_option_number) " +
             "WHERE sa.attempt_id = ? " +
             "ORDER BY sa.id ASC";

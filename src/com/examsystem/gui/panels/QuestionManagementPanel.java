@@ -19,9 +19,10 @@ public class QuestionManagementPanel extends JPanel {
     private final JTextArea newQuestionArea = new JTextArea(3, 40);
     private final JTextField[] newOptionFields = { new JTextField(20), new JTextField(20), new JTextField(20), new JTextField(20) };
     private final JComboBox<Integer> correctCombo = new JComboBox<>(new Integer[]{1,2,3,4});
+    private final JComboBox<String> typeCombo = new JComboBox<>(new String[]{"SINGLE", "MULTI"});
 
     private final DefaultTableModel model = new DefaultTableModel(
-            new Object[]{"ID", "Question Text", "Correct Option #"}, 0) {
+            new Object[]{"ID", "Type", "Question Text", "Correct Option #"}, 0) {
         @Override public boolean isCellEditable(int row, int column) { return false; }
     };
     private final JTable table = new JTable(model);
@@ -59,11 +60,14 @@ public class QuestionManagementPanel extends JPanel {
             addForm.add(newOptionFields[i], gbc);
         }
 
-        gbc.gridy = 3; gbc.gridx = 0; addForm.add(new JLabel("Correct:"), gbc);
-        gbc.gridx = 1; addForm.add(correctCombo, gbc);
+        gbc.gridy = 3; gbc.gridx = 0; addForm.add(new JLabel("Type:"), gbc);
+        gbc.gridx = 1; addForm.add(typeCombo, gbc);
+
+        gbc.gridy = 3; gbc.gridx = 2; addForm.add(new JLabel("Correct:"), gbc);
+        gbc.gridx = 3; addForm.add(correctCombo, gbc);
         
         JButton addBtn = new JButton("Add Question");
-        gbc.gridx = 2; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.EAST;
+        gbc.gridy = 4; gbc.gridx = 2; gbc.gridwidth = 2; gbc.anchor = GridBagConstraints.EAST;
         addForm.add(addBtn, gbc);
 
         topPanel.add(addForm, BorderLayout.CENTER);
@@ -107,7 +111,7 @@ public class QuestionManagementPanel extends JPanel {
 
         List<Question> questions = adminService.getQuestionsForExam(selected.id);
         for (Question q : questions) {
-            model.addRow(new Object[]{q.getId(), q.getQuestionText(), q.getCorrectOptionNumber()});
+            model.addRow(new Object[]{q.getId(), q.getQuestionType(), q.getQuestionText(), q.getCorrectOptionNumber()});
         }
     }
 
@@ -143,12 +147,15 @@ public class QuestionManagementPanel extends JPanel {
             return;
         }
 
-        boolean ok = adminService.addQuestionToExam(selected.id, qText, validOpts.toArray(new String[0]), correct);
+        String type = (String) typeCombo.getSelectedItem();
+
+        boolean ok = adminService.addQuestionToExam(selected.id, qText, validOpts.toArray(new String[0]), correct, type);
         if (ok) {
             JOptionPane.showMessageDialog(this, "Question added.", "Success", JOptionPane.INFORMATION_MESSAGE);
             newQuestionArea.setText("");
             for (JTextField f : newOptionFields) f.setText("");
             correctCombo.setSelectedIndex(0);
+            typeCombo.setSelectedIndex(0);
             loadQuestions();
         } else {
             JOptionPane.showMessageDialog(this, "Failed to add question.", "Error", JOptionPane.ERROR_MESSAGE);

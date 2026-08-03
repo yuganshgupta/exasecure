@@ -16,8 +16,8 @@ public class EditQuestionDialog extends JDialog {
     private boolean updated = false;
 
     private final JTextArea questionArea = new JTextArea(4, 40);
+    private final JComboBox<String> typeCombo = new JComboBox<>(new String[]{"SINGLE", "MULTI"});
     private final JPanel optionsPanel = new JPanel();
-    private final ButtonGroup correctGroup = new ButtonGroup();
     
     private final List<OptionRow> optionRows = new ArrayList<>();
 
@@ -28,10 +28,21 @@ public class EditQuestionDialog extends JDialog {
 
         setLayout(new BorderLayout(8, 8));
 
-        // Top: Question Text
+        // Top: Question Text & Type
         JPanel topPanel = new JPanel(new BorderLayout(5, 5));
         topPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 5, 10));
-        topPanel.add(new JLabel("Question Text:"), BorderLayout.NORTH);
+        
+        JPanel typePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+        typePanel.add(new JLabel("Type: "));
+        typeCombo.setSelectedItem(question.getQuestionType());
+        typePanel.add(typeCombo);
+        
+        JPanel labelAndTypePanel = new JPanel(new BorderLayout());
+        labelAndTypePanel.add(new JLabel("Question Text:"), BorderLayout.WEST);
+        labelAndTypePanel.add(typePanel, BorderLayout.EAST);
+        
+        topPanel.add(labelAndTypePanel, BorderLayout.NORTH);
+        
         questionArea.setText(question.getQuestionText());
         topPanel.add(new JScrollPane(questionArea), BorderLayout.CENTER);
         
@@ -76,7 +87,6 @@ public class EditQuestionDialog extends JDialog {
     private void addOptionRow(Option opt) {
         OptionRow row = new OptionRow(opt);
         optionRows.add(row);
-        correctGroup.add(row.radio);
         optionsPanel.add(row.panel);
     }
 
@@ -100,7 +110,7 @@ public class EditQuestionDialog extends JDialog {
                     JOptionPane.showMessageDialog(this, "Option text cannot be empty.", "Validation", JOptionPane.WARNING_MESSAGE);
                     return;
                 }
-                if (row.radio.isSelected()) {
+                if (row.check.isSelected()) {
                     correctCount++;
                     newCorrectOptionNumber = i + 1;
                 }
@@ -111,13 +121,19 @@ public class EditQuestionDialog extends JDialog {
             JOptionPane.showMessageDialog(this, "Must have at least 2 active options.", "Validation", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        if (correctCount != 1) {
-            JOptionPane.showMessageDialog(this, "Must select exactly one correct option.", "Validation", JOptionPane.WARNING_MESSAGE);
+        
+        String selectedType = (String) typeCombo.getSelectedItem();
+        if ("SINGLE".equals(selectedType) && correctCount != 1) {
+            JOptionPane.showMessageDialog(this, "SINGLE questions must have exactly one correct option.", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        } else if ("MULTI".equals(selectedType) && correctCount < 1) {
+            JOptionPane.showMessageDialog(this, "MULTI questions must have at least one correct option.", "Validation", JOptionPane.WARNING_MESSAGE);
             return;
         }
 
         // Update Question
         question.setQuestionText(qText);
+        question.setQuestionType(selectedType);
         question.setCorrectOptionNumber(newCorrectOptionNumber);
         
         if (!adminService.updateQuestion(question)) {
@@ -134,7 +150,7 @@ public class EditQuestionDialog extends JDialog {
                 }
             } else {
                 row.option.setOptionText(row.field.getText().trim());
-                row.option.setCorrect(row.radio.isSelected());
+                row.option.setCorrect(row.check.isSelected());
                 // We keep the original optionNumber to maintain history order if desired, or we can rewrite them.
                 // For now, just update text and is_correct.
                 if (row.option.getId() > 0) {
@@ -165,7 +181,7 @@ public class EditQuestionDialog extends JDialog {
         Option option;
         JPanel panel;
         JTextField field;
-        JRadioButton radio;
+        JCheckBox check;
         JButton deleteBtn;
         boolean isDeleted = false;
 
@@ -174,8 +190,8 @@ public class EditQuestionDialog extends JDialog {
             panel = new JPanel(new BorderLayout(5, 5));
             panel.setBorder(BorderFactory.createEmptyBorder(2, 0, 2, 0));
             
-            radio = new JRadioButton();
-            radio.setSelected(opt.isCorrect());
+            check = new JCheckBox();
+            check.setSelected(opt.isCorrect());
             
             field = new JTextField(opt.getOptionText(), 30);
             
@@ -186,13 +202,10 @@ public class EditQuestionDialog extends JDialog {
             deleteBtn.addActionListener(e -> {
                 isDeleted = true;
                 panel.setVisible(false);
-                if (radio.isSelected()) {
-                    correctGroup.clearSelection();
-                }
             });
 
             JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-            left.add(radio);
+            left.add(check);
             left.add(new JLabel(" Opt: "));
             
             panel.add(left, BorderLayout.WEST);
