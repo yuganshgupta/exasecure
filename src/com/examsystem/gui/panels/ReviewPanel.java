@@ -47,6 +47,9 @@ public class ReviewPanel extends JPanel {
         top.add(refreshExamsBtn);
         top.add(loadBtn);
         
+        JButton exportBtn = new JButton("Export to CSV");
+        top.add(exportBtn);
+        
         // Filter Bar
         top.add(new JSeparator(SwingConstants.VERTICAL));
         top.add(new JLabel("Filter Date:"));
@@ -81,6 +84,7 @@ public class ReviewPanel extends JPanel {
         deleteBtn.addActionListener(e -> onDelete());
         statsBtn.addActionListener(e -> onShowStats());
         evidenceBtn.addActionListener(e -> onViewScreenshots()); // Link button
+        exportBtn.addActionListener(e -> onExportCsv());
 
         // Double Click Listener
         summaryTable.addMouseListener(new MouseAdapter() {
@@ -263,6 +267,40 @@ public class ReviewPanel extends JPanel {
                             JOptionPane.showMessageDialog(ReviewPanel.this, "Failed to delete.");
                         }
                     } catch(Exception ex) {}
+                }
+            };
+            worker.execute();
+        }
+    }
+
+    private void onExportCsv() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Save CSV Report");
+        fileChooser.setSelectedFile(new java.io.File("exam_results_report.csv"));
+        
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            java.io.File dest = fileChooser.getSelectedFile();
+            
+            ExamItem item = (ExamItem) examCombo.getSelectedItem();
+            Integer examId = (item != null && item.id != -1) ? item.id : null;
+            
+            SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
+                @Override
+                protected Void doInBackground() throws Exception {
+                    com.examsystem.dao.ExamAttemptDAO dao = new com.examsystem.dao.ExamAttemptDAO();
+                    java.util.List<String[]> data = dao.getExportableResults(examId);
+                    com.examsystem.utils.CsvExporter.exportAttemptReport(data, dest);
+                    return null;
+                }
+                
+                @Override
+                protected void done() {
+                    try {
+                        get(); // Check for exceptions
+                        JOptionPane.showMessageDialog(ReviewPanel.this, "Export successful!", "Success", JOptionPane.INFORMATION_MESSAGE);
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(ReviewPanel.this, "Export failed: " + ex.getCause().getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                    }
                 }
             };
             worker.execute();

@@ -31,15 +31,27 @@ public class StudentDashboard extends JFrame {
         setSize(900, 600);
         setLocationRelativeTo(null);
         setLayout(new BorderLayout());
+        
+        JTabbedPane tabbedPane = new JTabbedPane();
 
+        // --- Tab 1: Available Exams (Existing functionality) ---
+        JPanel examsPanel = new JPanel(new BorderLayout());
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JButton refreshBtn = new JButton("Refresh");
         JButton takeBtn = new JButton("Take Exam");
         top.add(refreshBtn);
         top.add(takeBtn);
 
-        add(top, BorderLayout.NORTH);
-        add(new JScrollPane(table), BorderLayout.CENTER);
+        examsPanel.add(top, BorderLayout.NORTH);
+        examsPanel.add(new JScrollPane(table), BorderLayout.CENTER);
+        
+        tabbedPane.addTab("Available Exams", examsPanel);
+
+        // --- Tab 2: My History ---
+        com.examsystem.gui.panels.StudentHistoryPanel historyPanel = new com.examsystem.gui.panels.StudentHistoryPanel(student);
+        tabbedPane.addTab("My History", historyPanel);
+
+        add(tabbedPane, BorderLayout.CENTER);
 
         refreshBtn.addActionListener(e -> loadExams());
         takeBtn.addActionListener(e -> onTakeExam());

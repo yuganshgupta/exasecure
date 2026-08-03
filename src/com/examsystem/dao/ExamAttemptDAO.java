@@ -238,4 +238,179 @@ public class ExamAttemptDAO {
         }
         return 0; // Default to 0 if there's an error
     }
+
+    // --- PHASE 4: STUDENT HISTORY ---
+
+    public static class ExamAttemptSummary {
+        private int attemptId;
+        private String examTitle;
+        private int score;
+        private int maxScore;
+        private double percentage;
+        private String status;
+        private Timestamp submittedAt;
+
+        public ExamAttemptSummary(int attemptId, String examTitle, int score, int maxScore, double percentage, String status, Timestamp submittedAt) {
+            this.attemptId = attemptId;
+            this.examTitle = examTitle;
+            this.score = score;
+            this.maxScore = maxScore;
+            this.percentage = percentage;
+            this.status = status;
+            this.submittedAt = submittedAt;
+        }
+
+        public int getAttemptId() { return attemptId; }
+        public String getExamTitle() { return examTitle; }
+        public int getScore() { return score; }
+        public int getMaxScore() { return maxScore; }
+        public double getPercentage() { return percentage; }
+        public String getStatus() { return status; }
+        public Timestamp getSubmittedAt() { return submittedAt; }
+    }
+
+    public static class QuestionDetailReport {
+        private String questionText;
+        private String studentAnswer;
+        private String correctAnswer;
+        private int pointsAwarded;
+
+        public QuestionDetailReport(String questionText, String studentAnswer, String correctAnswer, int pointsAwarded) {
+            this.questionText = questionText;
+            this.studentAnswer = studentAnswer;
+            this.correctAnswer = correctAnswer;
+            this.pointsAwarded = pointsAwarded;
+        }
+
+        public String getQuestionText() { return questionText; }
+        public String getStudentAnswer() { return studentAnswer; }
+        public String getCorrectAnswer() { return correctAnswer; }
+        public int getPointsAwarded() { return pointsAwarded; }
+    }
+
+    public List<ExamAttemptSummary> getAttemptsByUserId(int userId) {
+        String sql = 
+            "SELECT ea.id AS attempt_id, e.title AS exam_title, IFNULL(ea.score, 0) AS score, " +
+            "       (SELECT COUNT(*) FROM questions q WHERE q.exam_id = e.id AND q.is_active = TRUE) AS max_score, " +
+            "       ea.end_time AS submitted_at " +
+            "FROM exam_attempts ea " +
+            "JOIN exams e ON ea.exam_id = e.id " +
+            "WHERE ea.student_id = ? " +
+            "ORDER BY ea.end_time DESC";
+
+        List<ExamAttemptSummary> list = new ArrayList<>();
+        try (Connection conn = DatabaseConnector.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, userId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int attemptId = rs.getInt("attempt_id");
+                    String title = rs.getString("exam_title");
+                    int score = rs.getInt("score");
+                    int maxScore = rs.getInt("max_score");
+                    Timestamp submitted = rs.getTimestamp("submitted_at");
+
+                    if (submitted == null) continue; // Skip unsubmitted attempts
+
+                    double pct = maxScore > 0 ? ((double) score / maxScore) * 100 : 0.0;
+                    String status = pct >= 50.0 ? "PASS" : "FAIL";
+
+                    list.add(new ExamAttemptSummary(attemptId, title, score, maxScore, pct, status, submitted));
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("ExamAttemptDAO.getAttemptsByUserId error: " + e.getMessage());
+        }
+        return list;
+    }
+
+    public List<QuestionDetailReport> getAttemptDetails(int attemptId) {
+        String sql = 
+            "SELECT q.question_text, " +
+            "       sa.selected_options AS selected_text, " +
+            "       (SELECT GROUP_CONCAT(o.option_text ORDER BY o.option_number SEPARATOR ', ') " +
+            "        FROM options o WHERE o.question_id = q.id AND o.is_correct = TRUE AND o.is_active = TRUE" +
+            "       ) AS correct_text, " +
+            "       sa.is_correct " +
+            "FROM student_answers sa " +
+            "JOIN questions q ON sa.question_id = q.id " +
+            "WHERE sa.attempt_id = ? " +
+            "ORDER BY sa.id ASC";
+
+        List<QuestionDetailReport> list = new ArrayList<>();
+        try (Connection conn = DatabaseConnector.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+
+            ps.setInt(1, attemptId);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String qText = rs.getString("question_text");
+                    String sText = rs.getString("selected_text");
+                    String cText = rs.getString("correct_text");
+                    boolean isCorrect = rs.getBoolean("is_correct");
+
+                    list.add(new QuestionDetailReport(qText, sText, cText, isCorrect ? 1 : 0));
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("ExamAttemptDAO.getAttemptDetails error: " + e.getMessage());
+        }
+        return list;
+    }
+
+    public List<String[]> getExportableResults(Integer examId) {
+        StringBuilder sql = new StringBuilder(
+            "SELECT ea.id AS attempt_id, u.username, u.full_name, e.title AS exam_title, IFNULL(ea.score, 0) AS score, " +
+            "       (SELECT COUNT(*) FROM questions q WHERE q.exam_id = e.id AND q.is_active = TRUE) AS max_score, " +
+            "       ea.end_time AS submitted_at " +
+            "FROM exam_attempts ea " +
+            "JOIN exams e ON ea.exam_id = e.id " +
+            "JOIN users u ON ea.student_id = u.id " +
+            "WHERE ea.end_time IS NOT NULL "
+        );
+
+        if (examId != null) {
+            sql.append("AND ea.exam_id = ? ");
+        }
+        sql.append("ORDER BY ea.end_time DESC");
+
+        List<String[]> results = new ArrayList<>();
+        try (Connection conn = DatabaseConnector.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql.toString())) {
+
+            if (examId != null) {
+                ps.setInt(1, examId);
+            }
+
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int attemptId = rs.getInt("attempt_id");
+                    String username = rs.getString("username");
+                    String fullName = rs.getString("full_name");
+                    String title = rs.getString("exam_title");
+                    int score = rs.getInt("score");
+                    int maxScore = rs.getInt("max_score");
+                    Timestamp submitted = rs.getTimestamp("submitted_at");
+
+                    double pct = maxScore > 0 ? ((double) score / maxScore) * 100 : 0.0;
+                    String pctStr = String.format("%.2f", pct) + "%";
+
+                    results.add(new String[]{
+                        String.valueOf(attemptId),
+                        username,
+                        fullName,
+                        title,
+                        String.valueOf(score),
+                        String.valueOf(maxScore),
+                        pctStr,
+                        submitted.toString()
+                    });
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("ExamAttemptDAO.getExportableResults error: " + e.getMessage());
+        }
+        return results;
+    }
 }
