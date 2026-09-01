@@ -1,338 +1,141 @@
-# 🎓 Secure Examination System
+# ExaSecure 1.0
 
-A desktop-based examination platform built using **Core Java, Swing, and JDBC**. The application provides a complete environment for conducting examinations with separate administrator and student interfaces, direct MySQL integration, automated evaluation, and basic proctoring capabilities.
+ExaSecure is a desktop examination system built with Java 17, Swing/AWT, JDBC,
+and MySQL. Version 1.0 provides separate administrator and student interfaces,
+timed examinations, automatic scoring, result review, CSV export, and basic
+focus-loss proctoring.
 
-This project was developed to demonstrate strong fundamentals in **Object-Oriented Programming, GUI development, database design, and software architecture** without relying on external frameworks.
+## Requirements
 
----
+- Windows 10 or 11 for the supported automated setup
+- JDK 17 or newer (a JDK is required, not only a JRE)
+- MySQL Server 8.x
+- PowerShell 5.1 or newer
+- Maven 3.9+ only when building through `pom.xml`
 
-# Features
+The application is compiled for Java 17. Its UI uses Java Swing; no browser or
+web server is required.
 
-## Authentication & User Management
+## Install and run on Windows
 
-- Secure login system for users
-- Role-based access control
-  - Administrator
-  - Student
-- User management interface for administrators
+1. Download `ExaSecure-1.0.0-windows.zip` from the GitHub Release and extract it.
+2. Open PowerShell in the extracted directory.
+3. Run the setup:
 
----
+   ```powershell
+   .\setup.ps1
+   ```
 
-## Examination Management
+4. Save the generated `demo_admin` and `demo_student` passwords shown at the
+   end of setup.
+5. Start the application:
 
-Administrators can:
+   ```powershell
+   java -jar .\ExaSecure.jar
+   ```
 
-- Create new exams
-- Add multiple-choice questions
-- Manage question banks
-- Configure examination details
-- Review submitted examinations
+The setup script installs or upgrades the local schema, creates a restricted
+application database account, writes an ignored `db.properties` file, creates
+demo users with BCrypt password hashes, and validates the connection and login
+path. It does not store database or demo-user passwords in Git.
 
-Students can:
+For setup options and troubleshooting, run:
 
-- View available exams
-- Attempt examinations
-- Navigate between questions
-- Submit examinations manually
-- Automatically submit when time expires
-
----
-
-## Real-Time Examination System
-
-- Countdown timer for each examination
-- Automatic submission on timeout
-- Question navigation
-- Option selection
-- Answer persistence during the examination
-
----
-
-## Result Processing
-
-- Automatic answer evaluation
-- Score calculation
-- Attempt history
-- Review submitted answers
-- Performance statistics
-
----
-
-## Proctoring System
-
-The application includes a lightweight desktop proctoring system.
-
-Features include:
-
-- Window focus detection
-- Violation logging
-- Timestamp recording
-- Screenshot capture during violations
-- Proctor log viewer for administrators
-
-Captured screenshots are stored locally for later review.
-
----
-
-## Database Integration
-
-- MySQL database backend
-- JDBC connectivity
-- DAO (Data Access Object) architecture
-- CRUD operations
-- Separation of business logic and persistence layer
-
----
-
-# Technology Stack
-
-| Category | Technology |
-|-----------|------------|
-| Language | Java SE |
-| GUI | Java Swing & AWT |
-| Database | MySQL |
-| Connectivity | JDBC |
-| Architecture | DAO Pattern |
-| IDE | IntelliJ IDEA / Eclipse / VS Code |
-
----
-
-# Project Structure
-
-```
-SecureExaminationSystem/
-│
-├── dao/
-│   ├── UserDAO.java
-│   ├── ExamDAO.java
-│   ├── QuestionDAO.java
-│   ├── OptionDAO.java
-│   ├── StudentAnswerDAO.java
-│   └── ExamAttemptDAO.java
-│
-├── db/
-│   ├── DatabaseConnector.java
-│   └── TestDBConnection.java
-│
-├── gui/
-│   ├── dialogs/
-│   ├── exam/
-│   ├── panels/
-│   ├── proctor_logs/
-│   ├── LoginWindow.java
-│   └── StudentDashboard.java
-│
-├── models/
-│
-├── services/
-│
-└── Main.java
+```powershell
+Get-Help .\setup.ps1 -Detailed
 ```
 
----
+## Run from a source checkout
 
-# Architecture
+The repository includes the two runtime libraries in `lib/` only in local
+development environments; JAR files are intentionally ignored by Git. Run
+`setup.ps1` to validate or download the pinned dependencies, configure MySQL,
+and build the source before launching:
 
-The project follows a layered architecture.
-
-```
-Presentation Layer (Swing GUI)
-            │
-            ▼
-Business Services
-            │
-            ▼
-DAO Layer
-            │
-            ▼
-JDBC
-            │
-            ▼
-MySQL Database
+```powershell
+.\setup.ps1
+.\run_onwindows.bat
 ```
 
-This separation improves maintainability and keeps database operations independent of the user interface.
+`db.properties.example` documents the required configuration keys. Never
+commit the generated `db.properties` file.
 
----
+## Build
 
-# Database
-
-The application uses MySQL for persistent storage.
-
-Typical entities include:
-
-- Users
-- Exams
-- Questions
-- Options
-- Student Answers
-- Exam Attempts
-- Proctor Logs
-
----
-
-# Setup
-
-## 1. Clone the repository
+The reproducible Maven build downloads dependencies and creates one executable
+JAR containing the application, MySQL Connector/J, and BCrypt:
 
 ```bash
-git clone https://github.com/your-username/secure-examination-system.git
-cd secure-examination-system
+mvn clean package
+java -jar target/exasecure-1.0.0.jar
 ```
 
----
-
-## 2. Configure MySQL
-
-Create a MySQL database.
-
-Example:
-
-```sql
-CREATE DATABASE exam_system;
-```
-
-Import your SQL schema.
+Verify the packaged version and database readiness without opening Swing:
 
 ```bash
-mysql -u root -p exam_system < database.sql
+java -jar target/exasecure-1.0.0.jar --version
+java -jar target/exasecure-1.0.0.jar --check
 ```
 
----
+The resulting bytecode targets Java 17. On a prepared local checkout, the
+platform scripts provide a Maven-free alternative:
 
-## 3. Configure Database Credentials
-
-Update the database credentials inside:
-
+```powershell
+.\build_jar.bat
 ```
-db/DatabaseConnector.java
-```
-
-or configure them using environment variables if your project has been updated to support them.
-
-Example:
-
-```java
-URL = jdbc:mysql://localhost:3306/exam_system
-USERNAME = root
-PASSWORD = your_password
-```
-
----
-
-## 4. Add MySQL JDBC Driver
-
-Download MySQL Connector/J and add it to your project's classpath.
-
----
-
-## 5. Compile
-
-macOS / Linux
 
 ```bash
-javac -cp ".:mysql-connector-j.jar" $(find . -name "*.java")
+./build_jar.sh
 ```
 
-Windows
+Both scripts write `dist/exasecure-1.0.0.jar` and require the dependency JARs
+under `lib/`.
 
-```cmd
-dir /s /b *.java > sources.txt
-javac -cp ".;mysql-connector-j.jar" @sources.txt
-del sources.txt
+## Main features
+
+- BCrypt-backed login and role-specific administrator/student screens
+- User, exam, question, and option management
+- Single-choice and multiple-choice questions
+- Timed attempts with automatic submission and scoring
+- Previous/next navigation with answer persistence
+- Student attempt history and detailed answer review
+- Administrator result review, statistics, and CSV export
+- Focus-loss counting, timestamps, and optional screenshot evidence
+- Background database operations through `SwingWorker` to keep the UI responsive
+
+## Project layout
+
+```text
+src/com/examsystem/
+  dao/            JDBC data access
+  db/             connection and schema verification
+  gui/            Swing windows, dialogs, and panels
+  models/         domain models
+  services/       application services
+  setup/          setup-only verification helpers
+  Main.java       application entry point
+setup/sql/        canonical MySQL schema
+setup.ps1         supported Windows setup
+pom.xml           reproducible release build
 ```
 
----
+## Database notes
 
-## 6. Run
+The runtime application verifies schema version 3 and deliberately performs no
+DDL with its restricted database account. Use `setup.ps1` for installation,
+upgrade, repair, credential rotation, or reset operations. `database.sql` is a
+non-destructive MySQL CLI convenience entry point for the canonical schema; the
+PowerShell setup remains the supported complete installation path.
 
-```bash
-java Main
-```
+## Security scope
 
----
+ExaSecure 1.0 is a security-aware educational desktop application, not a
+production or high-stakes remote-exam platform. The Java client connects
+directly to a local MySQL database, and proctoring is limited to desktop focus
+events and screenshots. Production deployment would require a trusted server
+API, server-side authorization and grading, transport security, audit controls,
+identity recovery, rate limiting, privacy controls, and a formal threat model.
 
-# Application Workflow
+## License
 
-```
-Login
-   │
-   ├──────────────┐
-   │              │
-Admin         Student
-   │              │
-Manage      Select Exam
-Users            │
-Exams            │
-Questions        │
-   │         Start Exam
-   │              │
-Review       Timer Running
-Attempts          │
-                  │
-         Window Focus Detection
-                  │
-          Violation Logging
-                  │
-          Submit Examination
-                  │
-          Automatic Evaluation
-                  │
-            Store in Database
-```
-
----
-
-# Highlights
-
-- Desktop-based examination platform
-- Object-Oriented Design
-- Modular architecture
-- Swing-based graphical interface
-- JDBC database connectivity
-- DAO design pattern
-- Role-based access
-- Automated evaluation
-- Window-focus proctoring
-- Screenshot-based violation recording
-- Responsive UI using SwingWorker
-
----
-
-# Future Improvements
-
-Possible enhancements include:
-
-- Password hashing
-- Email notifications
-- Online examination support
-- Webcam-based AI proctoring
-- Face recognition
-- Question randomization
-- Export results to PDF
-- CSV report generation
-- Exam scheduling
-- Analytics dashboard
-
----
-
-# Learning Outcomes
-
-This project strengthened practical knowledge of:
-
-- Core Java
-- Object-Oriented Programming
-- Swing GUI development
-- Event-driven programming
-- JDBC
-- MySQL
-- DAO Pattern
-- Layered software architecture
-- Multithreading using SwingWorker
-- Desktop application development
-
----
-
-# License
-
-This project is intended for educational and portfolio purposes.
+Licensed under the Apache License 2.0. See [LICENSE](LICENSE).

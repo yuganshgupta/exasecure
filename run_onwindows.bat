@@ -28,24 +28,70 @@ echo Lib dir      : %LIB%
 echo.
 
 REM ------------------------------------------------------------
-REM  Check Java availability
+REM  Resolve Java (PATH, explicit/local JAVA_HOME, then common JDK folders)
 REM ------------------------------------------------------------
-javac -version >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] javac not found. Install JDK and ensure it's on PATH.
-  pause
-  exit /b 1
+set "JAVAC_CMD="
+set "JAVA_CMD="
+
+for /f "delims=" %%J in ('where javac.exe 2^>nul') do (
+  if not defined JAVAC_CMD set "JAVAC_CMD=%%~fJ"
 )
-java -version >nul 2>nul
-if errorlevel 1 (
-  echo [ERROR] java runtime not found. Install JDK/JRE and ensure it's on PATH.
+
+if not defined JAVAC_CMD if defined EXASECURE_JAVA_HOME (
+  if exist "%EXASECURE_JAVA_HOME%\bin\javac.exe" set "JAVAC_CMD=%EXASECURE_JAVA_HOME%\bin\javac.exe"
+)
+if not defined JAVAC_CMD if defined JAVA_HOME (
+  if exist "%JAVA_HOME%\bin\javac.exe" set "JAVAC_CMD=%JAVA_HOME%\bin\javac.exe"
+)
+
+if not defined JAVAC_CMD (
+  for /d %%D in ("%ProgramFiles%\Eclipse Adoptium\jdk-*") do (
+    if exist "%%~fD\bin\javac.exe" set "JAVAC_CMD=%%~fD\bin\javac.exe"
+  )
+)
+if not defined JAVAC_CMD (
+  for /d %%D in ("%ProgramFiles%\Java\jdk-*") do (
+    if exist "%%~fD\bin\javac.exe" set "JAVAC_CMD=%%~fD\bin\javac.exe"
+  )
+)
+if not defined JAVAC_CMD (
+  for /d %%D in ("%ProgramFiles%\Microsoft\jdk-*") do (
+    if exist "%%~fD\bin\javac.exe" set "JAVAC_CMD=%%~fD\bin\javac.exe"
+  )
+)
+
+if not defined JAVAC_CMD (
+  echo [ERROR] javac not found. Install a JDK or set JAVA_HOME.
   pause
   exit /b 1
 )
 
+for %%D in ("!JAVAC_CMD!") do set "JAVA_CMD=%%~dpDjava.exe"
+if not exist "!JAVA_CMD!" (
+  echo [ERROR] java.exe was not found beside "!JAVAC_CMD!".
+  pause
+  exit /b 1
+)
+
+"!JAVAC_CMD!" -version >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] The resolved javac executable could not run: "!JAVAC_CMD!"
+  pause
+  exit /b 1
+)
+"!JAVA_CMD!" -version >nul 2>nul
+if errorlevel 1 (
+  echo [ERROR] The resolved java executable could not run: "!JAVA_CMD!"
+  pause
+  exit /b 1
+)
+echo Java compiler : !JAVAC_CMD!
+echo Java runtime  : !JAVA_CMD!
+echo.
+
 REM ------------------------------------------------------------
 REM  Detect MySQL Connector/J automatically (or pass as %1)
-REM  You can run: run_gui.bat mysql-connector-j-9.5.0.jar
+REM  You can run: run_onwindows.bat mysql-connector-j-9.5.0.jar
 REM ------------------------------------------------------------
 set "MYSQL_ARG=%~1"
 set "MYSQL_JAR_FULL="
@@ -97,7 +143,7 @@ REM ------------------------------------------------------------
 REM  Compile
 REM ------------------------------------------------------------
 echo [INFO] Compiling...
-javac -encoding UTF-8 -cp ".;%LIB%\*" -d "%BIN%" @%SRC_LIST%
+"!JAVAC_CMD!" --release 17 -encoding UTF-8 -cp ".;%LIB%\*" -d "%BIN%" "@%SRC_LIST%"
 if errorlevel 1 (
   echo.
   echo [ERROR] Compilation failed. See messages above.
@@ -114,7 +160,7 @@ REM  Run
 REM ------------------------------------------------------------
 echo [INFO] Launching GUI...
 echo.
-java -cp "%BIN%;%LIB%\*" %MAIN_CLASS%
+"!JAVA_CMD!" -cp "%BIN%;%LIB%\*" %MAIN_CLASS%
 set "EXITCODE=%ERRORLEVEL%"
 
 echo.

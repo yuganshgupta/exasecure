@@ -72,3 +72,12 @@ tempCodeRunnerFile.sh
 # =========================
 memory.md
 fix_catch.ps1
+
+# =========================
+# Private Local Documentation
+# =========================
+/WINDOWS_SETUP.md
+/PROJECT_DOCUMENTATION.md
+
+# Local setup reset backups and recovery artifacts
+/.setup-local/
