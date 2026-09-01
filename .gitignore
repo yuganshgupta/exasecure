@@ -81,3 +81,21 @@ fix_catch.ps1
 
 # Local setup reset backups and recovery artifacts
 /.setup-local/
+# Build output
+target/
+
+# Local logs
+debug.log
+*.log
+
+# Private project coordination
+AGENTS.md
+PLAN.md
+HANDOFF.md
+memory.md
+
+# VS Code / Eclipse / JDT local project state
+.vscode/
+.project
+.classpath
+.settings/
