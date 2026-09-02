@@ -3,6 +3,7 @@ package com.examsystem.server;
 import com.examsystem.application.ports.ClockPort;
 import com.examsystem.application.ports.PasswordEncoder;
 import com.examsystem.application.usecases.AuthenticateUserUseCase;
+import com.examsystem.application.usecases.AdminUserMutationUseCase;
 import com.examsystem.application.usecases.StartExamUseCase;
 import com.examsystem.application.usecases.SubmitExamUseCase;
 import com.examsystem.server.adapters.crypto.BCryptPasswordEncoder;
@@ -48,18 +49,21 @@ public class ExaSecureServer {
         JdbcExamRepository examRepository = new JdbcExamRepository(dataSource);
         SessionManager sessionManager = new SessionManager(dataSource);
         JdbcProctorRepository proctorRepository = new JdbcProctorRepository(dataSource);
+        JdbcAdminUserMutationPort adminUserMutationPort = new JdbcAdminUserMutationPort(dataSource);
 
         // Use Cases
         AuthenticateUserUseCase authUseCase = new AuthenticateUserUseCase(userRepository, passwordEncoder);
         StartExamUseCase startUseCase = new StartExamUseCase(attemptRepository, clockPort);
         SubmitExamUseCase submitUseCase = new SubmitExamUseCase(answerRepository, attemptRepository, questionRepository, proctorRepository, clockPort);
+        AdminUserMutationUseCase adminUserMutationUseCase =
+                new AdminUserMutationUseCase(adminUserMutationPort, passwordEncoder);
 
         // Controllers
         com.examsystem.application.ports.AdminQueryPort adminQueryPort = new com.examsystem.server.adapters.jdbc.JdbcAdminQueryPort(dataSource);
         com.examsystem.application.ports.StudentQueryPort studentQueryPort = new com.examsystem.server.adapters.jdbc.JdbcStudentQueryPort(dataSource);
         AuthController authController = new AuthController(authUseCase, sessionManager);
         StudentExamController studentController = new StudentExamController(startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, studentQueryPort);
-        AdminController adminController = new AdminController(adminQueryPort);
+        AdminController adminController = new AdminController(adminQueryPort, adminUserMutationUseCase);
         AuthMiddleware authMiddleware = new AuthMiddleware(sessionManager);
 
         // App init
@@ -85,6 +89,9 @@ public class ExaSecureServer {
                     
                     io.javalin.apibuilder.ApiBuilder.path("/admin", () -> {
                         io.javalin.apibuilder.ApiBuilder.get("/users", adminController::listUsers);
+                        io.javalin.apibuilder.ApiBuilder.post("/users", adminController::createUser);
+                        io.javalin.apibuilder.ApiBuilder.put("/users/{userId}", adminController::updateUser);
+                        io.javalin.apibuilder.ApiBuilder.delete("/users/{userId}", adminController::deactivateUser);
                         io.javalin.apibuilder.ApiBuilder.get("/exams", adminController::listExams);
                         io.javalin.apibuilder.ApiBuilder.get("/exams/{examId}/attempts", adminController::getAttemptHistory);
                         io.javalin.apibuilder.ApiBuilder.get("/attempts/{attemptId}/events", adminController::getProctorEvents);

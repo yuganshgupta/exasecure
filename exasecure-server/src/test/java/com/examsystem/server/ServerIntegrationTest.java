@@ -2,6 +2,7 @@ package com.examsystem.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.examsystem.server.config.AppConfig;
+import org.mindrot.jbcrypt.BCrypt;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -166,6 +167,119 @@ class ServerIntegrationTest {
         assertThat(downloadResponse.headers().firstValue("Content-Type"))
                 .hasValueSatisfying(value -> assertThat(value).startsWith("image/png"));
         assertThat(downloadResponse.body()).containsExactly(screenshot);
+    }
+
+    @Test
+    void adminUserMutationsHashPasswordsRevokeSessionsAndSoftDeactivate() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        String createBody = """
+                {
+                  "username": "api-student",
+                  "password": "initial-password",
+                  "fullName": "API Student",
+                  "enrollmentNumber": "API-001",
+                  "section": "C",
+                  "role": "STUDENT"
+                }
+                """;
+
+        HttpResponse<String> forbiddenCreate = sendJson(
+                client, "POST", "/api/v1/admin/users", "token-stu1", createBody);
+        assertThat(forbiddenCreate.statusCode()).isEqualTo(403);
+
+        HttpResponse<String> createResponse = sendJson(
+                client, "POST", "/api/v1/admin/users", "token-admin1", createBody);
+        assertThat(createResponse.statusCode()).isEqualTo(201);
+        int userId = new ObjectMapper().readTree(createResponse.body()).required("id").asInt();
+        assertUserPassword(userId, "api-student", "initial-password", true);
+
+        HttpResponse<String> duplicateResponse = sendJson(
+                client, "POST", "/api/v1/admin/users", "token-admin1", createBody);
+        assertThat(duplicateResponse.statusCode()).isEqualTo(409);
+
+        insertSession("token-api-student-before-update", userId);
+        String updateBody = """
+                {
+                  "username": "api-student-updated",
+                  "password": "replacement-password",
+                  "fullName": "Updated API Student",
+                  "enrollmentNumber": "API-002",
+                  "section": "D",
+                  "role": "STUDENT"
+                }
+                """;
+        HttpResponse<String> updateResponse = sendJson(
+                client, "PUT", "/api/v1/admin/users/" + userId, "token-admin1", updateBody);
+        assertThat(updateResponse.statusCode()).isEqualTo(204);
+        assertUserPassword(userId, "api-student-updated", "replacement-password", true);
+        assertSessionMissing("token-api-student-before-update");
+
+        insertSession("token-api-student-before-delete", userId);
+        HttpResponse<String> deleteResponse = sendJson(
+                client, "DELETE", "/api/v1/admin/users/" + userId, "token-admin1", null);
+        assertThat(deleteResponse.statusCode()).isEqualTo(204);
+        assertUserPassword(userId, "api-student-updated", "replacement-password", false);
+        assertSessionMissing("token-api-student-before-delete");
+
+        HttpResponse<String> selfDeleteResponse = sendJson(
+                client, "DELETE", "/api/v1/admin/users/103", "token-admin1", null);
+        assertThat(selfDeleteResponse.statusCode()).isEqualTo(403);
+    }
+
+    private static HttpResponse<String> sendJson(
+            HttpClient client, String method, String path, String token, String body) throws Exception {
+        HttpRequest.BodyPublisher publisher = body == null
+                ? HttpRequest.BodyPublishers.noBody()
+                : HttpRequest.BodyPublishers.ofString(body);
+        HttpRequest.Builder request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + PORT + path))
+                .header("Authorization", "Bearer " + token)
+                .method(method, publisher);
+        if (body != null) {
+            request.header("Content-Type", "application/json");
+        }
+        return client.send(request.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static void assertUserPassword(
+            int userId, String expectedUsername, String rawPassword, boolean expectedActive) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement statement = conn.prepareStatement(
+                     "SELECT username, password, is_active FROM users WHERE id = ?")) {
+            statement.setInt(1, userId);
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getString("username")).isEqualTo(expectedUsername);
+                String storedPassword = result.getString("password");
+                assertThat(storedPassword).isNotEqualTo(rawPassword);
+                assertThat(BCrypt.checkpw(rawPassword, storedPassword)).isTrue();
+                assertThat(result.getBoolean("is_active")).isEqualTo(expectedActive);
+                assertThat(result.next()).isFalse();
+            }
+        }
+    }
+
+    private static void insertSession(String token, int userId) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement statement = conn.prepareStatement(
+                     "INSERT INTO server_sessions (token, user_id, expires_at) "
+                             + "VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))")) {
+            statement.setString(1, token);
+            statement.setInt(2, userId);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void assertSessionMissing(String token) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement statement = conn.prepareStatement(
+                     "SELECT COUNT(*) FROM server_sessions WHERE token = ?")) {
+            statement.setString(1, token);
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getInt(1)).isZero();
+            }
+        }
     }
 
     private static byte[] multipartScreenshot(String boundary, byte[] screenshot) throws Exception {

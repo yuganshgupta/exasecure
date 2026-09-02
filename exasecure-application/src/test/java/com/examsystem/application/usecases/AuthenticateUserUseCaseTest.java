@@ -29,6 +29,11 @@ class AuthenticateUserUseCaseTest {
 
     static class StubPasswordEncoder implements PasswordEncoder {
         @Override
+        public String encode(String rawPassword) {
+            return "encoded:" + rawPassword;
+        }
+
+        @Override
         public boolean matches(String rawPassword, String encodedPassword) {
             return "secret".equals(rawPassword) && "hashed123".equals(encodedPassword);
         }
