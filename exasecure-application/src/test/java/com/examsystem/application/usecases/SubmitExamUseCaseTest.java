@@ -48,6 +48,11 @@ class SubmitExamUseCaseTest {
         public void calculateAndSetScore(int attemptId, int focusLostCount, int score, Instant submittedAt) {
             this.finalScore = score;
         }
+
+        @Override
+        public ExamAttempt startOrResumeAttempt(int studentId, int examId, Instant now, Duration timeLimit) {
+            return new ExamAttempt(1, examId, studentId, startTime, null, null, isFinalized);
+        }
     }
 
     static class StubClock implements ClockPort {

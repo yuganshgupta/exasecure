@@ -6,4 +6,5 @@ import java.util.Optional;
 public interface ExamAttemptRepository {
     Optional<ExamAttempt> findById(int attemptId);
     void calculateAndSetScore(int attemptId, int focusLostCount, int score, java.time.Instant submittedAt);
+    ExamAttempt startOrResumeAttempt(int studentId, int examId, java.time.Instant now, java.time.Duration timeLimit);
 }

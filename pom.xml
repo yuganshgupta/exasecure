@@ -22,6 +22,7 @@
         <module>exasecure-application</module>
         <module>exasecure-contracts</module>
         <module>exasecure-legacy</module>
+        <module>exasecure-server</module>
     </modules>
 
     <dependencyManagement>
