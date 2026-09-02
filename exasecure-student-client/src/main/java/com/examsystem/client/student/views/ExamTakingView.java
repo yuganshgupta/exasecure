@@ -30,28 +30,10 @@ import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
+import com.examsystem.client.student.autosave.QuestionAutosaveCoordinator;
+import com.examsystem.client.student.autosave.QuestionAutosaveCoordinator.QuestionSaveState;
+
 public class ExamTakingView {
-
-    public static class QuestionSaveState {
-        final int questionId;
-        final int questionIndex;
-        List<Integer> intended = new ArrayList<>();
-        List<Integer> acknowledged = null;
-        long currentGen = 0;
-        long acknowledgedGen = 0;
-        boolean inFlight = false;
-        boolean failed = false;
-        String lastError = null;
-
-        QuestionSaveState(int questionId, int questionIndex) {
-            this.questionId = questionId;
-            this.questionIndex = questionIndex;
-        }
-
-        public boolean isSynchronized() {
-            return !inFlight && !failed && acknowledged != null && acknowledged.equals(intended);
-        }
-    }
 
     private final StudentApp app;
     private final ApiClient apiClient;
@@ -61,7 +43,7 @@ public class ExamTakingView {
     private final List<StudentQuestionDto> questions;
     private final Map<Integer, List<Integer>> answers;
     private final Set<Integer> flaggedQuestions = new HashSet<>();
-    private final Map<Integer, QuestionSaveState> saveStates = new HashMap<>();
+    private final QuestionAutosaveCoordinator saveCoordinator;
 
     private final BorderPane view;
     private final Label timerLabel;
@@ -106,15 +88,46 @@ public class ExamTakingView {
             }
         }
 
-        for (int i = 0; i < questions.size(); i++) {
-            StudentQuestionDto q = questions.get(i);
-            QuestionSaveState state = new QuestionSaveState(q.id(), i);
-            if (this.answers.containsKey(q.id())) {
-                state.intended = new ArrayList<>(this.answers.get(q.id()));
-                state.acknowledged = new ArrayList<>(state.intended);
-            }
-            this.saveStates.put(q.id(), state);
-        }
+        this.saveCoordinator = new QuestionAutosaveCoordinator(
+                questions,
+                initialAnswers,
+                (qId, snapshot, onSuccess, onError) -> {
+                    AsyncRunner.runAsync(
+                            () -> {
+                                apiClient.saveAnswer(attempt.id(), qId, snapshot);
+                                return snapshot;
+                            },
+                            onSuccess,
+                            onError
+                    );
+                },
+                new QuestionAutosaveCoordinator.Listener() {
+                    @Override
+                    public void onStateChanged(QuestionSaveState state) {
+                        updateAutosaveUIForCurrentQuestion();
+                        updatePalette();
+                        if (isSubmissionPending && saveCoordinator.isAllSynchronized()) {
+                            checkAndProceedWithPendingSubmission();
+                        }
+                    }
+
+                    @Override
+                    public void onSaveFailed(QuestionSaveState state, Throwable error) {
+                        if (isSubmissionPending) {
+                            isSubmissionPending = false;
+                            setControlsDisabled(false);
+                            submitBtn.setText("Submit Exam");
+                            UiFeedback.showError("Submission Aborted",
+                                    "Cannot submit exam: Question " + (state.questionIndex() + 1)
+                                            + " failed to save (" + (error != null ? error.getMessage() : "unknown error")
+                                            + "). Please retry saving before submitting.");
+                            currentIndex = state.questionIndex();
+                            renderCurrentQuestion();
+                            updatePalette();
+                        }
+                    }
+                }
+        );
 
         this.view = new BorderPane();
         this.timerLabel = new Label();
@@ -477,85 +490,19 @@ public class ExamTakingView {
 
     private void onAnswerChanged(int questionId, List<Integer> newSelections) {
         if (isSubmitted || isSubmissionPending) return;
-        QuestionSaveState state = saveStates.get(questionId);
-        if (state == null) return;
-
-        state.intended = new ArrayList<>(newSelections);
-        state.currentGen++;
-        state.failed = false;
-        state.lastError = null;
-
-        dispatchAutosave(state, state.currentGen, new ArrayList<>(newSelections));
+        saveCoordinator.onAnswerChanged(questionId, newSelections);
         updatePalette();
     }
 
     private void retryQuestionSave(int questionId) {
         if (isSubmitted || isSubmissionPending) return;
-        QuestionSaveState state = saveStates.get(questionId);
-        if (state == null) return;
-
-        state.currentGen++;
-        state.failed = false;
-        state.lastError = null;
-        dispatchAutosave(state, state.currentGen, new ArrayList<>(state.intended));
-    }
-
-    private void dispatchAutosave(QuestionSaveState state, long gen, List<Integer> snapshot) {
-        state.inFlight = true;
-        updateAutosaveUIForCurrentQuestion();
-
-        AsyncRunner.runAsync(
-                () -> {
-                    apiClient.saveAnswer(attempt.id(), state.questionId, snapshot);
-                    return snapshot;
-                },
-                (List<Integer> ack) -> {
-                    // Ignore stale responses from earlier generations
-                    if (gen < state.currentGen) {
-                        return;
-                    }
-                    if (gen == state.currentGen) {
-                        state.acknowledged = new ArrayList<>(snapshot);
-                        state.acknowledgedGen = gen;
-                        state.inFlight = false;
-                        state.failed = false;
-                        state.lastError = null;
-                        updateAutosaveUIForCurrentQuestion();
-                        updatePalette();
-
-                        if (isSubmissionPending) {
-                            checkAndProceedWithPendingSubmission();
-                        }
-                    }
-                },
-                (Throwable err) -> {
-                    if (gen == state.currentGen) {
-                        state.inFlight = false;
-                        state.failed = true;
-                        state.lastError = err.getMessage();
-                        updateAutosaveUIForCurrentQuestion();
-                        updatePalette();
-
-                        if (isSubmissionPending) {
-                            isSubmissionPending = false;
-                            setControlsDisabled(false);
-                            submitBtn.setText("Submit Exam");
-                            UiFeedback.showError("Submission Aborted",
-                                    "Cannot submit exam: Question " + (state.questionIndex + 1)
-                                            + " failed to save (" + err.getMessage() + "). Please retry saving before submitting.");
-                            currentIndex = state.questionIndex;
-                            renderCurrentQuestion();
-                            updatePalette();
-                        }
-                    }
-                }
-        );
+        saveCoordinator.retry(questionId);
     }
 
     private void updateAutosaveUIForCurrentQuestion() {
         if (questions.isEmpty()) return;
         StudentQuestionDto q = questions.get(currentIndex);
-        QuestionSaveState state = saveStates.get(q.id());
+        QuestionSaveState state = saveCoordinator.getState(q.id());
         if (state == null) {
             autosaveStatusLabel.setText("");
             retryAutosaveBtn.setVisible(false);
@@ -563,18 +510,18 @@ public class ExamTakingView {
             return;
         }
 
-        if (state.failed) {
-            autosaveStatusLabel.setText("✗ Autosave failed: " + (state.lastError != null ? state.lastError : "unknown error"));
+        if (state.failed()) {
+            autosaveStatusLabel.setText("✗ Autosave failed: " + (state.lastError() != null ? state.lastError() : "unknown error"));
             autosaveStatusLabel.setTextFill(Color.web("#dc2626"));
             retryAutosaveBtn.setVisible(true);
             retryAutosaveBtn.setManaged(true);
             retryAutosaveBtn.setDisable(isSubmitted || isSubmissionPending);
-        } else if (state.inFlight) {
+        } else if (state.inFlight()) {
             autosaveStatusLabel.setText("Saving answer...");
             autosaveStatusLabel.setTextFill(Color.web("#d97706"));
             retryAutosaveBtn.setVisible(false);
             retryAutosaveBtn.setManaged(false);
-        } else if (state.acknowledged != null) {
+        } else if (state.acknowledged() != null) {
             String time = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
             autosaveStatusLabel.setText("✓ Saved (" + time + ")");
             autosaveStatusLabel.setTextFill(Color.web("#16a34a"));
@@ -597,8 +544,8 @@ public class ExamTakingView {
             List<Integer> sel = answers.get(q.id());
             boolean answered = sel != null && !sel.isEmpty();
             boolean flagged = flaggedQuestions.contains(q.id());
-            QuestionSaveState sState = saveStates.get(q.id());
-            boolean failed = sState != null && sState.failed;
+            QuestionSaveState sState = saveCoordinator.getState(q.id());
+            boolean failed = sState != null && sState.failed();
 
             if (answered) answeredCount++;
             if (flagged) flaggedCount++;
@@ -644,16 +591,16 @@ public class ExamTakingView {
         if (isSubmitted || isSubmissionPending) return;
 
         // Check if any question has already failed to save
-        for (QuestionSaveState s : saveStates.values()) {
-            if (s.failed) {
-                UiFeedback.showError("Save Failure Pending",
-                        "Question " + (s.questionIndex + 1)
-                                + " failed to save to the server. Please review and click '🔄 Retry Save' before submitting.");
-                currentIndex = s.questionIndex;
-                renderCurrentQuestion();
-                updatePalette();
-                return;
-            }
+        Optional<QuestionSaveState> failedOpt = saveCoordinator.getFirstFailed();
+        if (failedOpt.isPresent()) {
+            QuestionSaveState s = failedOpt.get();
+            UiFeedback.showError("Save Failure Pending",
+                    "Question " + (s.questionIndex() + 1)
+                            + " failed to save to the server. Please review and click '🔄 Retry Save' before submitting.");
+            currentIndex = s.questionIndex();
+            renderCurrentQuestion();
+            updatePalette();
+            return;
         }
 
         isDialogActive = true;
@@ -686,22 +633,18 @@ public class ExamTakingView {
     private void startSubmissionProcess() {
         setControlsDisabled(true);
 
-        boolean allSynced = true;
-        for (QuestionSaveState s : saveStates.values()) {
-            if (s.failed) {
-                setControlsDisabled(false);
-                UiFeedback.showError("Save Failure", "Question " + (s.questionIndex + 1) + " failed to save. Please retry saving before submitting.");
-                currentIndex = s.questionIndex;
-                renderCurrentQuestion();
-                updatePalette();
-                return;
-            }
-            if (s.inFlight || !s.isSynchronized()) {
-                allSynced = false;
-            }
+        Optional<QuestionSaveState> failedOpt = saveCoordinator.getFirstFailed();
+        if (failedOpt.isPresent()) {
+            QuestionSaveState s = failedOpt.get();
+            setControlsDisabled(false);
+            UiFeedback.showError("Save Failure", "Question " + (s.questionIndex() + 1) + " failed to save. Please retry saving before submitting.");
+            currentIndex = s.questionIndex();
+            renderCurrentQuestion();
+            updatePalette();
+            return;
         }
 
-        if (allSynced) {
+        if (saveCoordinator.isAllSynchronized()) {
             performSubmission();
         } else {
             isSubmissionPending = true;
@@ -714,31 +657,26 @@ public class ExamTakingView {
     private void checkAndProceedWithPendingSubmission() {
         if (!isSubmissionPending) return;
 
-        boolean allSynced = true;
-        for (QuestionSaveState s : saveStates.values()) {
-            if (s.failed) {
-                isSubmissionPending = false;
-                setControlsDisabled(false);
-                submitBtn.setText("Submit Exam");
-                UiFeedback.showError("Save Failure", "Question " + (s.questionIndex + 1) + " failed to save. Please retry saving before submitting.");
-                currentIndex = s.questionIndex;
-                renderCurrentQuestion();
-                updatePalette();
-                return;
-            }
-            if (s.inFlight || !s.isSynchronized()) {
-                allSynced = false;
-            }
+        Optional<QuestionSaveState> failedOpt = saveCoordinator.getFirstFailed();
+        if (failedOpt.isPresent()) {
+            QuestionSaveState s = failedOpt.get();
+            isSubmissionPending = false;
+            setControlsDisabled(false);
+            submitBtn.setText("Submit Exam");
+            UiFeedback.showError("Save Failure", "Question " + (s.questionIndex() + 1) + " failed to save. Please retry saving before submitting.");
+            currentIndex = s.questionIndex();
+            renderCurrentQuestion();
+            updatePalette();
+            return;
         }
 
-        if (allSynced) {
+        if (saveCoordinator.isAllSynchronized()) {
             isSubmissionPending = false;
             performSubmission();
         }
     }
 
     private void handleAutoSubmitOnExpiry() {
-        isSubmitted = true;
         cleanupListeners();
         UiFeedback.showError("Exam Time Expired", "The authoritative examination duration has expired. Submitting answers now...");
         startSubmissionProcess();
@@ -765,6 +703,7 @@ public class ExamTakingView {
                         UiFeedback.showInfo("Attempt Finalized", "This exam attempt has already been finalized by the server.");
                         app.showHistory();
                     } else {
+                        isSubmitted = false;
                         UiFeedback.showError("Submission Error", "Failed to submit exam: " + err.getMessage());
                     }
                 }
