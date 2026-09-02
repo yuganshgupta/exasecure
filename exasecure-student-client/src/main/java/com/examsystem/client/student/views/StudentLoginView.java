@@ -126,10 +126,10 @@ public class StudentLoginView {
                         usernameField.setDisable(false);
                         passwordField.setDisable(false);
 
-                        if (err instanceof ApiException apiEx) {
+                        if (err instanceof ApiException apiEx && apiEx.getServerMessage() != null && !apiEx.getServerMessage().isBlank() && !"null".equalsIgnoreCase(apiEx.getServerMessage().trim())) {
                             errorLabel.setText(apiEx.getServerMessage());
                         } else {
-                            errorLabel.setText("Could not reach examination server. Please check your network connection.");
+                            errorLabel.setText("Unable to connect to the ExaSecure server. Please ensure the server is running on " + apiClient.getConfig().baseUrl());
                         }
                         errorLabel.setVisible(true);
                     }

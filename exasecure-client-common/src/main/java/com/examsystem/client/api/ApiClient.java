@@ -350,7 +350,10 @@ public class ApiClient {
             return httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         } catch (IOException | InterruptedException e) {
             if (e instanceof InterruptedException) Thread.currentThread().interrupt();
-            throw new ApiException("Server unavailable or connection timed out: " + e.getMessage(), e);
+            String detail = (e.getMessage() != null && !e.getMessage().isBlank() && !"null".equalsIgnoreCase(e.getMessage().trim()))
+                    ? e.getMessage().trim()
+                    : "Connection refused. Please ensure the ExaSecure server is running on " + config.baseUrl();
+            throw new ApiException("Server unavailable or connection timed out: " + detail, e);
         }
     }
 

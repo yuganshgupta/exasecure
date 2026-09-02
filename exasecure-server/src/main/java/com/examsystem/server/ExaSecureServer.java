@@ -139,6 +139,10 @@ public class ExaSecureServer {
     }
 
     public static void main(String[] args) {
-        new ExaSecureServer(new AppConfig()).start();
+        AppConfig config = new AppConfig();
+        if ((args.length > 0 && "--bootstrap".equalsIgnoreCase(args[0])) || Boolean.getBoolean("exasecure.bootstrap")) {
+            com.examsystem.server.bootstrap.DevBootstrap.run(config);
+        }
+        new ExaSecureServer(config).start();
     }
 }

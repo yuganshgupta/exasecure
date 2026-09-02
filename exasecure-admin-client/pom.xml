@@ -15,7 +15,7 @@
     <description>JavaFX desktop client for administrators managing exams, users, and proctoring</description>
 
     <properties>
-        <javafx.version>23.0.2</javafx.version>
+        <javafx.version>25.0.2</javafx.version>
     </properties>
 
     <dependencies>
