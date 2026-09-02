@@ -77,6 +77,10 @@ public class SubmitExamUseCase {
     public int submitExam(int attemptId, Instant submittedAt) {
         var attempt = attemptRepository.findById(attemptId)
             .orElseThrow(() -> new IllegalArgumentException("Attempt not found"));
+
+        if (attempt.finalized() && attempt.score() != null) {
+            return attempt.score();
+        }
             
         int correct = 0;
         var answers = answerRepository.getSelectedOptionsForAttempt(attemptId);
@@ -91,7 +95,15 @@ public class SubmitExamUseCase {
         
         int focusLostCount = proctorRepository.countEvents(attemptId, "FOCUS_LOST");
         
-        attemptRepository.calculateAndSetScore(attemptId, focusLostCount, correct, submittedAt);
+        try {
+            attemptRepository.calculateAndSetScore(attemptId, focusLostCount, correct, submittedAt);
+        } catch (IllegalStateException e) {
+            var fresh = attemptRepository.findById(attemptId);
+            if (fresh.isPresent() && fresh.get().finalized() && fresh.get().score() != null) {
+                return fresh.get().score();
+            }
+            throw e;
+        }
         return correct;
     }
 }

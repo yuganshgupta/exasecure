@@ -71,7 +71,7 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                // Find active attempt
+                // Find active or existing attempt
                 try (PreparedStatement ps = conn.prepareStatement(
                         "SELECT id, start_time, end_time, score, status FROM exam_attempts WHERE student_id = ? AND exam_id = ? ORDER BY id DESC LIMIT 1")) {
                     ps.setInt(1, studentId);
@@ -92,12 +92,25 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
                                 conn.commit();
                                 return attempt;
                             }
+                            if (attempt.finalized()) {
+                                conn.commit();
+                                throw new IllegalStateException("Exam attempt is already finalized");
+                            }
+                            if (attempt.isExpired(now, timeLimit)) {
+                                try (PreparedStatement psExpire = conn.prepareStatement(
+                                        "UPDATE exam_attempts SET status = 'EXPIRED', end_time = ? WHERE id = ? AND status = 'ACTIVE'")) {
+                                    psExpire.setTimestamp(1, Timestamp.from(now));
+                                    psExpire.setInt(2, attempt.id());
+                                    psExpire.executeUpdate();
+                                }
+                                conn.commit();
+                                throw new IllegalStateException("Exam attempt has expired");
+                            }
                         }
                     }
                 }
 
-                // If we reach here, we need to create a new attempt (if policy allows multiple)
-                // For ExaSecure, students usually get 1 attempt, but let's just create one.
+                // If no attempt exists, create a new attempt
                 try (PreparedStatement ps = conn.prepareStatement(
                         "INSERT INTO exam_attempts (exam_id, student_id, start_time, status) VALUES (?, ?, ?, 'ACTIVE')",
                         java.sql.Statement.RETURN_GENERATED_KEYS)) {
@@ -120,6 +133,9 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
                 conn.setAutoCommit(true);
             }
         } catch (Exception e) {
+            if (e instanceof IllegalStateException ise) {
+                throw ise;
+            }
             throw new RuntimeException("DB error", e);
         }
         throw new IllegalStateException("Could not create attempt");

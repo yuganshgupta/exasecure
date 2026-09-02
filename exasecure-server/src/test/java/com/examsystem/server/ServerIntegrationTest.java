@@ -67,11 +67,17 @@ class ServerIntegrationTest {
             stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (1, 'Test Exam', 60, 103, 1)");
             stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (2, 'Other Exam', 60, 103, 1)");
             stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (3, 'Option Number Exam', 60, 103, 1)");
-            stmt.execute("INSERT INTO questions (id, exam_id, question_text, correct_option_number, question_type, is_active) VALUES (401, 1, 'Owned question', 1, 'SINGLE', 1), (402, 2, 'Other question', 1, 'SINGLE', 1), (403, 3, 'Stable numbers', 3, 'MULTI', 1)");
-            stmt.execute("INSERT INTO options (id, question_id, option_number, option_text, is_correct, is_active) VALUES (501, 401, 1, 'Owned correct', 1, 1), (502, 401, 2, 'Owned wrong', 0, 1), (503, 402, 1, 'Other correct', 1, 1), (504, 402, 2, 'Other wrong', 0, 1), (601, 403, 3, 'First stable', 1, 1), (602, 403, 7, 'Middle stable', 0, 1), (603, 403, 9, 'Last stable', 1, 1)");
+            stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (4, 'Expired Exam', 60, 103, 1)");
+            stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (5, 'Concurrent Exam', 60, 103, 1)");
+            stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (6, 'Lifecycle Exam', 60, 103, 1)");
+            stmt.execute("INSERT INTO questions (id, exam_id, question_text, correct_option_number, question_type, is_active) VALUES (401, 1, 'Owned question', 1, 'SINGLE', 1), (402, 2, 'Other question', 1, 'SINGLE', 1), (403, 3, 'Stable numbers', 3, 'MULTI', 1), (404, 4, 'Expired question', 1, 'SINGLE', 1), (405, 5, 'Concurrent question', 1, 'SINGLE', 1), (406, 6, 'Lifecycle question', 1, 'SINGLE', 1)");
+            stmt.execute("INSERT INTO options (id, question_id, option_number, option_text, is_correct, is_active) VALUES (501, 401, 1, 'Owned correct', 1, 1), (502, 401, 2, 'Owned wrong', 0, 1), (503, 402, 1, 'Other correct', 1, 1), (504, 402, 2, 'Other wrong', 0, 1), (601, 403, 3, 'First stable', 1, 1), (602, 403, 7, 'Middle stable', 0, 1), (603, 403, 9, 'Last stable', 1, 1), (701, 404, 1, 'Exp correct', 1, 1), (702, 404, 2, 'Exp wrong', 0, 1), (801, 405, 1, 'Con correct', 1, 1), (802, 405, 2, 'Con wrong', 0, 1), (901, 406, 1, 'Life correct', 1, 1), (902, 406, 2, 'Life wrong', 0, 1)");
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (201, 1, 101, NOW(), 'ACTIVE')");
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (202, 2, 102, NOW(), 'ACTIVE')");
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (203, 3, 101, NOW(), 'ACTIVE')");
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (204, 4, 101, DATE_SUB(NOW(), INTERVAL 2 HOUR), 'ACTIVE')");
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (205, 5, 101, NOW(), 'ACTIVE')");
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (206, 6, 101, NOW(), 'ACTIVE')");
             stmt.execute("INSERT INTO proctor_events (id, attempt_id, event_type, recorded_at) VALUES (301, 202, 'FOCUS_LOST', NOW())");
             stmt.execute("INSERT INTO server_sessions (token, user_id, expires_at) VALUES ('token-stu1', 101, DATE_ADD(NOW(), INTERVAL 1 HOUR))");
             stmt.execute("INSERT INTO server_sessions (token, user_id, expires_at) VALUES ('token-stu2', 102, DATE_ADD(NOW(), INTERVAL 1 HOUR))");
@@ -427,6 +433,140 @@ class ServerIntegrationTest {
         assertThat(submit.statusCode()).isEqualTo(200);
         assertThat(new ObjectMapper().readTree(submit.body()).asInt()).isEqualTo(1);
         assertAttemptSubmittedWithScore(203, 1);
+    }
+
+    @Test
+    void attemptLifecycle_startResumeSubmitIdempotencyAndAnswerClearSemantics() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // 1. Resume existing active attempt 206 -> idempotent
+        HttpResponse<String> resumeResponse = sendJson(
+                client, "POST", "/api/v1/student/exams/6/attempts", "token-stu1", null);
+        assertThat(resumeResponse.statusCode()).isEqualTo(200);
+        assertThat(new ObjectMapper().readTree(resumeResponse.body()).required("id").asInt()).isEqualTo(206);
+
+        // 2. Save answer
+        HttpResponse<String> saveFirst = sendJson(
+                client, "POST", "/api/v1/student/attempts/206/answers", "token-stu1",
+                "{\"questionId\":406,\"selectedOptions\":[1]}");
+        assertThat(saveFirst.statusCode()).isEqualTo(200);
+        assertStoredSelections(206, 406, 1);
+
+        // 3. Replace answer
+        HttpResponse<String> replaceAnswer = sendJson(
+                client, "POST", "/api/v1/student/attempts/206/answers", "token-stu1",
+                "{\"questionId\":406,\"selectedOptions\":[2]}");
+        assertThat(replaceAnswer.statusCode()).isEqualTo(200);
+        assertStoredSelections(206, 406, 2);
+
+        // 4. Clear answer with empty list
+        HttpResponse<String> clearAnswer = sendJson(
+                client, "POST", "/api/v1/student/attempts/206/answers", "token-stu1",
+                "{\"questionId\":406,\"selectedOptions\":[]}");
+        assertThat(clearAnswer.statusCode()).isEqualTo(200);
+        assertStoredSelections(206, 406); // 0 selections
+
+        // 5. Re-save correct answer [1]
+        HttpResponse<String> reSave = sendJson(
+                client, "POST", "/api/v1/student/attempts/206/answers", "token-stu1",
+                "{\"questionId\":406,\"selectedOptions\":[1]}");
+        assertThat(reSave.statusCode()).isEqualTo(200);
+        assertStoredSelections(206, 406, 1);
+
+        // 6. Submit exam
+        HttpResponse<String> submit = sendJson(
+                client, "POST", "/api/v1/student/attempts/206/submit", "token-stu1", null);
+        assertThat(submit.statusCode()).isEqualTo(200);
+        assertThat(new ObjectMapper().readTree(submit.body()).asInt()).isEqualTo(1);
+        assertAttemptSubmittedWithScore(206, 1);
+
+        // 7. Duplicate submit returns same score idempotently
+        HttpResponse<String> duplicateSubmit = sendJson(
+                client, "POST", "/api/v1/student/attempts/206/submit", "token-stu1", null);
+        assertThat(duplicateSubmit.statusCode()).isEqualTo(200);
+        assertThat(new ObjectMapper().readTree(duplicateSubmit.body()).asInt()).isEqualTo(1);
+
+        // 8. Post-submit attempt start on exam 6 is rejected with 409 Conflict
+        HttpResponse<String> restartAttempt = sendJson(
+                client, "POST", "/api/v1/student/exams/6/attempts", "token-stu1", null);
+        assertThat(restartAttempt.statusCode()).isEqualTo(409);
+        assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE student_id = 101 AND exam_id = 6", 1);
+
+        // 9. Post-submit answer save on attempt 206 is rejected with 409 Conflict
+        HttpResponse<String> postSubmitAnswer = sendJson(
+                client, "POST", "/api/v1/student/attempts/206/answers", "token-stu1",
+                "{\"questionId\":406,\"selectedOptions\":[2]}");
+        assertThat(postSubmitAnswer.statusCode()).isEqualTo(409);
+        assertStoredSelections(206, 406, 1);
+
+        // 10. Student history includes submitted attempt
+        HttpResponse<String> studentHistory = sendJson(
+                client, "GET", "/api/v1/student/history", "token-stu1", null);
+        assertThat(studentHistory.statusCode()).isEqualTo(200);
+        assertThat(studentHistory.body()).contains("\"examTitle\":\"Lifecycle Exam\"", "\"attemptId\":206", "\"score\":1", "\"status\":\"SUBMITTED\"");
+
+        // 11. Admin exam attempt history includes submitted attempt
+        HttpResponse<String> adminHistory = sendJson(
+                client, "GET", "/api/v1/admin/exams/6/attempts", "token-admin1", null);
+        assertThat(adminHistory.statusCode()).isEqualTo(200);
+        assertThat(adminHistory.body()).contains("\"id\":206", "\"score\":1", "\"status\":\"SUBMITTED\"", "\"studentName\":\"Student One\"");
+    }
+
+    @Test
+    void authoritativeTiming_expiredAttemptTransitionsToExpiredAndRejectsActions() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // 1. Calling start/resume on expired attempt 204 transitions it to EXPIRED and returns 409
+        HttpResponse<String> startExpired = sendJson(
+                client, "POST", "/api/v1/student/exams/4/attempts", "token-stu1", null);
+        assertThat(startExpired.statusCode()).isEqualTo(409);
+        assertThat(startExpired.body()).contains("expired");
+
+        // 2. Database row updated to EXPIRED with end_time set
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT status, end_time FROM exam_attempts WHERE id = 204")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString("status")).isEqualTo("EXPIRED");
+                assertThat(rs.getTimestamp("end_time")).isNotNull();
+            }
+        }
+
+        // 3. Answer saving on expired attempt rejected with 409
+        HttpResponse<String> saveOnExpired = sendJson(
+                client, "POST", "/api/v1/student/attempts/204/answers", "token-stu1",
+                "{\"questionId\":404,\"selectedOptions\":[1]}");
+        assertThat(saveOnExpired.statusCode()).isEqualTo(409);
+        assertDatabaseCount("SELECT COUNT(*) FROM student_answers WHERE attempt_id = 204", 0);
+    }
+
+    @Test
+    void concurrentSubmissionSafety_resolvesToIdenticalCommittedScore() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // Save answer for attempt 205
+        HttpResponse<String> save = sendJson(
+                client, "POST", "/api/v1/student/attempts/205/answers", "token-stu1",
+                "{\"questionId\":405,\"selectedOptions\":[1]}");
+        assertThat(save.statusCode()).isEqualTo(200);
+
+        // Submit concurrently
+        var executor = java.util.concurrent.Executors.newFixedThreadPool(2);
+        var future1 = executor.submit(() -> sendJson(
+                client, "POST", "/api/v1/student/attempts/205/submit", "token-stu1", null));
+        var future2 = executor.submit(() -> sendJson(
+                client, "POST", "/api/v1/student/attempts/205/submit", "token-stu1", null));
+
+        HttpResponse<String> res1 = future1.get();
+        HttpResponse<String> res2 = future2.get();
+        executor.shutdown();
+
+        assertThat(res1.statusCode()).isEqualTo(200);
+        assertThat(res2.statusCode()).isEqualTo(200);
+        assertThat(new ObjectMapper().readTree(res1.body()).asInt()).isEqualTo(1);
+        assertThat(new ObjectMapper().readTree(res2.body()).asInt()).isEqualTo(1);
+        assertAttemptSubmittedWithScore(205, 1);
     }
 
     private static void assertDatabaseCount(String sql, int expected) throws Exception {

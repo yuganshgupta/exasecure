@@ -39,16 +39,26 @@ class SubmitExamUseCaseTest {
     static class StubAttemptRepo implements ExamAttemptRepository {
         int finalScore = -1;
         boolean isFinalized = false;
+        boolean simulateConcurrentConflict = false;
         Instant startTime = Instant.now().minus(Duration.ofMinutes(10));
         
         @Override
         public Optional<ExamAttempt> findById(int attemptId) {
-            return Optional.of(new ExamAttempt(attemptId, 1, 1, startTime, null, null, isFinalized));
+            return Optional.of(new ExamAttempt(attemptId, 1, 1, startTime, null, finalScore >= 0 ? finalScore : null, isFinalized));
         }
 
         @Override
         public void calculateAndSetScore(int attemptId, int focusLostCount, int score, Instant submittedAt) {
+            if (simulateConcurrentConflict) {
+                this.finalScore = score;
+                this.isFinalized = true;
+                throw new IllegalStateException("Attempt is not ACTIVE or does not exist");
+            }
+            if (isFinalized) {
+                throw new IllegalStateException("Attempt is not ACTIVE or does not exist");
+            }
             this.finalScore = score;
+            this.isFinalized = true;
         }
 
         @Override
@@ -185,5 +195,35 @@ class SubmitExamUseCaseTest {
         
         assertThat(score).isEqualTo(1); // 1 correct answer
         assertThat(attemptRepo.finalScore).isEqualTo(1);
+    }
+
+    @Test
+    void submitExam_alreadyFinalized_returnsStoredScoreIdempotently() {
+        StubAttemptRepo attemptRepo = new StubAttemptRepo();
+        attemptRepo.isFinalized = true;
+        attemptRepo.finalScore = 1;
+        StubAnswerRepo answerRepo = new StubAnswerRepo();
+
+        SubmitExamUseCase useCase = new SubmitExamUseCase(
+                answerRepo, attemptRepo, new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+
+        int score = useCase.submitExam(100, Instant.now());
+
+        assertThat(score).isEqualTo(1);
+    }
+
+    @Test
+    void submitExam_concurrentConflict_returnsStoredScoreIdempotently() {
+        StubAttemptRepo attemptRepo = new StubAttemptRepo();
+        attemptRepo.simulateConcurrentConflict = true;
+        StubAnswerRepo answerRepo = new StubAnswerRepo();
+        answerRepo.answers.put(1, List.of(2));
+
+        SubmitExamUseCase useCase = new SubmitExamUseCase(
+                answerRepo, attemptRepo, new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+
+        int score = useCase.submitExam(100, Instant.now());
+
+        assertThat(score).isEqualTo(1);
     }
 }
