@@ -1,11 +1,14 @@
 package com.examsystem.application.usecases;
 
 import com.examsystem.application.ports.AnswerRepository;
+import com.examsystem.application.ports.ClockPort;
 import com.examsystem.application.ports.ExamAttemptRepository;
 import com.examsystem.application.ports.QuestionRepository;
+import com.examsystem.domain.models.ExamAttempt;
 import com.examsystem.domain.models.Question;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
@@ -33,10 +36,25 @@ class SubmitExamUseCaseTest {
 
     static class StubAttemptRepo implements ExamAttemptRepository {
         int finalScore = -1;
+        boolean isFinalized = false;
+        Instant startTime = Instant.now().minus(Duration.ofMinutes(10));
         
+        @Override
+        public Optional<ExamAttempt> findById(int attemptId) {
+            return Optional.of(new ExamAttempt(attemptId, 1, 1, startTime, null, null, isFinalized));
+        }
+
         @Override
         public void calculateAndSetScore(int attemptId, int focusLostCount, int score, Instant submittedAt) {
             this.finalScore = score;
+        }
+    }
+
+    static class StubClock implements ClockPort {
+        Instant current = Instant.now();
+        @Override
+        public Instant now() {
+            return current;
         }
     }
 
@@ -58,9 +76,9 @@ class SubmitExamUseCaseTest {
     @Test
     void saveAnswer_correctAnswer_savesAsCorrect() {
         StubAnswerRepo answerRepo = new StubAnswerRepo();
-        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, new StubAttemptRepo(), new StubQuestionRepo());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubClock());
         
-        useCase.saveAnswer(100, 1, List.of(2), Instant.now());
+        useCase.saveAnswer(100, 1, List.of(2), Duration.ofMinutes(60));
         
         assertThat(answerRepo.savedCorrect).isTrue();
     }
@@ -68,26 +86,38 @@ class SubmitExamUseCaseTest {
     @Test
     void saveAnswer_wrongAnswer_savesAsIncorrect() {
         StubAnswerRepo answerRepo = new StubAnswerRepo();
-        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, new StubAttemptRepo(), new StubQuestionRepo());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubClock());
         
-        useCase.saveAnswer(100, 1, List.of(1), Instant.now());
+        useCase.saveAnswer(100, 1, List.of(1), Duration.ofMinutes(60));
         
         assertThat(answerRepo.savedCorrect).isFalse();
     }
 
     @Test
     void saveAnswer_invalidQuestion_throws() {
-        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), new StubAttemptRepo(), new StubQuestionRepo());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), new StubAttemptRepo(), new StubQuestionRepo(), new StubClock());
         
-        assertThatThrownBy(() -> useCase.saveAnswer(100, 999, List.of(1), Instant.now()))
+        assertThatThrownBy(() -> useCase.saveAnswer(100, 999, List.of(1), Duration.ofMinutes(60)))
             .isInstanceOf(IllegalArgumentException.class)
             .hasMessageContaining("Question not found");
     }
 
     @Test
+    void saveAnswer_expiredAttempt_throws() {
+        StubAttemptRepo attemptRepo = new StubAttemptRepo();
+        attemptRepo.startTime = Instant.now().minus(Duration.ofMinutes(120)); // Expired
+        
+        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), attemptRepo, new StubQuestionRepo(), new StubClock());
+        
+        assertThatThrownBy(() -> useCase.saveAnswer(100, 1, List.of(2), Duration.ofMinutes(60)))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageContaining("expired or finalized");
+    }
+
+    @Test
     void submitExam_calculatesAndSetsScore() {
         StubAttemptRepo attemptRepo = new StubAttemptRepo();
-        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), attemptRepo, new StubQuestionRepo());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), attemptRepo, new StubQuestionRepo(), new StubClock());
         
         int score = useCase.submitExam(100, 0, Instant.now());
         
