@@ -81,9 +81,11 @@ class SubmitExamUseCaseTest {
 
     static class StubProctorRepo implements com.examsystem.application.ports.ProctorRepository {
         @Override
-        public void saveEvent(int attemptId, String eventType, Instant timestamp) {}
+        public int saveEvent(int attemptId, String eventType, java.time.Instant timestamp) {
+            return 1;
+        }
         @Override
-        public void saveEvidence(int attemptId, byte[] screenshot, Instant timestamp) {}
+        public void saveEvidence(int eventId, byte[] screenshot, String contentType, java.time.Instant timestamp) {}
         @Override
         public int countEvents(int attemptId, String eventType) { return 0; }
     }

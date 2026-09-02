@@ -55,7 +55,12 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
             ps.setTimestamp(2, Timestamp.from(submittedAt));
             ps.setInt(3, focusLostCount);
             ps.setInt(4, attemptId);
-            ps.executeUpdate();
+            int updated = ps.executeUpdate();
+            if (updated == 0) {
+                throw new IllegalStateException("Attempt is not ACTIVE or does not exist");
+            }
+        } catch (IllegalStateException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("DB error", e);
         }

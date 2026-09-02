@@ -19,6 +19,11 @@
             <artifactId>exasecure-domain</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.examsystem</groupId>
+            <artifactId>exasecure-contracts</artifactId>
+            <version>${project.version}</version>
+        </dependency>
         
         <dependency>
             <groupId>org.junit.jupiter</groupId>

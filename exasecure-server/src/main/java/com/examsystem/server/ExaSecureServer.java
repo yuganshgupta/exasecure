@@ -55,9 +55,11 @@ public class ExaSecureServer {
         SubmitExamUseCase submitUseCase = new SubmitExamUseCase(answerRepository, attemptRepository, questionRepository, proctorRepository, clockPort);
 
         // Controllers
+        com.examsystem.application.ports.AdminQueryPort adminQueryPort = new com.examsystem.server.adapters.jdbc.JdbcAdminQueryPort(dataSource);
+        com.examsystem.application.ports.StudentQueryPort studentQueryPort = new com.examsystem.server.adapters.jdbc.JdbcStudentQueryPort(dataSource);
         AuthController authController = new AuthController(authUseCase, sessionManager);
-        StudentExamController studentController = new StudentExamController(startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, dataSource);
-        AdminController adminController = new AdminController(examRepository, questionRepository, userRepository, dataSource);
+        StudentExamController studentController = new StudentExamController(startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, studentQueryPort);
+        AdminController adminController = new AdminController(adminQueryPort);
         AuthMiddleware authMiddleware = new AuthMiddleware(sessionManager);
 
         // App init
@@ -79,12 +81,14 @@ public class ExaSecureServer {
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/answers", studentController::saveAnswer);
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/submit", studentController::submitExam);
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/events", studentController::recordEvent);
-                    io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/proctor-evidence", studentController::uploadEvidence);
+                    io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/events/{eventId}/proctor-evidence", studentController::uploadEvidence);
                     
                     io.javalin.apibuilder.ApiBuilder.path("/admin", () -> {
                         io.javalin.apibuilder.ApiBuilder.get("/users", adminController::listUsers);
                         io.javalin.apibuilder.ApiBuilder.get("/exams", adminController::listExams);
-                        io.javalin.apibuilder.ApiBuilder.get("/attempts/{attemptId}/evidence", adminController::getAttemptEvidence);
+                        io.javalin.apibuilder.ApiBuilder.get("/exams/{examId}/attempts", adminController::getAttemptHistory);
+                        io.javalin.apibuilder.ApiBuilder.get("/attempts/{attemptId}/events", adminController::getProctorEvents);
+                        io.javalin.apibuilder.ApiBuilder.get("/events/{eventId}/evidence", adminController::getAttemptEvidence);
                     });
                 });
             });

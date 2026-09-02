@@ -27,7 +27,7 @@ public class StudentExamController {
 
     private final com.examsystem.application.ports.ExamAttemptRepository attemptRepository;
     private final com.examsystem.application.ports.ProctorRepository proctorRepository;
-    private final javax.sql.DataSource dataSource;
+    private final com.examsystem.application.ports.StudentQueryPort studentQueryPort;
 
     public StudentExamController(StartExamUseCase startUseCase, 
                                  SubmitExamUseCase submitUseCase, 
@@ -35,38 +35,19 @@ public class StudentExamController {
                                  QuestionRepository questionRepository, 
                                  com.examsystem.application.ports.ExamAttemptRepository attemptRepository,
                                  com.examsystem.application.ports.ProctorRepository proctorRepository,
-                                 javax.sql.DataSource dataSource) {
+                                 com.examsystem.application.ports.StudentQueryPort studentQueryPort) {
         this.startUseCase = startUseCase;
         this.submitUseCase = submitUseCase;
         this.examRepository = examRepository;
         this.questionRepository = questionRepository;
         this.attemptRepository = attemptRepository;
         this.proctorRepository = proctorRepository;
-        this.dataSource = dataSource;
+        this.studentQueryPort = studentQueryPort;
     }
 
     public void listHistory(Context ctx) {
         User user = ctx.attribute("user");
-        java.util.List<java.util.Map<String, Object>> history = new java.util.ArrayList<>();
-        try (java.sql.Connection conn = dataSource.getConnection();
-             java.sql.PreparedStatement ps = conn.prepareStatement("SELECT e.title, a.id, a.start_time, a.end_time, a.score, a.status FROM exam_attempts a JOIN exams e ON a.exam_id = e.id WHERE a.student_id = ? ORDER BY a.start_time DESC")) {
-            ps.setInt(1, user.id());
-            try (java.sql.ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    java.util.Map<String, Object> h = new java.util.HashMap<>();
-                    h.put("exam_title", rs.getString("title"));
-                    h.put("attempt_id", rs.getInt("id"));
-                    h.put("start_time", rs.getTimestamp("start_time").toInstant().toString());
-                    h.put("end_time", rs.getTimestamp("end_time") != null ? rs.getTimestamp("end_time").toInstant().toString() : null);
-                    h.put("score", rs.getObject("score"));
-                    h.put("status", rs.getString("status"));
-                    history.add(h);
-                }
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to load history", e);
-        }
-        ctx.json(history);
+        ctx.json(studentQueryPort.listHistory(user.id()));
     }
 
     public void startOrResumeExam(Context ctx) {
@@ -129,19 +110,27 @@ public class StudentExamController {
         enforceOwnership(ctx, attemptId);
         String eventType = ctx.formParam("eventType");
         if (eventType == null) throw new BadRequestResponse("Missing eventType");
-        proctorRepository.saveEvent(attemptId, eventType, java.time.Instant.now());
-        ctx.status(200);
+        int eventId = proctorRepository.saveEvent(attemptId, eventType, java.time.Instant.now());
+        ctx.json(java.util.Map.of("eventId", eventId));
     }
 
     public void uploadEvidence(Context ctx) {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
         enforceOwnership(ctx, attemptId);
+        int eventId = Integer.parseInt(ctx.pathParam("eventId"));
+        
         var uploadedFile = ctx.uploadedFile("screenshot");
         if (uploadedFile == null) throw new BadRequestResponse("Missing screenshot");
         
+        if (uploadedFile.size() > 5 * 1024 * 1024) throw new BadRequestResponse("Screenshot too large (max 5MB)");
+        String contentType = uploadedFile.contentType();
+        if (contentType == null || (!contentType.equals("image/jpeg") && !contentType.equals("image/png"))) {
+            throw new BadRequestResponse("Invalid content type, must be image/jpeg or image/png");
+        }
+        
         try {
             byte[] data = uploadedFile.content().readAllBytes();
-            proctorRepository.saveEvidence(attemptId, data, java.time.Instant.now());
+            proctorRepository.saveEvidence(eventId, data, contentType, java.time.Instant.now());
             ctx.status(200);
         } catch (Exception e) {
             throw new RuntimeException("Failed to save evidence", e);

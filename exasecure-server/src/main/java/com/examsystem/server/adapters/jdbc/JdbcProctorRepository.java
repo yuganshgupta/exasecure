@@ -17,25 +17,31 @@ public class JdbcProctorRepository implements ProctorRepository {
     }
 
     @Override
-    public void saveEvent(int attemptId, String eventType, Instant timestamp) {
+    public int saveEvent(int attemptId, String eventType, Instant timestamp) {
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("INSERT INTO proctor_logs (attempt_id, event_type, recorded_at) VALUES (?, ?, ?)")) {
+             PreparedStatement ps = conn.prepareStatement("INSERT INTO proctor_events (attempt_id, event_type, recorded_at) VALUES (?, ?, ?)", java.sql.Statement.RETURN_GENERATED_KEYS)) {
             ps.setInt(1, attemptId);
             ps.setString(2, eventType);
             ps.setTimestamp(3, Timestamp.from(timestamp));
             ps.executeUpdate();
+            try (ResultSet rs = ps.getGeneratedKeys()) {
+                if (rs.next()) return rs.getInt(1);
+            }
+            throw new RuntimeException("No ID generated for proctor_events");
         } catch (Exception e) {
             throw new RuntimeException("DB error", e);
         }
     }
 
     @Override
-    public void saveEvidence(int attemptId, byte[] screenshot, Instant timestamp) {
+    public void saveEvidence(int eventId, byte[] screenshot, String contentType, Instant timestamp) {
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("INSERT INTO proctor_evidence (attempt_id, screenshot, recorded_at) VALUES (?, ?, ?)")) {
-            ps.setInt(1, attemptId);
-            ps.setBytes(2, screenshot);
-            ps.setTimestamp(3, Timestamp.from(timestamp));
+             PreparedStatement ps = conn.prepareStatement("INSERT INTO proctor_evidence_v2 (event_id, content_type, byte_size, screenshot_data, recorded_at) VALUES (?, ?, ?, ?, ?)")) {
+            ps.setInt(1, eventId);
+            ps.setString(2, contentType);
+            ps.setInt(3, screenshot.length);
+            ps.setBytes(4, screenshot);
+            ps.setTimestamp(5, Timestamp.from(timestamp));
             ps.executeUpdate();
         } catch (Exception e) {
             throw new RuntimeException("DB error", e);
@@ -45,7 +51,7 @@ public class JdbcProctorRepository implements ProctorRepository {
     @Override
     public int countEvents(int attemptId, String eventType) {
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM proctor_logs WHERE attempt_id = ? AND event_type = ?")) {
+             PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM proctor_events WHERE attempt_id = ? AND event_type = ?")) {
             ps.setInt(1, attemptId);
             ps.setString(2, eventType);
             try (ResultSet rs = ps.executeQuery()) {
