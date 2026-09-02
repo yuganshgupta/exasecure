@@ -24,6 +24,7 @@
         <module>exasecure-legacy</module>
         <module>exasecure-server</module>
         <module>exasecure-client-common</module>
+        <module>exasecure-student-client</module>
     </modules>
 
     <dependencyManagement>
