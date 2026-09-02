@@ -51,7 +51,7 @@ class MigrationIntegrationTest {
             // Check schema version
             try (ResultSet rs = stmt.executeQuery("SELECT MAX(version) FROM schema_versions")) {
                 assertThat(rs.next()).isTrue();
-                assertThat(rs.getInt(1)).isEqualTo(6);
+                assertThat(rs.getInt(1)).isEqualTo(7);
             }
             
             // Check user remained

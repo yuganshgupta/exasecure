@@ -8,9 +8,14 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 public class DatabaseMigrator {
     private static final Logger log = LoggerFactory.getLogger(DatabaseMigrator.class);
@@ -54,6 +59,13 @@ public class DatabaseMigrator {
 
                 log.info("Successfully migrated to v6");
                 currentVersion = 6;
+            }
+            if (currentVersion < 7) {
+                log.info("Migrating schema to v7...");
+                executeScript(conn, "db/migration/schema-v7.sql");
+                migrateLegacyAnswerSelections(conn);
+                log.info("Successfully migrated to v7");
+                currentVersion = 7;
             }
         } catch (Exception e) {
             throw new RuntimeException("Database migration failed", e);
@@ -105,6 +117,72 @@ public class DatabaseMigrator {
         }
         return false;
     }
+
+    private void migrateLegacyAnswerSelections(Connection conn) throws Exception {
+        boolean originalAutoCommit = conn.getAutoCommit();
+        List<LegacyAnswerSelections> legacyAnswers = new ArrayList<>();
+
+        try (PreparedStatement select = conn.prepareStatement(
+                "SELECT id, selected_options FROM student_answers WHERE selected_options IS NOT NULL");
+             ResultSet rows = select.executeQuery()) {
+            while (rows.next()) {
+                legacyAnswers.add(new LegacyAnswerSelections(
+                        rows.getInt("id"), parseLegacySelections(rows.getInt("id"), rows.getString("selected_options"))));
+            }
+        }
+
+        try {
+            conn.setAutoCommit(false);
+            try (PreparedStatement delete = conn.prepareStatement(
+                         "DELETE FROM student_answer_options WHERE answer_id = ?");
+                 PreparedStatement insert = conn.prepareStatement(
+                         "INSERT INTO student_answer_options (answer_id, selected_option) VALUES (?, ?)");
+                 PreparedStatement recordVersion = conn.prepareStatement(
+                         "INSERT INTO schema_versions (version, applied_at) VALUES (7, CURRENT_TIMESTAMP)")) {
+                for (LegacyAnswerSelections answer : legacyAnswers) {
+                    delete.setInt(1, answer.answerId());
+                    delete.executeUpdate();
+
+                    for (int selectedOption : answer.selectedOptions()) {
+                        insert.setInt(1, answer.answerId());
+                        insert.setInt(2, selectedOption);
+                        insert.addBatch();
+                    }
+                }
+                insert.executeBatch();
+                recordVersion.executeUpdate();
+            }
+            conn.commit();
+        } catch (Exception e) {
+            conn.rollback();
+            throw e;
+        } finally {
+            conn.setAutoCommit(originalAutoCommit);
+        }
+    }
+
+    private Set<Integer> parseLegacySelections(int answerId, String csv) {
+        Set<Integer> selections = new LinkedHashSet<>();
+        if (csv.isBlank()) {
+            return selections;
+        }
+
+        for (String token : csv.split(",")) {
+            try {
+                int value = Integer.parseInt(token.trim());
+                if (value <= 0) {
+                    throw new NumberFormatException("selection must be positive");
+                }
+                selections.add(value);
+            } catch (NumberFormatException e) {
+                throw new IllegalStateException(
+                        "Legacy answer " + answerId + " has an invalid selected option", e);
+            }
+        }
+        return selections;
+    }
+
+    private record LegacyAnswerSelections(int answerId, Set<Integer> selectedOptions) {}
 
     private void executeScript(Connection conn, String path) throws Exception {
         try (InputStream is = getClass().getClassLoader().getResourceAsStream(path)) {
