@@ -25,6 +25,7 @@
         <module>exasecure-server</module>
         <module>exasecure-client-common</module>
         <module>exasecure-student-client</module>
+        <module>exasecure-admin-client</module>
     </modules>
 
     <dependencyManagement>
