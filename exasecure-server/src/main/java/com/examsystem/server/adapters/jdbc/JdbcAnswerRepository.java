@@ -19,7 +19,7 @@ public class JdbcAnswerRepository implements AnswerRepository {
     }
 
     @Override
-    public void saveAnswer(int attemptId, int questionId, List<Integer> selectedOptions, boolean isCorrect, Instant timestamp) {
+    public void saveAnswer(int attemptId, int questionId, List<Integer> selectedOptions, Instant timestamp) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
@@ -35,15 +35,11 @@ public class JdbcAnswerRepository implements AnswerRepository {
                     }
                 }
 
-                String csv = String.join(",", selectedOptions.stream().map(String::valueOf).toArray(String[]::new));
-
                 if (answerId != -1) {
                     try (PreparedStatement psUpdate = conn.prepareStatement(
-                            "UPDATE student_answers SET selected_options = ?, is_correct = ?, answer_timestamp = ? WHERE id = ?")) {
-                        psUpdate.setString(1, csv);
-                        psUpdate.setBoolean(2, isCorrect);
-                        psUpdate.setTimestamp(3, Timestamp.from(timestamp));
-                        psUpdate.setInt(4, answerId);
+                            "UPDATE student_answers SET answer_timestamp = ? WHERE id = ?")) {
+                        psUpdate.setTimestamp(1, Timestamp.from(timestamp));
+                        psUpdate.setInt(2, answerId);
                         psUpdate.executeUpdate();
                     }
                     try (PreparedStatement psDeleteOps = conn.prepareStatement("DELETE FROM student_answer_options WHERE answer_id = ?")) {
@@ -52,12 +48,10 @@ public class JdbcAnswerRepository implements AnswerRepository {
                     }
                 } else {
                     try (PreparedStatement psInsert = conn.prepareStatement(
-                            "INSERT INTO student_answers (attempt_id, question_id, selected_options, is_correct, answer_timestamp) VALUES (?, ?, ?, ?, ?)", Statement.RETURN_GENERATED_KEYS)) {
+                            "INSERT INTO student_answers (attempt_id, question_id, answer_timestamp) VALUES (?, ?, ?)", Statement.RETURN_GENERATED_KEYS)) {
                         psInsert.setInt(1, attemptId);
                         psInsert.setInt(2, questionId);
-                        psInsert.setString(3, csv);
-                        psInsert.setBoolean(4, isCorrect);
-                        psInsert.setTimestamp(5, Timestamp.from(timestamp));
+                        psInsert.setTimestamp(3, Timestamp.from(timestamp));
                         psInsert.executeUpdate();
                         try (ResultSet rs = psInsert.getGeneratedKeys()) {
                             if (rs.next()) {
@@ -67,7 +61,7 @@ public class JdbcAnswerRepository implements AnswerRepository {
                     }
                 }
 
-                if (answerId != -1 && !selectedOptions.isEmpty()) {
+                if (answerId != -1 && selectedOptions != null && !selectedOptions.isEmpty()) {
                     try (PreparedStatement psOps = conn.prepareStatement("INSERT INTO student_answer_options (answer_id, selected_option) VALUES (?, ?)")) {
                         for (Integer opt : selectedOptions) {
                             psOps.setInt(1, answerId);
@@ -90,18 +84,27 @@ public class JdbcAnswerRepository implements AnswerRepository {
     }
 
     @Override
-    public int countCorrectAnswersByAttempt(int attemptId) {
+    public java.util.Map<Integer, List<Integer>> getSelectedOptionsForAttempt(int attemptId) {
+        java.util.Map<Integer, List<Integer>> answers = new java.util.HashMap<>();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM student_answers WHERE attempt_id = ? AND is_correct = 1")) {
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT sa.question_id, sao.selected_option FROM student_answers sa " +
+                     "LEFT JOIN student_answer_options sao ON sa.id = sao.answer_id " +
+                     "WHERE sa.attempt_id = ?")) {
             ps.setInt(1, attemptId);
             try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return rs.getInt(1);
+                while (rs.next()) {
+                    int questionId = rs.getInt("question_id");
+                    int option = rs.getInt("selected_option");
+                    answers.computeIfAbsent(questionId, k -> new java.util.ArrayList<>());
+                    if (!rs.wasNull()) {
+                        answers.get(questionId).add(option);
+                    }
                 }
             }
         } catch (Exception e) {
             throw new RuntimeException("DB error", e);
         }
-        return 0;
+        return answers;
     }
 }

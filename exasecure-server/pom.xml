@@ -14,10 +14,22 @@
     <description>V2 Authoritative Server and Data Layer</description>
 
     <properties>
-        <javalin.version>6.4.0</javalin.version>
+        <javalin.version>7.2.3</javalin.version>
         <jackson.version>2.18.2</jackson.version>
         <hikaricp.version>6.2.1</hikaricp.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>io.javalin</groupId>
+                <artifactId>javalin-bom</artifactId>
+                <version>${javalin.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <dependency>
@@ -40,7 +52,6 @@
         <dependency>
             <groupId>io.javalin</groupId>
             <artifactId>javalin</artifactId>
-            <version>${javalin.version}</version>
         </dependency>
         
         <!-- JSON -->
@@ -105,7 +116,6 @@
         <dependency>
             <groupId>io.javalin</groupId>
             <artifactId>javalin-testtools</artifactId>
-            <version>${javalin.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>

@@ -1,3 +1,3 @@
 package com.examsystem.contracts;
 
-public record StudentSubmitExamRequestDto(int focusLostCount) {}
+public record StudentSubmitExamRequestDto() {}

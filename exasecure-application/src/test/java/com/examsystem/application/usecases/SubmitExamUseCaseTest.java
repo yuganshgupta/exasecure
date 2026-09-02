@@ -20,17 +20,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SubmitExamUseCaseTest {
 
     static class StubAnswerRepo implements AnswerRepository {
-        boolean savedCorrect = false;
-        int countCorrect = 5;
+        boolean saved = false;
+        java.util.Map<Integer, List<Integer>> answers = new java.util.HashMap<>();
         
         @Override
-        public void saveAnswer(int attemptId, int questionId, List<Integer> selectedOptions, boolean isCorrect, Instant timestamp) {
-            this.savedCorrect = isCorrect;
+        public void saveAnswer(int attemptId, int questionId, List<Integer> selectedOptions, Instant timestamp) {
+            this.saved = true;
+            this.answers.put(questionId, selectedOptions);
         }
 
         @Override
-        public int countCorrectAnswersByAttempt(int attemptId) {
-            return countCorrect;
+        public java.util.Map<Integer, List<Integer>> getSelectedOptionsForAttempt(int attemptId) {
+            return answers;
         }
     }
 
@@ -74,33 +75,32 @@ class SubmitExamUseCaseTest {
 
         @Override
         public List<Question> findByExamId(int examId) {
-            return Collections.emptyList();
+            return List.of(new Question(1, 1, "Q1", "SINGLE", Collections.emptyList(), 2, true));
         }
     }
 
-    @Test
-    void saveAnswer_correctAnswer_savesAsCorrect() {
-        StubAnswerRepo answerRepo = new StubAnswerRepo();
-        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubClock());
-        
-        useCase.saveAnswer(100, 1, List.of(2), Duration.ofMinutes(60));
-        
-        assertThat(answerRepo.savedCorrect).isTrue();
+    static class StubProctorRepo implements com.examsystem.application.ports.ProctorRepository {
+        @Override
+        public void saveEvent(int attemptId, String eventType, Instant timestamp) {}
+        @Override
+        public void saveEvidence(int attemptId, byte[] screenshot, Instant timestamp) {}
+        @Override
+        public int countEvents(int attemptId, String eventType) { return 0; }
     }
 
     @Test
-    void saveAnswer_wrongAnswer_savesAsIncorrect() {
+    void saveAnswer_savesCorrectly() {
         StubAnswerRepo answerRepo = new StubAnswerRepo();
-        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubClock());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
         
-        useCase.saveAnswer(100, 1, List.of(1), Duration.ofMinutes(60));
+        useCase.saveAnswer(100, 1, List.of(2), Duration.ofMinutes(60));
         
-        assertThat(answerRepo.savedCorrect).isFalse();
+        assertThat(answerRepo.saved).isTrue();
     }
 
     @Test
     void saveAnswer_invalidQuestion_throws() {
-        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), new StubAttemptRepo(), new StubQuestionRepo(), new StubClock());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), new StubAttemptRepo(), new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
         
         assertThatThrownBy(() -> useCase.saveAnswer(100, 999, List.of(1), Duration.ofMinutes(60)))
             .isInstanceOf(IllegalArgumentException.class)
@@ -112,7 +112,7 @@ class SubmitExamUseCaseTest {
         StubAttemptRepo attemptRepo = new StubAttemptRepo();
         attemptRepo.startTime = Instant.now().minus(Duration.ofMinutes(120)); // Expired
         
-        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), attemptRepo, new StubQuestionRepo(), new StubClock());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), attemptRepo, new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
         
         assertThatThrownBy(() -> useCase.saveAnswer(100, 1, List.of(2), Duration.ofMinutes(60)))
             .isInstanceOf(IllegalStateException.class)
@@ -122,11 +122,14 @@ class SubmitExamUseCaseTest {
     @Test
     void submitExam_calculatesAndSetsScore() {
         StubAttemptRepo attemptRepo = new StubAttemptRepo();
-        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), attemptRepo, new StubQuestionRepo(), new StubClock());
+        StubAnswerRepo answerRepo = new StubAnswerRepo();
+        answerRepo.answers.put(1, List.of(2)); // Correct answer for Q1
         
-        int score = useCase.submitExam(100, 0, Instant.now());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, attemptRepo, new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
         
-        assertThat(score).isEqualTo(5);
-        assertThat(attemptRepo.finalScore).isEqualTo(5);
+        int score = useCase.submitExam(100, Instant.now());
+        
+        assertThat(score).isEqualTo(1); // 1 correct answer
+        assertThat(attemptRepo.finalScore).isEqualTo(1);
     }
 }

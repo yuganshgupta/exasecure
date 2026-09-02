@@ -29,6 +29,13 @@ public class DatabaseMigrator {
                 log.info("Migrating schema to v4...");
                 executeScript(conn, "db/migration/schema-v4.sql");
                 log.info("Successfully migrated to v4");
+                currentVersion = 4;
+            }
+            if (currentVersion < 5) {
+                log.info("Migrating schema to v5...");
+                executeScript(conn, "db/migration/schema-v5.sql");
+                log.info("Successfully migrated to v5");
+                currentVersion = 5;
             }
         } catch (Exception e) {
             throw new RuntimeException("Database migration failed", e);

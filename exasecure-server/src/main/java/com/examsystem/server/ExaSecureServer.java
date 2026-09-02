@@ -14,6 +14,7 @@ import com.examsystem.server.config.AppConfig;
 import com.examsystem.server.db.DatabaseMigrator;
 import com.examsystem.server.http.controllers.AuthController;
 import com.examsystem.server.http.controllers.StudentExamController;
+import com.examsystem.server.http.controllers.AdminController;
 import com.examsystem.server.http.exceptions.GlobalExceptionHandler;
 import io.javalin.Javalin;
 import org.slf4j.Logger;
@@ -46,35 +47,50 @@ public class ExaSecureServer {
         JdbcAnswerRepository answerRepository = new JdbcAnswerRepository(dataSource);
         JdbcExamRepository examRepository = new JdbcExamRepository(dataSource);
         SessionManager sessionManager = new SessionManager(dataSource);
+        JdbcProctorRepository proctorRepository = new JdbcProctorRepository(dataSource);
 
         // Use Cases
         AuthenticateUserUseCase authUseCase = new AuthenticateUserUseCase(userRepository, passwordEncoder);
         StartExamUseCase startUseCase = new StartExamUseCase(attemptRepository, clockPort);
-        SubmitExamUseCase submitUseCase = new SubmitExamUseCase(answerRepository, attemptRepository, questionRepository, clockPort);
+        SubmitExamUseCase submitUseCase = new SubmitExamUseCase(answerRepository, attemptRepository, questionRepository, proctorRepository, clockPort);
 
         // Controllers
         AuthController authController = new AuthController(authUseCase, sessionManager);
-        StudentExamController studentController = new StudentExamController(startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository);
+        StudentExamController studentController = new StudentExamController(startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, dataSource);
+        AdminController adminController = new AdminController(examRepository, questionRepository, userRepository, dataSource);
         AuthMiddleware authMiddleware = new AuthMiddleware(sessionManager);
 
         // App init
         app = Javalin.create(javalinConfig -> {
-            javalinConfig.showJavalinBanner = false;
+            javalinConfig.startup.showJavalinBanner = false;
+            
+            javalinConfig.routes.apiBuilder(() -> {
+                io.javalin.apibuilder.ApiBuilder.get("/health", ctx -> ctx.result("OK"));
+                
+                io.javalin.apibuilder.ApiBuilder.path("/api/v1", () -> {
+                    io.javalin.apibuilder.ApiBuilder.before("/*", authMiddleware::enforceAuthentication);
+                    
+                    io.javalin.apibuilder.ApiBuilder.post("/auth/login", authController::login);
+                    io.javalin.apibuilder.ApiBuilder.post("/auth/logout", authController::logout);
+
+                    io.javalin.apibuilder.ApiBuilder.get("/student/history", studentController::listHistory);
+                    io.javalin.apibuilder.ApiBuilder.post("/student/exams/{examId}/attempts", studentController::startOrResumeExam);
+                    io.javalin.apibuilder.ApiBuilder.get("/student/questions/{questionId}", studentController::getQuestion);
+                    io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/answers", studentController::saveAnswer);
+                    io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/submit", studentController::submitExam);
+                    io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/events", studentController::recordEvent);
+                    io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/proctor-evidence", studentController::uploadEvidence);
+                    
+                    io.javalin.apibuilder.ApiBuilder.path("/admin", () -> {
+                        io.javalin.apibuilder.ApiBuilder.get("/users", adminController::listUsers);
+                        io.javalin.apibuilder.ApiBuilder.get("/exams", adminController::listExams);
+                        io.javalin.apibuilder.ApiBuilder.get("/attempts/{attemptId}/evidence", adminController::getAttemptEvidence);
+                    });
+                });
+            });
+
+            GlobalExceptionHandler.register(javalinConfig);
         });
-
-        app.before("/api/v1/*", authMiddleware::enforceAuthentication);
-        
-        app.get("/health", ctx -> ctx.result("OK"));
-
-        app.post("/api/v1/auth/login", authController::login);
-        app.post("/api/v1/auth/logout", authController::logout);
-
-        app.post("/api/v1/student/exams/{examId}/attempts", studentController::startOrResumeExam);
-        app.get("/api/v1/student/questions/{questionId}", studentController::getQuestion);
-        app.post("/api/v1/student/attempts/{attemptId}/answers", studentController::saveAnswer);
-        app.post("/api/v1/student/attempts/{attemptId}/submit", studentController::submitExam);
-
-        GlobalExceptionHandler.register(app);
 
         app.start(config.port);
         log.info("ExaSecure Server running on port {}", config.port);
