@@ -180,10 +180,31 @@ public class StudentDashboardView {
         startBtn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
         startBtn.setStyle("-fx-background-color: #2563eb; -fx-text-fill: white; -fx-background-radius: 6px; -fx-cursor: hand; -fx-padding: 0 16;");
 
-        startBtn.setOnAction(e -> launchExam(exam, startBtn));
+        startBtn.setOnAction(e -> promptAndLaunchExam(exam, startBtn));
 
         card.getChildren().addAll(info, spacer, startBtn);
         return card;
+    }
+
+    private void promptAndLaunchExam(StudentExamDto exam, Button startBtn) {
+        String message = "Examination: " + exam.title() + "\n"
+                + "Duration: " + exam.durationMinutes() + " minutes\n\n"
+                + "SECURITY & EXAMINATION RULES:\n"
+                + "1. This exam environment is actively proctored.\n"
+                + "2. Switching away from the exam or losing window focus records a proctoring violation and captures screenshot evidence.\n"
+                + "3. Your answers are automatically saved to the server in real time.\n"
+                + "4. You can flag questions for review and return to them anytime before submission.\n"
+                + "5. When the countdown timer reaches 00:00, your exam will be automatically finalized.\n\n"
+                + "Click 'OK' to enter the examination environment.";
+
+        boolean confirmed = UiFeedback.showConfirmation(
+                "Examination Pre-Flight Check",
+                "Ready to begin: " + exam.title() + "?",
+                message
+        );
+        if (confirmed) {
+            launchExam(exam, startBtn);
+        }
     }
 
     private void launchExam(StudentExamDto exam, Button startBtn) {

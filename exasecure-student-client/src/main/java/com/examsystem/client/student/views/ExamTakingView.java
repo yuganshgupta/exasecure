@@ -38,6 +38,7 @@ public class ExamTakingView {
     private final StudentAttemptDto attempt;
     private final List<StudentQuestionDto> questions;
     private final Map<Integer, List<Integer>> answers;
+    private final Set<Integer> flaggedQuestions = new HashSet<>();
 
     private final BorderPane view;
     private final Label timerLabel;
@@ -46,9 +47,11 @@ public class ExamTakingView {
     private final Label questionTextLabel;
     private final VBox optionsBox;
     private final Label autosaveStatusLabel;
+    private final Button retryAutosaveBtn;
     private final Button prevBtn;
     private final Button nextBtn;
     private final Button clearBtn;
+    private final Button flagBtn;
     private final Button submitBtn;
     private final FlowPane palettePane;
     private final Label answeredSummaryLabel;
@@ -86,9 +89,11 @@ public class ExamTakingView {
         this.questionTextLabel = new Label();
         this.optionsBox = new VBox(12);
         this.autosaveStatusLabel = new Label();
+        this.retryAutosaveBtn = new Button("🔄 Retry Save");
         this.prevBtn = new Button("← Previous");
         this.nextBtn = new Button("Next →");
         this.clearBtn = new Button("Clear Choice");
+        this.flagBtn = new Button("🚩 Flag for Review");
         this.submitBtn = new Button("Submit Exam");
         this.palettePane = new FlowPane();
         this.answeredSummaryLabel = new Label();
@@ -179,7 +184,16 @@ public class ExamTakingView {
 
         autosaveStatusLabel.setStyle("-fx-font-size: 12px; -fx-text-fill: #64748b;");
 
-        questionHeader.getChildren().addAll(questionNumberLabel, questionTypeBadge, qSpacer, autosaveStatusLabel);
+        retryAutosaveBtn.setVisible(false);
+        retryAutosaveBtn.setManaged(false);
+        retryAutosaveBtn.setStyle("-fx-background-color: #fee2e2; -fx-text-fill: #b91c1c; -fx-font-size: 11px; -fx-padding: 2 8; -fx-background-radius: 4px; -fx-cursor: hand;");
+        retryAutosaveBtn.setOnAction(e -> {
+            StudentQuestionDto q = questions.get(currentIndex);
+            List<Integer> currentAnswers = answers.getOrDefault(q.id(), List.of());
+            triggerAutosave(q.id(), currentAnswers);
+        });
+
+        questionHeader.getChildren().addAll(questionNumberLabel, questionTypeBadge, qSpacer, autosaveStatusLabel, retryAutosaveBtn);
 
         questionTextLabel.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 16));
         questionTextLabel.setStyle("-fx-text-fill: #1e293b; -fx-line-spacing: 4px;");
@@ -203,6 +217,9 @@ public class ExamTakingView {
         clearBtn.setStyle("-fx-background-color: white; -fx-border-color: #cbd5e1; -fx-text-fill: #64748b; -fx-background-radius: 6px; -fx-border-radius: 6px; -fx-padding: 8 12; -fx-cursor: hand;");
         clearBtn.setOnAction(e -> clearCurrentAnswer());
 
+        flagBtn.setStyle("-fx-background-color: white; -fx-border-color: #8b5cf6; -fx-text-fill: #7c3aed; -fx-background-radius: 6px; -fx-border-radius: 6px; -fx-padding: 8 12; -fx-cursor: hand; -fx-font-weight: bold;");
+        flagBtn.setOnAction(e -> toggleCurrentFlag());
+
         Region navSpacer = new Region();
         HBox.setHgrow(navSpacer, Priority.ALWAYS);
 
@@ -215,7 +232,7 @@ public class ExamTakingView {
             }
         });
 
-        navBar.getChildren().addAll(prevBtn, clearBtn, navSpacer, nextBtn);
+        navBar.getChildren().addAll(prevBtn, clearBtn, flagBtn, navSpacer, nextBtn);
 
         card.getChildren().addAll(questionHeader, questionTextLabel, optionsBox, navBar);
 
@@ -227,7 +244,7 @@ public class ExamTakingView {
         // Right Sidebar: Question Palette
         VBox rightSidebar = new VBox(16);
         rightSidebar.setPadding(new Insets(24));
-        rightSidebar.setPrefWidth(260);
+        rightSidebar.setPrefWidth(270);
         rightSidebar.setStyle("-fx-background-color: white; -fx-border-color: #e2e8f0; -fx-border-width: 0 0 0 1;");
 
         Label paletteTitle = new Label("Question Navigator");
@@ -239,12 +256,14 @@ public class ExamTakingView {
         palettePane.setHgap(8);
         palettePane.setVgap(8);
 
-        HBox legend = new HBox(12);
+        VBox legend = new VBox(6);
         Label greenDot = new Label("● Answered");
         greenDot.setStyle("-fx-text-fill: #16a34a; -fx-font-size: 11px;");
+        Label purpleDot = new Label("● Flagged for Review");
+        purpleDot.setStyle("-fx-text-fill: #8b5cf6; -fx-font-size: 11px;");
         Label grayDot = new Label("○ Unanswered");
         grayDot.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
-        legend.getChildren().addAll(greenDot, grayDot);
+        legend.getChildren().addAll(greenDot, purpleDot, grayDot);
 
         rightSidebar.getChildren().addAll(paletteTitle, answeredSummaryLabel, palettePane, legend);
         view.setRight(rightSidebar);
@@ -279,54 +298,67 @@ public class ExamTakingView {
         if (stage == null) return;
         focusListener = (obs, oldVal, newVal) -> {
             if (!newVal && !isDialogActive && !isSubmitted) {
-                handleFocusLossViolation();
+                handleFocusLost();
             }
         };
         stage.focusedProperty().addListener(focusListener);
     }
 
-    private void handleFocusLossViolation() {
+    private void handleFocusLost() {
         long now = System.currentTimeMillis();
-        if (now - lastProctorEventTime < 3000) {
-            return; // Debounce
-        }
+        if (now - lastProctorEventTime < 3000) return; // Debounce
         lastProctorEventTime = now;
 
-        proctorNoticeBanner.setText("⚠ Focus loss detected! An automated evidence screenshot has been captured and submitted.");
+        proctorNoticeBanner.setText("⚠️ Warning: Window focus lost. Proctoring event recorded and evidence uploaded to the server.");
         proctorNoticeBanner.setVisible(true);
         proctorNoticeBanner.setManaged(true);
 
         byte[] screenshot = ScreenCaptureService.captureScreenAsJpeg();
+
         AsyncRunner.runAsync(
                 () -> {
                     int eventId = apiClient.recordProctorEvent(attempt.id(), "FOCUS_LOST");
-                    apiClient.uploadProctorEvidence(attempt.id(), eventId, screenshot, "image/jpeg");
-                    return eventId;
+                    if (screenshot != null && screenshot.length > 0) {
+                        try {
+                            apiClient.uploadProctorEvidence(attempt.id(), eventId, screenshot, "image/jpeg");
+                        } catch (Exception ignored) {}
+                    }
+                    return true;
                 },
-                (Integer eventId) -> {
-                    // Successfully recorded
-                },
-                (Throwable err) -> {
-                    System.err.println("[PROCTOR] Failed to upload focus loss evidence: " + err.getMessage());
-                }
+                (Boolean ok) -> {},
+                (Throwable err) -> {}
         );
     }
 
     private void renderCurrentQuestion() {
-        if (questions == null || questions.isEmpty()) return;
+        if (questions.isEmpty()) return;
 
         StudentQuestionDto q = questions.get(currentIndex);
         questionNumberLabel.setText("Question " + (currentIndex + 1) + " of " + questions.size());
+
         boolean isMulti = "MULTI".equalsIgnoreCase(q.type());
-        questionTypeBadge.setText(isMulti ? "MULTIPLE CHOICE (Select all that apply)" : "SINGLE CHOICE");
+        questionTypeBadge.setText(isMulti ? "MULTIPLE CHOICE (Select all that apply)" : "SINGLE CHOICE (Select one)");
+        questionTypeBadge.setStyle(isMulti
+                ? "-fx-background-color: #fdf4ff; -fx-text-fill: #a21caf; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 3 8; -fx-background-radius: 4px;"
+                : "-fx-background-color: #e0f2fe; -fx-text-fill: #0369a1; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 3 8; -fx-background-radius: 4px;");
+
         questionTextLabel.setText(q.text());
+
+        // Update Flag button state
+        boolean isFlagged = flaggedQuestions.contains(q.id());
+        if (isFlagged) {
+            flagBtn.setText("🏳️ Unflag");
+            flagBtn.setStyle("-fx-background-color: #8b5cf6; -fx-text-fill: white; -fx-background-radius: 6px; -fx-padding: 8 12; -fx-cursor: hand; -fx-font-weight: bold;");
+        } else {
+            flagBtn.setText("🚩 Flag for Review");
+            flagBtn.setStyle("-fx-background-color: white; -fx-border-color: #8b5cf6; -fx-text-fill: #7c3aed; -fx-background-radius: 6px; -fx-border-radius: 6px; -fx-padding: 8 12; -fx-cursor: hand; -fx-font-weight: bold;");
+        }
 
         prevBtn.setDisable(currentIndex == 0);
         nextBtn.setDisable(currentIndex == questions.size() - 1);
 
         optionsBox.getChildren().clear();
-        List<Integer> selectedOptions = answers.getOrDefault(q.id(), new ArrayList<>());
-
+        List<Integer> selectedOptions = answers.getOrDefault(q.id(), List.of());
         ToggleGroup singleGroup = isMulti ? null : new ToggleGroup();
 
         for (StudentOptionDto opt : q.options()) {
@@ -380,9 +412,22 @@ public class ExamTakingView {
         updatePalette();
     }
 
+    private void toggleCurrentFlag() {
+        StudentQuestionDto q = questions.get(currentIndex);
+        if (flaggedQuestions.contains(q.id())) {
+            flaggedQuestions.remove(q.id());
+        } else {
+            flaggedQuestions.add(q.id());
+        }
+        renderCurrentQuestion();
+        updatePalette();
+    }
+
     private void triggerAutosave(int questionId, List<Integer> selected) {
         autosaveStatusLabel.setText("Saving answer...");
         autosaveStatusLabel.setTextFill(Color.web("#d97706"));
+        retryAutosaveBtn.setVisible(false);
+        retryAutosaveBtn.setManaged(false);
 
         AsyncRunner.runAsync(
                 () -> {
@@ -393,10 +438,14 @@ public class ExamTakingView {
                     String time = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
                     autosaveStatusLabel.setText("✓ Saved (" + time + ")");
                     autosaveStatusLabel.setTextFill(Color.web("#16a34a"));
+                    retryAutosaveBtn.setVisible(false);
+                    retryAutosaveBtn.setManaged(false);
                 },
                 (Throwable err) -> {
                     autosaveStatusLabel.setText("✗ Autosave failed: " + err.getMessage());
                     autosaveStatusLabel.setTextFill(Color.web("#dc2626"));
+                    retryAutosaveBtn.setVisible(true);
+                    retryAutosaveBtn.setManaged(true);
                 }
         );
     }
@@ -404,12 +453,16 @@ public class ExamTakingView {
     private void updatePalette() {
         palettePane.getChildren().clear();
         int answeredCount = 0;
+        int flaggedCount = 0;
 
         for (int i = 0; i < questions.size(); i++) {
             StudentQuestionDto q = questions.get(i);
             List<Integer> sel = answers.get(q.id());
             boolean answered = sel != null && !sel.isEmpty();
+            boolean flagged = flaggedQuestions.contains(q.id());
+
             if (answered) answeredCount++;
+            if (flagged) flaggedCount++;
 
             Button pBtn = new Button(String.valueOf(i + 1));
             pBtn.setPrefSize(38, 38);
@@ -422,38 +475,45 @@ public class ExamTakingView {
                 updatePalette();
             });
 
-            if (i == currentIndex) {
-                pBtn.setStyle("-fx-background-color: " + (answered ? "#16a34a" : "#e2e8f0")
-                        + "; -fx-text-fill: " + (answered ? "white" : "#0f172a")
-                        + "; -fx-border-color: #2563eb; -fx-border-width: 2.5px; -fx-border-radius: 4px; -fx-cursor: hand;");
+            boolean isCurrent = (i == currentIndex);
+            String border = isCurrent ? "-fx-border-color: #2563eb; -fx-border-width: 2px; -fx-border-radius: 4px;" : "-fx-border-width: 0;";
+
+            if (flagged) {
+                pBtn.setStyle("-fx-background-color: #8b5cf6; -fx-text-fill: white; -fx-background-radius: 4px; " + border + " -fx-cursor: hand;");
+            } else if (answered) {
+                pBtn.setStyle("-fx-background-color: #16a34a; -fx-text-fill: white; -fx-background-radius: 4px; " + border + " -fx-cursor: hand;");
             } else {
-                pBtn.setStyle("-fx-background-color: " + (answered ? "#16a34a" : "#f1f5f9")
-                        + "; -fx-text-fill: " + (answered ? "white" : "#334155")
-                        + "; -fx-border-color: #cbd5e1; -fx-border-radius: 4px; -fx-cursor: hand;");
+                pBtn.setStyle("-fx-background-color: #f1f5f9; -fx-text-fill: #475569; -fx-background-radius: 4px; " + border + " -fx-cursor: hand;");
             }
 
             palettePane.getChildren().add(pBtn);
         }
 
-        answeredSummaryLabel.setText(answeredCount + " of " + questions.size() + " answered");
+        answeredSummaryLabel.setText(answeredCount + "/" + questions.size() + " Answered"
+                + (flaggedCount > 0 ? " • " + flaggedCount + " Flagged" : ""));
     }
 
     private void confirmAndSubmitExam() {
         isDialogActive = true;
         int answeredCount = 0;
-        for (StudentQuestionDto q : questions) {
-            List<Integer> sel = answers.get(q.id());
-            if (sel != null && !sel.isEmpty()) answeredCount++;
+        for (var q : questions) {
+            var a = answers.get(q.id());
+            if (a != null && !a.isEmpty()) answeredCount++;
         }
         int unanswered = questions.size() - answeredCount;
+        int flagged = flaggedQuestions.size();
 
-        String content = "Answered: " + answeredCount + " of " + questions.size() + " questions.\n";
+        StringBuilder content = new StringBuilder();
+        content.append("Answered: ").append(answeredCount).append(" of ").append(questions.size()).append(" questions.\n");
         if (unanswered > 0) {
-            content += "Warning: You have " + unanswered + " unanswered question(s).\n\n";
+            content.append("⚠️ Warning: You have ").append(unanswered).append(" unanswered question(s)!\n");
         }
-        content += "Once submitted, your answers cannot be modified and your exam attempt will be finalized and graded.";
+        if (flagged > 0) {
+            content.append("🚩 Note: You have ").append(flagged).append(" question(s) flagged for review.\n");
+        }
+        content.append("\nOnce submitted, your answers cannot be modified and your exam attempt will be finalized and graded.");
 
-        boolean confirmed = UiFeedback.showConfirmation("Submit Examination", "Are you ready to submit your exam?", content);
+        boolean confirmed = UiFeedback.showConfirmation("Submit Examination", "Are you ready to submit your exam?", content.toString());
         isDialogActive = false;
 
         if (confirmed) {
