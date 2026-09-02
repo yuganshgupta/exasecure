@@ -569,6 +569,35 @@ class ServerIntegrationTest {
         assertAttemptSubmittedWithScore(205, 1);
     }
 
+    @Test
+    void studentAndAdminQueryEndpoints_returnExpectedDataWithoutLeakage() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // 1. Student lists available exams
+        HttpResponse<String> examsRes = sendJson(
+                client, "GET", "/api/v1/student/exams", "token-stu1", null);
+        assertThat(examsRes.statusCode()).isEqualTo(200);
+        assertThat(examsRes.body()).contains("Option Number Exam");
+
+        // 2. Student lists attempt questions without correctness leakage
+        HttpResponse<String> questionsRes = sendJson(
+                client, "GET", "/api/v1/student/attempts/201/questions", "token-stu1", null);
+        assertThat(questionsRes.statusCode()).isEqualTo(200);
+        assertThat(questionsRes.body()).doesNotContain("\"correct\"");
+        assertThat(questionsRes.body()).contains("Owned question");
+
+        // 3. Student gets saved answers for attempt
+        HttpResponse<String> answersRes = sendJson(
+                client, "GET", "/api/v1/student/attempts/201/answers", "token-stu1", null);
+        assertThat(answersRes.statusCode()).isEqualTo(200);
+
+        // 4. Admin gets questions with correctness
+        HttpResponse<String> adminQuestionsRes = sendJson(
+                client, "GET", "/api/v1/admin/exams/1/questions", "token-admin1", null);
+        assertThat(adminQuestionsRes.statusCode()).isEqualTo(200);
+        assertThat(adminQuestionsRes.body()).contains("\"correct\"");
+    }
+
     private static void assertDatabaseCount(String sql, int expected) throws Exception {
         try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              var statement = conn.createStatement();

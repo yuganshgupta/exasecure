@@ -2,6 +2,7 @@ package com.examsystem.server.adapters.jdbc;
 
 import com.examsystem.application.ports.StudentQueryPort;
 import com.examsystem.application.query.StudentAttemptHistoryResult;
+import com.examsystem.application.query.StudentExamResult;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -37,5 +38,25 @@ public class JdbcStudentQueryPort implements StudentQueryPort {
             throw new RuntimeException(e);
         }
         return history;
+    }
+
+    @Override
+    public List<StudentExamResult> listAvailableExams() {
+        List<StudentExamResult> exams = new ArrayList<>();
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT id, title, duration_minutes FROM exams WHERE is_active = 1 ORDER BY id ASC")) {
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    exams.add(new StudentExamResult(
+                            rs.getInt("id"),
+                            rs.getString("title"),
+                            rs.getInt("duration_minutes")));
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return exams;
     }
 }

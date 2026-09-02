@@ -1,6 +1,7 @@
 package com.examsystem.server.http.controllers;
 
 import com.examsystem.application.ports.AdminQueryPort;
+import com.examsystem.application.ports.QuestionRepository;
 import com.examsystem.application.commands.AdminCreateUserCommand;
 import com.examsystem.application.commands.AdminExamDefinitionCommand;
 import com.examsystem.application.commands.AdminOptionDefinitionCommand;
@@ -14,31 +15,54 @@ import com.examsystem.contracts.admin.AdminExamDefinitionRequestDto;
 import com.examsystem.contracts.admin.AdminEvidenceDto;
 import com.examsystem.contracts.admin.AdminExamMutationResultDto;
 import com.examsystem.contracts.admin.AdminMutationResultDto;
+import com.examsystem.contracts.admin.AdminOptionDefinitionDto;
+import com.examsystem.contracts.admin.AdminQuestionDefinitionDto;
 import com.examsystem.contracts.admin.AdminUpdateUserRequestDto;
+import com.examsystem.domain.models.Question;
 import com.examsystem.domain.models.User;
 import com.examsystem.server.http.mappers.AdminContractMapper;
 import io.javalin.http.Context;
 import io.javalin.http.ForbiddenResponse;
 import io.javalin.http.NotFoundResponse;
 
+import java.util.List;
+
 public class AdminController {
     private final AdminQueryPort adminQueryPort;
     private final AdminUserMutationUseCase userMutationUseCase;
     private final AdminExamDefinitionUseCase examDefinitionUseCase;
+    private final QuestionRepository questionRepository;
 
     public AdminController(
             AdminQueryPort adminQueryPort,
             AdminUserMutationUseCase userMutationUseCase,
-            AdminExamDefinitionUseCase examDefinitionUseCase) {
+            AdminExamDefinitionUseCase examDefinitionUseCase,
+            QuestionRepository questionRepository) {
         this.adminQueryPort = adminQueryPort;
         this.userMutationUseCase = userMutationUseCase;
         this.examDefinitionUseCase = examDefinitionUseCase;
+        this.questionRepository = questionRepository;
     }
 
     public void listExams(Context ctx) {
         ctx.json(adminQueryPort.listExams().stream()
                 .map(AdminContractMapper::toExamDto)
                 .toList());
+    }
+
+    public void getExamQuestions(Context ctx) {
+        int examId = Integer.parseInt(ctx.pathParam("examId"));
+        List<Question> questions = questionRepository.findByExamId(examId);
+        List<AdminQuestionDefinitionDto> dtos = questions.stream()
+                .filter(Question::isActive)
+                .map(q -> new AdminQuestionDefinitionDto(
+                        q.text(),
+                        q.type(),
+                        q.options().stream()
+                                .map(o -> new AdminOptionDefinitionDto(o.text(), o.correct()))
+                                .toList()))
+                .toList();
+        ctx.json(dtos);
     }
 
     public void listUsers(Context ctx) {

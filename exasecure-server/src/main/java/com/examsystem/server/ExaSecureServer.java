@@ -67,9 +67,10 @@ public class ExaSecureServer {
         com.examsystem.application.ports.AdminQueryPort adminQueryPort = new com.examsystem.server.adapters.jdbc.JdbcAdminQueryPort(dataSource);
         com.examsystem.application.ports.StudentQueryPort studentQueryPort = new com.examsystem.server.adapters.jdbc.JdbcStudentQueryPort(dataSource);
         AuthController authController = new AuthController(authUseCase, sessionManager);
-        StudentExamController studentController = new StudentExamController(startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, studentQueryPort);
+        StudentExamController studentController = new StudentExamController(
+                startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, studentQueryPort, answerRepository);
         AdminController adminController = new AdminController(
-                adminQueryPort, adminUserMutationUseCase, adminExamDefinitionUseCase);
+                adminQueryPort, adminUserMutationUseCase, adminExamDefinitionUseCase, questionRepository);
         AuthMiddleware authMiddleware = new AuthMiddleware(sessionManager);
 
         // App init
@@ -85,11 +86,18 @@ public class ExaSecureServer {
                     io.javalin.apibuilder.ApiBuilder.post("/auth/login", authController::login);
                     io.javalin.apibuilder.ApiBuilder.post("/auth/logout", authController::logout);
 
+                    io.javalin.apibuilder.ApiBuilder.get("/student/exams", studentController::listAvailableExams);
                     io.javalin.apibuilder.ApiBuilder.get("/student/history", studentController::listHistory);
                     io.javalin.apibuilder.ApiBuilder.post("/student/exams/{examId}/attempts", studentController::startOrResumeExam);
                     io.javalin.apibuilder.ApiBuilder.get(
+                            "/student/attempts/{attemptId}/questions",
+                            studentController::getAttemptQuestions);
+                    io.javalin.apibuilder.ApiBuilder.get(
                             "/student/attempts/{attemptId}/questions/{questionId}",
                             studentController::getQuestion);
+                    io.javalin.apibuilder.ApiBuilder.get(
+                            "/student/attempts/{attemptId}/answers",
+                            studentController::getAttemptAnswers);
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/answers", studentController::saveAnswer);
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/submit", studentController::submitExam);
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/events", studentController::recordEvent);
@@ -101,6 +109,7 @@ public class ExaSecureServer {
                         io.javalin.apibuilder.ApiBuilder.put("/users/{userId}", adminController::updateUser);
                         io.javalin.apibuilder.ApiBuilder.delete("/users/{userId}", adminController::deactivateUser);
                         io.javalin.apibuilder.ApiBuilder.get("/exams", adminController::listExams);
+                        io.javalin.apibuilder.ApiBuilder.get("/exams/{examId}/questions", adminController::getExamQuestions);
                         io.javalin.apibuilder.ApiBuilder.post("/exams", adminController::createExamDefinition);
                         io.javalin.apibuilder.ApiBuilder.post(
                                 "/exams/{examId}/revisions", adminController::reviseExamDefinition);

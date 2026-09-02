@@ -1,23 +1,29 @@
 package com.examsystem.server.http.controllers;
 
+import com.examsystem.application.ports.AnswerRepository;
+import com.examsystem.application.ports.ExamAttemptRepository;
 import com.examsystem.application.ports.ExamRepository;
+import com.examsystem.application.ports.ProctorRepository;
 import com.examsystem.application.ports.QuestionRepository;
+import com.examsystem.application.ports.StudentQueryPort;
 import com.examsystem.application.usecases.StartExamUseCase;
 import com.examsystem.application.usecases.SubmitExamUseCase;
-import com.examsystem.contracts.StudentQuestionDto;
+import com.examsystem.contracts.StudentExamDto;
 import com.examsystem.contracts.StudentOptionDto;
+import com.examsystem.contracts.StudentQuestionDto;
 import com.examsystem.contracts.StudentSaveAnswerRequestDto;
-import com.examsystem.contracts.StudentSubmitExamRequestDto;
 import com.examsystem.domain.models.Exam;
 import com.examsystem.domain.models.ExamAttempt;
 import com.examsystem.domain.models.Question;
 import com.examsystem.domain.models.User;
 import com.examsystem.server.http.mappers.StudentContractMapper;
-import io.javalin.http.Context;
-import io.javalin.http.NotFoundResponse;
 import io.javalin.http.BadRequestResponse;
+import io.javalin.http.Context;
 import io.javalin.http.ForbiddenResponse;
+import io.javalin.http.NotFoundResponse;
 
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 public class StudentExamController {
@@ -25,18 +31,19 @@ public class StudentExamController {
     private final SubmitExamUseCase submitUseCase;
     private final ExamRepository examRepository;
     private final QuestionRepository questionRepository;
-
-    private final com.examsystem.application.ports.ExamAttemptRepository attemptRepository;
-    private final com.examsystem.application.ports.ProctorRepository proctorRepository;
-    private final com.examsystem.application.ports.StudentQueryPort studentQueryPort;
+    private final ExamAttemptRepository attemptRepository;
+    private final ProctorRepository proctorRepository;
+    private final StudentQueryPort studentQueryPort;
+    private final AnswerRepository answerRepository;
 
     public StudentExamController(StartExamUseCase startUseCase, 
                                  SubmitExamUseCase submitUseCase, 
                                  ExamRepository examRepository, 
                                  QuestionRepository questionRepository, 
-                                 com.examsystem.application.ports.ExamAttemptRepository attemptRepository,
-                                 com.examsystem.application.ports.ProctorRepository proctorRepository,
-                                 com.examsystem.application.ports.StudentQueryPort studentQueryPort) {
+                                 ExamAttemptRepository attemptRepository,
+                                 ProctorRepository proctorRepository,
+                                 StudentQueryPort studentQueryPort,
+                                 AnswerRepository answerRepository) {
         this.startUseCase = startUseCase;
         this.submitUseCase = submitUseCase;
         this.examRepository = examRepository;
@@ -44,6 +51,13 @@ public class StudentExamController {
         this.attemptRepository = attemptRepository;
         this.proctorRepository = proctorRepository;
         this.studentQueryPort = studentQueryPort;
+        this.answerRepository = answerRepository;
+    }
+
+    public void listAvailableExams(Context ctx) {
+        ctx.json(studentQueryPort.listAvailableExams().stream()
+                .map(e -> new StudentExamDto(e.id(), e.title(), e.durationMinutes()))
+                .toList());
     }
 
     public void listHistory(Context ctx) {
@@ -60,7 +74,32 @@ public class StudentExamController {
         if (!exam.isActive()) throw new ForbiddenResponse("Exam is not active");
 
         ExamAttempt attempt = startUseCase.startOrResume(user.id(), examId, exam.duration());
-        ctx.json(attempt); // Basic representation, safe enough
+        ctx.json(attempt);
+    }
+
+    public void getAttemptQuestions(Context ctx) {
+        int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
+        ExamAttempt attempt = enforceOwnership(ctx, attemptId);
+        List<Question> questions = questionRepository.findByExamId(attempt.examId());
+        List<StudentQuestionDto> dtos = questions.stream()
+                .filter(Question::isActive)
+                .map(q -> new StudentQuestionDto(
+                        q.id(),
+                        q.examId(),
+                        q.text(),
+                        q.type(),
+                        q.options().stream()
+                                .map(o -> new StudentOptionDto(o.number(), o.text()))
+                                .collect(Collectors.toList())))
+                .toList();
+        ctx.json(dtos);
+    }
+
+    public void getAttemptAnswers(Context ctx) {
+        int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
+        enforceOwnership(ctx, attemptId);
+        Map<Integer, List<Integer>> answers = answerRepository.getSelectedOptionsForAttempt(attemptId);
+        ctx.json(answers);
     }
 
     public void getQuestion(Context ctx) {
