@@ -12,9 +12,6 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
 import java.util.*;
 
 public class JdbcAdminQueryPort implements AdminQueryPort {
@@ -28,11 +25,10 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
     public List<AdminUserResult> listUsers() {
         List<AdminUserResult> users = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("SELECT id, username, full_name, role, is_active FROM users");
-             PreparedStatement ps = conn.prepareStatement("SELECT id, username, full_name, role, is_active, enrollment_number, section FROM users ORDER BY id ASC");
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT id, username, full_name, role, is_active, enrollment_number, section FROM users ORDER BY id ASC");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
-                users.add(new AdminUserResult(rs.getInt("id"), rs.getString("username"), rs.getString("full_name"), rs.getString("role"), rs.getBoolean("is_active")));
                 users.add(new AdminUserResult(
                         rs.getInt("id"),
                         rs.getString("username"),
@@ -54,7 +50,6 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT id, title, duration_minutes, created_by, is_active, "
-                             + "version_number, supersedes_exam_id FROM exams");
                              + "version_number, supersedes_exam_id FROM exams ORDER BY id ASC");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
@@ -77,7 +72,6 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
     public List<AdminAttemptResult> getAttemptHistory(int examId) {
         List<AdminAttemptResult> attempts = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("SELECT a.id, a.student_id, u.full_name, a.start_time, a.status, a.score FROM exam_attempts a JOIN users u ON a.student_id = u.id WHERE a.exam_id = ? ORDER BY a.start_time DESC")) {
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT a.id, a.student_id, u.full_name, a.start_time, a.status, a.score "
                              + "FROM exam_attempts a JOIN users u ON a.student_id = u.id "
@@ -85,7 +79,6 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
             ps.setInt(1, examId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    attempts.add(new AdminAttemptResult(rs.getInt("id"), rs.getInt("student_id"), rs.getString("full_name"), rs.getTimestamp("start_time").toInstant(), rs.getString("status"), (Integer) rs.getObject("score")));
                     attempts.add(new AdminAttemptResult(
                             rs.getInt("id"),
                             rs.getInt("student_id"),
@@ -309,11 +302,18 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
     public List<AdminProctorEventResult> getProctorEvents(int attemptId) {
         List<AdminProctorEventResult> events = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("SELECT e.id, e.event_type, e.recorded_at, (v.id IS NOT NULL) as has_evidence FROM proctor_events e LEFT JOIN proctor_evidence_v2 v ON e.id = v.event_id WHERE e.attempt_id = ? ORDER BY e.recorded_at ASC")) {
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT e.id, e.event_type, e.recorded_at, (v.id IS NOT NULL) as has_evidence "
+                             + "FROM proctor_events e LEFT JOIN proctor_evidence_v2 v ON e.id = v.event_id "
+                             + "WHERE e.attempt_id = ? ORDER BY e.recorded_at ASC")) {
             ps.setInt(1, attemptId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    events.add(new AdminProctorEventResult(rs.getInt("id"), rs.getString("event_type"), rs.getTimestamp("recorded_at").toInstant(), rs.getBoolean("has_evidence")));
+                    events.add(new AdminProctorEventResult(
+                            rs.getInt("id"),
+                            rs.getString("event_type"),
+                            rs.getTimestamp("recorded_at").toInstant(),
+                            rs.getBoolean("has_evidence")));
                 }
             }
         } catch (Exception e) {
@@ -325,11 +325,16 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
     @Override
     public Optional<AdminEvidenceResult> getEvidenceByEventId(int eventId) {
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("SELECT id, content_type, screenshot_data FROM proctor_evidence_v2 WHERE event_id = ?")) {
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT id, content_type, screenshot_data FROM proctor_evidence_v2 WHERE event_id = ?")) {
             ps.setInt(1, eventId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return Optional.of(new AdminEvidenceResult(rs.getInt("id"), eventId, rs.getString("content_type"), rs.getBytes("screenshot_data")));
+                    return Optional.of(new AdminEvidenceResult(
+                            rs.getInt("id"),
+                            eventId,
+                            rs.getString("content_type"),
+                            rs.getBytes("screenshot_data")));
                 }
             }
         } catch (Exception e) {
