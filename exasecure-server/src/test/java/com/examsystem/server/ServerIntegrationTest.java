@@ -226,6 +226,172 @@ class ServerIntegrationTest {
         assertThat(selfDeleteResponse.statusCode()).isEqualTo(403);
     }
 
+    @Test
+    void adminExamMutationsCreateImmutableRevisionsAndKeepAttemptsPinned() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        String definition = """
+                {
+                  "title": "API Definition",
+                  "durationMinutes": 50,
+                  "questions": [
+                    {
+                      "text": "Choose one",
+                      "type": "SINGLE",
+                      "options": [
+                        {"text": "Correct", "correct": true},
+                        {"text": "Wrong", "correct": false}
+                      ]
+                    },
+                    {
+                      "text": "Choose all",
+                      "type": "MULTI",
+                      "options": [
+                        {"text": "First", "correct": true},
+                        {"text": "Second", "correct": true},
+                        {"text": "Third", "correct": false}
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+        HttpResponse<String> forbidden = sendJson(
+                client, "POST", "/api/v1/admin/exams", "token-stu1", definition);
+        assertThat(forbidden.statusCode()).isEqualTo(403);
+
+        HttpResponse<String> create = sendJson(
+                client, "POST", "/api/v1/admin/exams", "token-admin1", definition);
+        assertThat(create.statusCode()).isEqualTo(201);
+        var createJson = new ObjectMapper().readTree(create.body());
+        int createdExamId = createJson.required("id").asInt();
+        assertThat(createJson.required("versionNumber").asInt()).isEqualTo(1);
+        assertDefinition(createdExamId, "API Definition", 1, null, true, 2, 5);
+        assertCorrectnessMetadata(createdExamId, 3, 2);
+
+        String revision = """
+                {
+                  "title": "Test Exam Revision",
+                  "durationMinutes": 75,
+                  "questions": [
+                    {
+                      "text": "Revised question",
+                      "type": "SINGLE",
+                      "options": [
+                        {"text": "Safe", "correct": true},
+                        {"text": "Unsafe", "correct": false}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        HttpResponse<String> revise = sendJson(
+                client, "POST", "/api/v1/admin/exams/1/revisions", "token-admin1", revision);
+        assertThat(revise.statusCode()).isEqualTo(201);
+        var revisionJson = new ObjectMapper().readTree(revise.body());
+        int revisedExamId = revisionJson.required("id").asInt();
+        assertThat(revisionJson.required("versionNumber").asInt()).isEqualTo(2);
+
+        assertDefinition(1, "Test Exam", 1, null, false, 0, 0);
+        assertDefinition(revisedExamId, "Test Exam Revision", 2, 1, true, 1, 2);
+        assertCorrectnessMetadata(revisedExamId, 1, 1);
+        assertAttemptStillUsesDefinition(201, 1);
+
+        HttpResponse<String> duplicateRevision = sendJson(
+                client, "POST", "/api/v1/admin/exams/1/revisions", "token-admin1", revision);
+        assertThat(duplicateRevision.statusCode()).isEqualTo(409);
+
+        int questionId = firstQuestionId(revisedExamId);
+        HttpRequest studentQuestion = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/questions/" + questionId))
+                .header("Authorization", "Bearer token-stu1")
+                .GET()
+                .build();
+        HttpResponse<String> studentQuestionResponse = client.send(
+                studentQuestion, HttpResponse.BodyHandlers.ofString());
+        assertThat(studentQuestionResponse.statusCode()).isEqualTo(200);
+        assertThat(studentQuestionResponse.body()).doesNotContainIgnoringCase("correct");
+
+        HttpResponse<String> list = sendJson(
+                client, "GET", "/api/v1/admin/exams", "token-admin1", null);
+        assertThat(list.statusCode()).isEqualTo(200);
+        assertThat(list.body()).contains("\"versionNumber\":2", "\"supersedesExamId\":1");
+
+        HttpResponse<String> deactivate = sendJson(
+                client, "DELETE", "/api/v1/admin/exams/" + createdExamId, "token-admin1", null);
+        assertThat(deactivate.statusCode()).isEqualTo(204);
+        assertDefinition(createdExamId, "API Definition", 1, null, false, 2, 5);
+    }
+
+    private static void assertDefinition(
+            int examId,
+            String title,
+            int version,
+            Integer supersedesExamId,
+            boolean active,
+            int expectedQuestions,
+            int expectedOptions) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement statement = conn.prepareStatement(
+                     "SELECT title, version_number, supersedes_exam_id, is_active, "
+                             + "(SELECT COUNT(*) FROM questions q WHERE q.exam_id = e.id) question_count, "
+                             + "(SELECT COUNT(*) FROM options o JOIN questions q ON q.id = o.question_id "
+                             + "WHERE q.exam_id = e.id) option_count FROM exams e WHERE e.id = ?")) {
+            statement.setInt(1, examId);
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getString("title")).isEqualTo(title);
+                assertThat(result.getInt("version_number")).isEqualTo(version);
+                assertThat((Integer) result.getObject("supersedes_exam_id")).isEqualTo(supersedesExamId);
+                assertThat(result.getBoolean("is_active")).isEqualTo(active);
+                assertThat(result.getInt("question_count")).isEqualTo(expectedQuestions);
+                assertThat(result.getInt("option_count")).isEqualTo(expectedOptions);
+                assertThat(result.next()).isFalse();
+            }
+        }
+    }
+
+    private static void assertAttemptStillUsesDefinition(int attemptId, int examId) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement statement = conn.prepareStatement(
+                     "SELECT exam_id FROM exam_attempts WHERE id = ?")) {
+            statement.setInt(1, attemptId);
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getInt("exam_id")).isEqualTo(examId);
+            }
+        }
+    }
+
+    private static void assertCorrectnessMetadata(
+            int examId, int expectedCorrectOptions, int expectedPrimaryCorrectOptions) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement statement = conn.prepareStatement(
+                     "SELECT "
+                             + "SUM(CASE WHEN o.is_correct = 1 THEN 1 ELSE 0 END) correct_options, "
+                             + "SUM(CASE WHEN o.option_number = q.correct_option_number "
+                             + "AND o.is_correct = 1 THEN 1 ELSE 0 END) primary_correct_options "
+                             + "FROM questions q JOIN options o ON o.question_id = q.id WHERE q.exam_id = ?")) {
+            statement.setInt(1, examId);
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getInt("correct_options")).isEqualTo(expectedCorrectOptions);
+                assertThat(result.getInt("primary_correct_options")).isEqualTo(expectedPrimaryCorrectOptions);
+            }
+        }
+    }
+
+    private static int firstQuestionId(int examId) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement statement = conn.prepareStatement(
+                     "SELECT id FROM questions WHERE exam_id = ? ORDER BY id LIMIT 1")) {
+            statement.setInt(1, examId);
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                return result.getInt("id");
+            }
+        }
+    }
+
     private static HttpResponse<String> sendJson(
             HttpClient client, String method, String path, String token, String body) throws Exception {
         HttpRequest.BodyPublisher publisher = body == null

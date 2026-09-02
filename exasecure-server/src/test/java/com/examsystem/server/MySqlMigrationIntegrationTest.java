@@ -73,8 +73,8 @@ class MySqlMigrationIntegrationTest {
         migrator.migrate();
 
         try (Connection conn = dataSource.getConnection()) {
-            assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 7);
-            assertSingleInt(conn, "SELECT COUNT(*) FROM schema_versions", 7);
+            assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 8);
+            assertSingleInt(conn, "SELECT COUNT(*) FROM schema_versions", 8);
             assertSingleInt(conn, "SELECT COUNT(*) FROM users", 2);
             assertSingleInt(conn, "SELECT COUNT(*) FROM exams", 1);
             assertSingleInt(conn, "SELECT COUNT(*) FROM questions", 2);
@@ -104,6 +104,9 @@ class MySqlMigrationIntegrationTest {
 
             assertColumnNullable(conn, "selected_options");
             assertColumnNullable(conn, "is_correct");
+            assertSingleInt(conn,
+                    "SELECT COUNT(*) FROM exams WHERE id = 1 AND version_number = 1 AND supersedes_exam_id IS NULL",
+                    1);
         }
 
         new JdbcAnswerRepository(dataSource).saveAnswer(1, 2, List.of(1), Instant.parse("2026-09-02T12:00:00Z"));

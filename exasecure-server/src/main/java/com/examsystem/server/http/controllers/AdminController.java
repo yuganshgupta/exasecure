@@ -2,10 +2,17 @@ package com.examsystem.server.http.controllers;
 
 import com.examsystem.application.ports.AdminQueryPort;
 import com.examsystem.application.commands.AdminCreateUserCommand;
+import com.examsystem.application.commands.AdminExamDefinitionCommand;
+import com.examsystem.application.commands.AdminOptionDefinitionCommand;
+import com.examsystem.application.commands.AdminQuestionDefinitionCommand;
 import com.examsystem.application.commands.AdminUpdateUserCommand;
+import com.examsystem.application.query.AdminExamMutationResult;
+import com.examsystem.application.usecases.AdminExamDefinitionUseCase;
 import com.examsystem.application.usecases.AdminUserMutationUseCase;
 import com.examsystem.contracts.admin.AdminCreateUserRequestDto;
+import com.examsystem.contracts.admin.AdminExamDefinitionRequestDto;
 import com.examsystem.contracts.admin.AdminEvidenceDto;
+import com.examsystem.contracts.admin.AdminExamMutationResultDto;
 import com.examsystem.contracts.admin.AdminMutationResultDto;
 import com.examsystem.contracts.admin.AdminUpdateUserRequestDto;
 import com.examsystem.domain.models.User;
@@ -17,10 +24,15 @@ import io.javalin.http.NotFoundResponse;
 public class AdminController {
     private final AdminQueryPort adminQueryPort;
     private final AdminUserMutationUseCase userMutationUseCase;
+    private final AdminExamDefinitionUseCase examDefinitionUseCase;
 
-    public AdminController(AdminQueryPort adminQueryPort, AdminUserMutationUseCase userMutationUseCase) {
+    public AdminController(
+            AdminQueryPort adminQueryPort,
+            AdminUserMutationUseCase userMutationUseCase,
+            AdminExamDefinitionUseCase examDefinitionUseCase) {
         this.adminQueryPort = adminQueryPort;
         this.userMutationUseCase = userMutationUseCase;
+        this.examDefinitionUseCase = examDefinitionUseCase;
     }
 
     public void listExams(Context ctx) {
@@ -33,6 +45,59 @@ public class AdminController {
         ctx.json(adminQueryPort.listUsers().stream()
                 .map(AdminContractMapper::toUserDto)
                 .toList());
+    }
+
+    public void createExamDefinition(Context ctx) {
+        User currentUser = ctx.attribute("user");
+        AdminExamMutationResult result = examDefinitionUseCase.createDefinition(
+                toDefinitionCommand(ctx.bodyAsClass(AdminExamDefinitionRequestDto.class)),
+                currentUser.id());
+        ctx.status(201).json(toMutationResultDto(result));
+    }
+
+    public void reviseExamDefinition(Context ctx) {
+        int examId = Integer.parseInt(ctx.pathParam("examId"));
+        User currentUser = ctx.attribute("user");
+        AdminExamMutationResult result = examDefinitionUseCase.reviseDefinition(
+                        examId,
+                        toDefinitionCommand(ctx.bodyAsClass(AdminExamDefinitionRequestDto.class)),
+                        currentUser.id())
+                .orElseThrow(() -> new NotFoundResponse("Exam not found"));
+        ctx.status(201).json(toMutationResultDto(result));
+    }
+
+    public void deactivateExamDefinition(Context ctx) {
+        int examId = Integer.parseInt(ctx.pathParam("examId"));
+        if (!examDefinitionUseCase.deactivateDefinition(examId)) {
+            throw new NotFoundResponse("Active exam not found");
+        }
+        ctx.status(204);
+    }
+
+    private static AdminExamDefinitionCommand toDefinitionCommand(AdminExamDefinitionRequestDto request) {
+        if (request == null) {
+            throw new IllegalArgumentException("Exam definition is required");
+        }
+        return new AdminExamDefinitionCommand(
+                request.title(),
+                request.durationMinutes(),
+                request.questions() == null ? null : request.questions().stream()
+                        .map(question -> question == null
+                                ? null
+                                : new AdminQuestionDefinitionCommand(
+                                        question.text(),
+                                        question.type(),
+                                        question.options() == null ? null : question.options().stream()
+                                                .map(option -> option == null
+                                                        ? null
+                                                        : new AdminOptionDefinitionCommand(
+                                                                option.text(), option.correct()))
+                                                .toList()))
+                        .toList());
+    }
+
+    private static AdminExamMutationResultDto toMutationResultDto(AdminExamMutationResult result) {
+        return new AdminExamMutationResultDto(result.id(), result.versionNumber());
     }
 
     public void createUser(Context ctx) {

@@ -5,5 +5,7 @@ public record AdminExamResult(
         String title,
         int durationMinutes,
         int createdBy,
-        boolean active
+        boolean active,
+        int versionNumber,
+        Integer supersedesExamId
 ) {}

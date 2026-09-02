@@ -29,7 +29,9 @@ public final class AdminContractMapper {
                 result.title(),
                 result.durationMinutes(),
                 result.createdBy(),
-                result.active());
+                result.active(),
+                result.versionNumber(),
+                result.supersedesExamId());
     }
 
     public static AdminAttemptDto toAttemptDto(AdminAttemptResult result) {

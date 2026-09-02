@@ -27,8 +27,8 @@ class ContractMapperTest {
                 .isEqualTo(new AdminUserDto(1, "admin", "Admin User", "ADMIN", true));
 
         assertThat(AdminContractMapper.toExamDto(
-                new AdminExamResult(2, "Final", 60, 1, true)))
-                .isEqualTo(new AdminExamDto(2, "Final", 60, 1, true));
+                new AdminExamResult(2, "Final", 60, 1, true, 2, 1)))
+                .isEqualTo(new AdminExamDto(2, "Final", 60, 1, true, 2, 1));
 
         assertThat(AdminContractMapper.toAttemptDto(
                 new AdminAttemptResult(3, 4, "Student User", STARTED_AT, "SUBMITTED", 8)))

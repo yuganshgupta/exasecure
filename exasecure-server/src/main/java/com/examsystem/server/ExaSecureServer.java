@@ -4,6 +4,7 @@ import com.examsystem.application.ports.ClockPort;
 import com.examsystem.application.ports.PasswordEncoder;
 import com.examsystem.application.usecases.AuthenticateUserUseCase;
 import com.examsystem.application.usecases.AdminUserMutationUseCase;
+import com.examsystem.application.usecases.AdminExamDefinitionUseCase;
 import com.examsystem.application.usecases.StartExamUseCase;
 import com.examsystem.application.usecases.SubmitExamUseCase;
 import com.examsystem.server.adapters.crypto.BCryptPasswordEncoder;
@@ -50,6 +51,8 @@ public class ExaSecureServer {
         SessionManager sessionManager = new SessionManager(dataSource);
         JdbcProctorRepository proctorRepository = new JdbcProctorRepository(dataSource);
         JdbcAdminUserMutationPort adminUserMutationPort = new JdbcAdminUserMutationPort(dataSource);
+        JdbcAdminExamDefinitionMutationPort adminExamMutationPort =
+                new JdbcAdminExamDefinitionMutationPort(dataSource);
 
         // Use Cases
         AuthenticateUserUseCase authUseCase = new AuthenticateUserUseCase(userRepository, passwordEncoder);
@@ -57,13 +60,16 @@ public class ExaSecureServer {
         SubmitExamUseCase submitUseCase = new SubmitExamUseCase(answerRepository, attemptRepository, questionRepository, proctorRepository, clockPort);
         AdminUserMutationUseCase adminUserMutationUseCase =
                 new AdminUserMutationUseCase(adminUserMutationPort, passwordEncoder);
+        AdminExamDefinitionUseCase adminExamDefinitionUseCase =
+                new AdminExamDefinitionUseCase(adminExamMutationPort);
 
         // Controllers
         com.examsystem.application.ports.AdminQueryPort adminQueryPort = new com.examsystem.server.adapters.jdbc.JdbcAdminQueryPort(dataSource);
         com.examsystem.application.ports.StudentQueryPort studentQueryPort = new com.examsystem.server.adapters.jdbc.JdbcStudentQueryPort(dataSource);
         AuthController authController = new AuthController(authUseCase, sessionManager);
         StudentExamController studentController = new StudentExamController(startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, studentQueryPort);
-        AdminController adminController = new AdminController(adminQueryPort, adminUserMutationUseCase);
+        AdminController adminController = new AdminController(
+                adminQueryPort, adminUserMutationUseCase, adminExamDefinitionUseCase);
         AuthMiddleware authMiddleware = new AuthMiddleware(sessionManager);
 
         // App init
@@ -93,6 +99,11 @@ public class ExaSecureServer {
                         io.javalin.apibuilder.ApiBuilder.put("/users/{userId}", adminController::updateUser);
                         io.javalin.apibuilder.ApiBuilder.delete("/users/{userId}", adminController::deactivateUser);
                         io.javalin.apibuilder.ApiBuilder.get("/exams", adminController::listExams);
+                        io.javalin.apibuilder.ApiBuilder.post("/exams", adminController::createExamDefinition);
+                        io.javalin.apibuilder.ApiBuilder.post(
+                                "/exams/{examId}/revisions", adminController::reviseExamDefinition);
+                        io.javalin.apibuilder.ApiBuilder.delete(
+                                "/exams/{examId}", adminController::deactivateExamDefinition);
                         io.javalin.apibuilder.ApiBuilder.get("/exams/{examId}/attempts", adminController::getAttemptHistory);
                         io.javalin.apibuilder.ApiBuilder.get("/attempts/{attemptId}/events", adminController::getProctorEvents);
                         io.javalin.apibuilder.ApiBuilder.get("/events/{eventId}/evidence", adminController::getAttemptEvidence);

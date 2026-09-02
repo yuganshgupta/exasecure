@@ -40,10 +40,19 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
     public List<AdminExamResult> listExams() {
         List<AdminExamResult> exams = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("SELECT id, title, duration_minutes, created_by, is_active FROM exams");
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT id, title, duration_minutes, created_by, is_active, "
+                             + "version_number, supersedes_exam_id FROM exams");
              ResultSet rs = ps.executeQuery()) {
             while (rs.next()) {
-                exams.add(new AdminExamResult(rs.getInt("id"), rs.getString("title"), rs.getInt("duration_minutes"), rs.getInt("created_by"), rs.getBoolean("is_active")));
+                exams.add(new AdminExamResult(
+                        rs.getInt("id"),
+                        rs.getString("title"),
+                        rs.getInt("duration_minutes"),
+                        rs.getInt("created_by"),
+                        rs.getBoolean("is_active"),
+                        rs.getInt("version_number"),
+                        (Integer) rs.getObject("supersedes_exam_id")));
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
