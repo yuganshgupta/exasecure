@@ -95,7 +95,7 @@ public class QuestionManagementPanel extends JPanel {
 
     private void loadExams() {
         examCombo.removeAllItems();
-        examCombo.addItem(new ExamItem(-1, "Loading...", 0));
+        examCombo.addItem(new ExamItem(-1, "Loading..."));
         
         SwingWorker<List<Exam>, Void> worker = new SwingWorker<List<Exam>, Void>() {
             @Override
@@ -107,7 +107,7 @@ public class QuestionManagementPanel extends JPanel {
                 try {
                     examCombo.removeAllItems();
                     for (Exam ex : get()) {
-                        examCombo.addItem(new ExamItem(ex.getId(), ex.getTitle(), ex.getDurationMinutes()));
+                        examCombo.addItem(new ExamItem(ex.getId(), ex.getTitle()));
                     }
                 } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
             }
@@ -306,8 +306,8 @@ public class QuestionManagementPanel extends JPanel {
     }
 
     private static class ExamItem {
-        final int id; final String title; final int duration;
-        ExamItem(int id, String title, int duration) { this.id = id; this.title = title; this.duration = duration; }
+        final int id; final String title;
+        ExamItem(int id, String title) { this.id = id; this.title = title; }
         @Override public String toString() { return "[" + id + "] " + title; }
     }
 }

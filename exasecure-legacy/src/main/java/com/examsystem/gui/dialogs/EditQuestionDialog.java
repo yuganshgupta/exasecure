@@ -177,11 +177,7 @@ public class EditQuestionDialog extends JDialog {
                     adminService.updateOption(row.option);
                 } else {
                     // New option added dynamically
-                    // The DAO only has addOption(qId, optNum, text, isCorrect) currently.
-                    // Let's assume AdminService will expose addOption if needed, or we just rely on existing.
-                    // Wait, AdminService doesn't have a direct addOption. Let's use OptionDAO if we have to, 
-                    // but since AdminService isn't exposing it, I should update AdminService or just not support adding new options in edit yet.
-                    // The prompt asked for dynamic option handling. We'll leave it as a TODO or just use OptionDAO directly for this demo.
+                    // Persist newly added option
                     com.examsystem.dao.OptionDAO oDao = new com.examsystem.dao.OptionDAO();
                     oDao.addOption(question.getId(), i + 1, row.option.getOptionText(), row.option.isCorrect());
                 }

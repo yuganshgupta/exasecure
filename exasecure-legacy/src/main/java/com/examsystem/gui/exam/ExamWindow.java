@@ -24,7 +24,6 @@ public class ExamWindow extends JDialog {
     private final User student;
 
     private final QuestionDAO questionDAO = new QuestionDAO();
-    private final OptionDAO optionDAO = new OptionDAO();
     private final ExamAttemptDAO examAttemptDAO = new ExamAttemptDAO();
     private final StudentAnswerDAO studentAnswerDAO = new StudentAnswerDAO();
 
@@ -72,8 +71,6 @@ public class ExamWindow extends JDialog {
 
         // Fonts
         Font timerFont = new Font("SansSerif", Font.BOLD, 36);
-        Font questionFont = new Font("SansSerif", Font.PLAIN, 28);
-        Font optionFont = new Font("SansSerif", Font.PLAIN, 24);
         Font buttonFont = new Font("SansSerif", Font.BOLD, 22);
 
         // Top: Timer
@@ -154,7 +151,6 @@ public class ExamWindow extends JDialog {
                     examAttemptDAO.logEvent(attemptId, msg, screenshotData);
                 }).start();
 
-                int remaining = MAX_FOCUS_LOST - focusLostCount;
                 isOverlayVisible = true; 
                 try {
                     if (focusLostCount >= MAX_FOCUS_LOST) {

@@ -1,6 +1,5 @@
 package com.examsystem.server;
 
-import com.examsystem.server.config.AppConfig;
 import com.examsystem.server.db.DatabaseMigrator;
 import org.junit.jupiter.api.Test;
 

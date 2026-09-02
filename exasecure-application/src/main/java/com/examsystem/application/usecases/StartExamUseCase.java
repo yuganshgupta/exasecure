@@ -4,7 +4,6 @@ import com.examsystem.application.ports.ClockPort;
 import com.examsystem.application.ports.ExamAttemptRepository;
 import com.examsystem.domain.models.ExamAttempt;
 
-import java.time.Instant;
 
 public class StartExamUseCase {
     private final ExamAttemptRepository attemptRepository;
