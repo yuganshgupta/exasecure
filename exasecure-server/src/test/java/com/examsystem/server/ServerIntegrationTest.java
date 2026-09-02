@@ -63,11 +63,19 @@ class ServerIntegrationTest {
             stmt.execute("INSERT INTO users (id, username, password, full_name, role, is_active) VALUES (101, 'student1', '$2a$10$w09ZlM.O/x10QhJv9eU3T.n/fHk69d5uL5Y5YQ/D3qD3D5D5D3D5q', 'Student One', 'STUDENT', 1)");
             stmt.execute("INSERT INTO users (id, username, password, full_name, role, is_active) VALUES (102, 'student2', '$2a$10$w09ZlM.O/x10QhJv9eU3T.n/fHk69d5uL5Y5YQ/D3qD3D5D5D3D5q', 'Student Two', 'STUDENT', 1)");
             stmt.execute("INSERT INTO users (id, username, password, full_name, role, is_active) VALUES (103, 'admin1', '$2a$10$w09ZlM.O/x10QhJv9eU3T.n/fHk69d5uL5Y5YQ/D3qD3D5D5D3D5q', 'Admin One', 'ADMIN', 1)");
+            stmt.execute("INSERT INTO users (id, username, password, full_name, role, is_active) VALUES (104, 'inactive1', '$2a$10$w09ZlM.O/x10QhJv9eU3T.n/fHk69d5uL5Y5YQ/D3qD3D5D5D3D5q', 'Inactive Student', 'STUDENT', 0)");
             stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (1, 'Test Exam', 60, 103, 1)");
+            stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (2, 'Other Exam', 60, 103, 1)");
+            stmt.execute("INSERT INTO questions (id, exam_id, question_text, correct_option_number, question_type, is_active) VALUES (401, 1, 'Owned question', 1, 'SINGLE', 1), (402, 2, 'Other question', 1, 'SINGLE', 1)");
+            stmt.execute("INSERT INTO options (id, question_id, option_number, option_text, is_correct, is_active) VALUES (501, 401, 1, 'Owned correct', 1, 1), (502, 401, 2, 'Owned wrong', 0, 1), (503, 402, 1, 'Other correct', 1, 1), (504, 402, 2, 'Other wrong', 0, 1)");
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (201, 1, 101, NOW(), 'ACTIVE')");
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (202, 2, 102, NOW(), 'ACTIVE')");
+            stmt.execute("INSERT INTO proctor_events (id, attempt_id, event_type, recorded_at) VALUES (301, 202, 'FOCUS_LOST', NOW())");
             stmt.execute("INSERT INTO server_sessions (token, user_id, expires_at) VALUES ('token-stu1', 101, DATE_ADD(NOW(), INTERVAL 1 HOUR))");
             stmt.execute("INSERT INTO server_sessions (token, user_id, expires_at) VALUES ('token-stu2', 102, DATE_ADD(NOW(), INTERVAL 1 HOUR))");
             stmt.execute("INSERT INTO server_sessions (token, user_id, expires_at) VALUES ('token-admin1', 103, DATE_ADD(NOW(), INTERVAL 1 HOUR))");
+            stmt.execute("INSERT INTO server_sessions (token, user_id, expires_at) VALUES ('token-expired', 101, '2000-01-01 00:00:00')");
+            stmt.execute("INSERT INTO server_sessions (token, user_id, expires_at) VALUES ('token-inactive', 104, DATE_ADD(NOW(), INTERVAL 1 HOUR))");
         }
     }
 
@@ -291,7 +299,7 @@ class ServerIntegrationTest {
         int revisedExamId = revisionJson.required("id").asInt();
         assertThat(revisionJson.required("versionNumber").asInt()).isEqualTo(2);
 
-        assertDefinition(1, "Test Exam", 1, null, false, 0, 0);
+        assertDefinition(1, "Test Exam", 1, null, false, 1, 2);
         assertDefinition(revisedExamId, "Test Exam Revision", 2, 1, true, 1, 2);
         assertCorrectnessMetadata(revisedExamId, 1, 1);
         assertAttemptStillUsesDefinition(201, 1);
@@ -301,15 +309,20 @@ class ServerIntegrationTest {
         assertThat(duplicateRevision.statusCode()).isEqualTo(409);
 
         int questionId = firstQuestionId(revisedExamId);
+        HttpResponse<String> startAttempt = sendJson(
+                client, "POST", "/api/v1/student/exams/" + revisedExamId + "/attempts", "token-stu1", null);
+        assertThat(startAttempt.statusCode()).isEqualTo(200);
+        int revisedAttemptId = new ObjectMapper().readTree(startAttempt.body()).required("id").asInt();
         HttpRequest studentQuestion = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/questions/" + questionId))
+                .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/attempts/"
+                        + revisedAttemptId + "/questions/" + questionId))
                 .header("Authorization", "Bearer token-stu1")
                 .GET()
                 .build();
         HttpResponse<String> studentQuestionResponse = client.send(
                 studentQuestion, HttpResponse.BodyHandlers.ofString());
         assertThat(studentQuestionResponse.statusCode()).isEqualTo(200);
-        assertThat(studentQuestionResponse.body()).doesNotContainIgnoringCase("correct");
+        assertNoCorrectnessProperties(studentQuestionResponse.body());
 
         HttpResponse<String> list = sendJson(
                 client, "GET", "/api/v1/admin/exams", "token-admin1", null);
@@ -320,6 +333,74 @@ class ServerIntegrationTest {
                 client, "DELETE", "/api/v1/admin/exams/" + createdExamId, "token-admin1", null);
         assertThat(deactivate.statusCode()).isEqualTo(204);
         assertDefinition(createdExamId, "API Definition", 1, null, false, 2, 5);
+    }
+
+    @Test
+    void sessionAndStudentObjectAuthorizationNegativesWriteNothing() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        assertThat(sendJson(client, "GET", "/api/v1/student/history", "unknown-token", null).statusCode())
+                .isEqualTo(401);
+        assertThat(sendJson(client, "GET", "/api/v1/student/history", "token-expired", null).statusCode())
+                .isEqualTo(401);
+        assertThat(sendJson(client, "GET", "/api/v1/student/history", "token-inactive", null).statusCode())
+                .isEqualTo(401);
+
+        HttpResponse<String> ownedQuestion = sendJson(
+                client, "GET", "/api/v1/student/attempts/201/questions/401", "token-stu1", null);
+        assertThat(ownedQuestion.statusCode()).isEqualTo(200);
+        assertNoCorrectnessProperties(ownedQuestion.body());
+
+        HttpResponse<String> otherExamQuestion = sendJson(
+                client, "GET", "/api/v1/student/attempts/201/questions/402", "token-stu1", null);
+        assertThat(otherExamQuestion.statusCode()).isEqualTo(404);
+
+        HttpResponse<String> otherStudentAttempt = sendJson(
+                client, "GET", "/api/v1/student/attempts/202/questions/402", "token-stu1", null);
+        assertThat(otherStudentAttempt.statusCode()).isEqualTo(403);
+
+        HttpResponse<String> unscopedQuestion = sendJson(
+                client, "GET", "/api/v1/student/questions/401", "token-stu1", null);
+        assertThat(unscopedQuestion.statusCode()).isEqualTo(404);
+
+        String crossExamAnswer = """
+                {"questionId": 402, "selectedOptions": [1]}
+                """;
+        HttpResponse<String> answerResponse = sendJson(
+                client, "POST", "/api/v1/student/attempts/201/answers", "token-stu1", crossExamAnswer);
+        assertThat(answerResponse.statusCode()).isEqualTo(400);
+        assertDatabaseCount(
+                "SELECT COUNT(*) FROM student_answers WHERE attempt_id = 201 AND question_id = 402", 0);
+
+        String boundary = "ExaSecureCrossEventBoundary";
+        HttpRequest crossEventEvidence = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + PORT
+                        + "/api/v1/student/attempts/201/events/301/proctor-evidence"))
+                .header("Authorization", "Bearer token-stu1")
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(
+                        multipartScreenshot(boundary, new byte[] {1, 2, 3})))
+                .build();
+        HttpResponse<String> evidenceResponse = client.send(
+                crossEventEvidence, HttpResponse.BodyHandlers.ofString());
+        assertThat(evidenceResponse.statusCode()).isEqualTo(404);
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_evidence_v2 WHERE event_id = 301", 0);
+    }
+
+    private static void assertDatabaseCount(String sql, int expected) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var statement = conn.createStatement();
+             ResultSet result = statement.executeQuery(sql)) {
+            assertThat(result.next()).isTrue();
+            assertThat(result.getInt(1)).isEqualTo(expected);
+        }
+    }
+
+    private static void assertNoCorrectnessProperties(String json) {
+        assertThat(json)
+                .doesNotContain("\"correct\"")
+                .doesNotContain("\"isCorrect\"")
+                .doesNotContain("\"correctOptionNumber\"");
     }
 
     private static void assertDefinition(

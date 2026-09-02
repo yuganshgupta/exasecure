@@ -49,6 +49,21 @@ public class JdbcProctorRepository implements ProctorRepository {
     }
 
     @Override
+    public boolean eventBelongsToAttempt(int eventId, int attemptId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT 1 FROM proctor_events WHERE id = ? AND attempt_id = ?")) {
+            ps.setInt(1, eventId);
+            ps.setInt(2, attemptId);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("DB error", e);
+        }
+    }
+
+    @Override
     public int countEvents(int attemptId, String eventType) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM proctor_events WHERE attempt_id = ? AND event_type = ?")) {

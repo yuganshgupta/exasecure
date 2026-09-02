@@ -22,8 +22,8 @@ public class JdbcQuestionRepository implements QuestionRepository {
     @Override
     public Optional<Question> findById(int id) {
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement psQuestion = conn.prepareStatement("SELECT id, exam_id, question_text, question_type, correct_option_number, is_active FROM questions WHERE id = ?");
-             PreparedStatement psOptions = conn.prepareStatement("SELECT id, option_number, option_text, is_correct FROM options WHERE question_id = ? ORDER BY option_number")) {
+             PreparedStatement psQuestion = conn.prepareStatement("SELECT id, exam_id, question_text, question_type, correct_option_number, is_active FROM questions WHERE id = ? AND is_active = 1");
+             PreparedStatement psOptions = conn.prepareStatement("SELECT id, option_number, option_text, is_correct FROM options WHERE question_id = ? AND is_active = 1 ORDER BY option_number")) {
             
             psQuestion.setInt(1, id);
             try (ResultSet rsQ = psQuestion.executeQuery()) {
@@ -61,13 +61,13 @@ public class JdbcQuestionRepository implements QuestionRepository {
     public List<Question> findByExamId(int examId) {
         List<Question> questions = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement psQuestion = conn.prepareStatement("SELECT id, exam_id, question_text, question_type, correct_option_number, is_active FROM questions WHERE exam_id = ?")) {
+             PreparedStatement psQuestion = conn.prepareStatement("SELECT id, exam_id, question_text, question_type, correct_option_number, is_active FROM questions WHERE exam_id = ? AND is_active = 1")) {
             psQuestion.setInt(1, examId);
             try (ResultSet rsQ = psQuestion.executeQuery()) {
                 while (rsQ.next()) {
                     int id = rsQ.getInt("id");
                     List<Option> options = new ArrayList<>();
-                    try (PreparedStatement psOptions = conn.prepareStatement("SELECT id, option_text, is_correct FROM options WHERE question_id = ? ORDER BY option_number")) {
+                    try (PreparedStatement psOptions = conn.prepareStatement("SELECT id, option_text, is_correct FROM options WHERE question_id = ? AND is_active = 1 ORDER BY option_number")) {
                         psOptions.setInt(1, id);
                         try (ResultSet rsO = psOptions.executeQuery()) {
                             while (rsO.next()) {

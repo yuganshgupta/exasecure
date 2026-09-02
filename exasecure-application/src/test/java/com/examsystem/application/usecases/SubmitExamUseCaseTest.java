@@ -87,6 +87,8 @@ class SubmitExamUseCaseTest {
         @Override
         public void saveEvidence(int eventId, byte[] screenshot, String contentType, java.time.Instant timestamp) {}
         @Override
+        public boolean eventBelongsToAttempt(int eventId, int attemptId) { return true; }
+        @Override
         public int countEvents(int attemptId, String eventType) { return 0; }
     }
 
@@ -119,6 +121,25 @@ class SubmitExamUseCaseTest {
         assertThatThrownBy(() -> useCase.saveAnswer(100, 1, List.of(2), Duration.ofMinutes(60)))
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("expired or finalized");
+    }
+
+    @Test
+    void saveAnswer_questionFromAnotherExam_throwsWithoutSaving() {
+        StubAnswerRepo answerRepo = new StubAnswerRepo();
+        QuestionRepository wrongExamQuestions = new StubQuestionRepo() {
+            @Override
+            public Optional<Question> findById(int id) {
+                return Optional.of(new Question(id, 2, "Other exam", "SINGLE",
+                        Collections.emptyList(), 1, true));
+            }
+        };
+        SubmitExamUseCase useCase = new SubmitExamUseCase(
+                answerRepo, new StubAttemptRepo(), wrongExamQuestions, new StubProctorRepo(), new StubClock());
+
+        assertThatThrownBy(() -> useCase.saveAnswer(100, 2, List.of(1), Duration.ofMinutes(60)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not belong");
+        assertThat(answerRepo.saved).isFalse();
     }
 
     @Test

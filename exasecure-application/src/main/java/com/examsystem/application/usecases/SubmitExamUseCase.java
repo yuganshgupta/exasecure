@@ -31,14 +31,17 @@ public class SubmitExamUseCase {
     }
 
     public void saveAnswer(int attemptId, int questionId, List<Integer> selectedOptions, java.time.Duration timeLimit) {
-        attemptRepository.findById(attemptId).ifPresent(attempt -> {
-            if (attempt.isExpired(clockPort.now(), timeLimit)) {
-                throw new IllegalStateException("Exam attempt is expired or finalized.");
-            }
-        });
+        var attempt = attemptRepository.findById(attemptId)
+                .orElseThrow(() -> new IllegalArgumentException("Attempt not found"));
+        if (attempt.isExpired(clockPort.now(), timeLimit)) {
+            throw new IllegalStateException("Exam attempt is expired or finalized.");
+        }
 
         Question question = questionRepository.findById(questionId)
             .orElseThrow(() -> new IllegalArgumentException("Question not found"));
+        if (question.examId() != attempt.examId()) {
+            throw new IllegalArgumentException("Question does not belong to the attempt exam");
+        }
             
         answerRepository.saveAnswer(attemptId, questionId, selectedOptions, clockPort.now());
     }

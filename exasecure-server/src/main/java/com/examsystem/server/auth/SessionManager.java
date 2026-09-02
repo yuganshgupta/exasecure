@@ -47,7 +47,7 @@ public class SessionManager {
                      "SELECT u.id, u.username, u.full_name, u.enrollment_number, u.section, u.role " +
                              "FROM users u " +
                              "JOIN server_sessions s ON u.id = s.user_id " +
-                             "WHERE s.token = ? AND s.expires_at > ?")) {
+                             "WHERE s.token = ? AND s.expires_at > ? AND u.is_active = 1")) {
             ps.setString(1, token);
             ps.setTimestamp(2, Timestamp.from(Instant.now()));
             try (ResultSet rs = ps.executeQuery()) {

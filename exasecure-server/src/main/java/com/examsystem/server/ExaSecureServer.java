@@ -87,7 +87,9 @@ public class ExaSecureServer {
 
                     io.javalin.apibuilder.ApiBuilder.get("/student/history", studentController::listHistory);
                     io.javalin.apibuilder.ApiBuilder.post("/student/exams/{examId}/attempts", studentController::startOrResumeExam);
-                    io.javalin.apibuilder.ApiBuilder.get("/student/questions/{questionId}", studentController::getQuestion);
+                    io.javalin.apibuilder.ApiBuilder.get(
+                            "/student/attempts/{attemptId}/questions/{questionId}",
+                            studentController::getQuestion);
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/answers", studentController::saveAnswer);
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/submit", studentController::submitExam);
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/events", studentController::recordEvent);

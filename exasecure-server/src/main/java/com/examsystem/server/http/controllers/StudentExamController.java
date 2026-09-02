@@ -64,10 +64,13 @@ public class StudentExamController {
     }
 
     public void getQuestion(Context ctx) {
-        // Enforce attempt ownership and validity
-        // For brevity, we just fetch the question and map it to a safe DTO
+        int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
+        ExamAttempt attempt = enforceOwnership(ctx, attemptId);
         int questionId = Integer.parseInt(ctx.pathParam("questionId"));
         Question question = questionRepository.findById(questionId).orElseThrow(() -> new NotFoundResponse("Question not found"));
+        if (question.examId() != attempt.examId()) {
+            throw new NotFoundResponse("Question not found for this attempt");
+        }
         
         StudentQuestionDto dto = new StudentQuestionDto(
             question.id(),
@@ -81,12 +84,13 @@ public class StudentExamController {
         ctx.json(dto);
     }
 
-    private void enforceOwnership(Context ctx, int attemptId) {
+    private ExamAttempt enforceOwnership(Context ctx, int attemptId) {
         User user = ctx.attribute("user");
         ExamAttempt attempt = attemptRepository.findById(attemptId).orElseThrow(() -> new NotFoundResponse("Attempt not found"));
         if (attempt.studentId() != user.id()) {
             throw new ForbiddenResponse("Cannot access another student's attempt");
         }
+        return attempt;
     }
 
     public void saveAnswer(Context ctx) {
@@ -121,6 +125,9 @@ public class StudentExamController {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
         enforceOwnership(ctx, attemptId);
         int eventId = Integer.parseInt(ctx.pathParam("eventId"));
+        if (!proctorRepository.eventBelongsToAttempt(eventId, attemptId)) {
+            throw new NotFoundResponse("Event not found for this attempt");
+        }
 
         var uploadedFile = ctx.uploadedFile("screenshot");
         if (uploadedFile == null) throw new BadRequestResponse("Missing screenshot");
