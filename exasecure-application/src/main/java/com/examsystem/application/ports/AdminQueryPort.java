@@ -1,13 +1,17 @@
 package com.examsystem.application.ports;
 
-import com.examsystem.contracts.admin.*;
+import com.examsystem.application.query.AdminAttemptResult;
+import com.examsystem.application.query.AdminEvidenceResult;
+import com.examsystem.application.query.AdminExamResult;
+import com.examsystem.application.query.AdminProctorEventResult;
+import com.examsystem.application.query.AdminUserResult;
 import java.util.List;
 import java.util.Optional;
 
 public interface AdminQueryPort {
-    List<AdminUserDto> listUsers();
-    List<AdminExamDto> listExams();
-    List<AdminAttemptDto> getAttemptHistory(int examId);
-    List<AdminProctorEventDto> getProctorEvents(int attemptId);
-    Optional<AdminEvidenceDto> getEvidenceByEventId(int eventId);
+    List<AdminUserResult> listUsers();
+    List<AdminExamResult> listExams();
+    List<AdminAttemptResult> getAttemptHistory(int examId);
+    List<AdminProctorEventResult> getProctorEvents(int attemptId);
+    Optional<AdminEvidenceResult> getEvidenceByEventId(int eventId);
 }

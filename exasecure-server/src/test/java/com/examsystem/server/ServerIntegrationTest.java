@@ -4,6 +4,7 @@ import com.examsystem.server.config.AppConfig;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -12,20 +13,32 @@ import java.net.http.HttpResponse;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+@EnabledIfEnvironmentVariable(named = "EXASECURE_MYSQL_TEST_URL", matches = ".+")
 class ServerIntegrationTest {
 
     private static ExaSecureServer server;
     private static final int PORT = 8089;
+    private static String dbUrl;
+    private static String dbUser;
+    private static String dbPassword;
 
     @BeforeAll
     static void setUp() throws Exception {
+        dbUrl = System.getenv("EXASECURE_MYSQL_TEST_URL");
+        dbUser = System.getenv().getOrDefault("EXASECURE_MYSQL_TEST_USER", "root");
+        dbPassword = System.getenv().getOrDefault("EXASECURE_MYSQL_TEST_PASSWORD", "");
+        if (!dbUrl.matches("(?i)^jdbc:mysql://[^/]+/exasecure_test(?:_[a-z0-9]+)?(?:\\?.*)?$")) {
+            throw new IllegalArgumentException(
+                    "EXASECURE_MYSQL_TEST_URL must target a disposable exasecure_test database");
+        }
+
         System.setProperty("SERVER_PORT", String.valueOf(PORT));
-        System.setProperty("DB_URL", "jdbc:mysql://localhost:3306/exasecure_test_r2?allowMultiQueries=true");
-        System.setProperty("DB_USER", "root");
-        System.setProperty("DB_PASSWORD", "baba1234");
+        System.setProperty("DB_URL", dbUrl);
+        System.setProperty("DB_USER", dbUser);
+        System.setProperty("DB_PASSWORD", dbPassword);
         
         // Clean test DB
-        try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:mysql://localhost:3306/exasecure_test_r2", "root", "baba1234");
+        try (java.sql.Connection conn = java.sql.DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              java.sql.Statement stmt = conn.createStatement()) {
             stmt.execute("SET FOREIGN_KEY_CHECKS = 0;");
             stmt.execute("DROP TABLE IF EXISTS legacy_proctor_logs, proctor_evidence_v2, proctor_events, proctor_evidence, proctor_logs, student_answer_options, student_answers, exam_attempts, exam_questions, options, questions, exams, server_sessions, schema_versions, users;");
@@ -41,6 +54,10 @@ class ServerIntegrationTest {
         if (server != null) {
             server.stop();
         }
+        System.clearProperty("SERVER_PORT");
+        System.clearProperty("DB_URL");
+        System.clearProperty("DB_USER");
+        System.clearProperty("DB_PASSWORD");
     }
 
     @Test
@@ -60,7 +77,7 @@ class ServerIntegrationTest {
     @Test
     void testNegativeAuthScenarios() throws Exception {
         // Seed users
-        try (java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:mysql://localhost:3306/exasecure_test_r2", "root", "baba1234");
+        try (java.sql.Connection conn = java.sql.DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              java.sql.Statement stmt = conn.createStatement()) {
             stmt.execute("INSERT IGNORE INTO users (id, username, password, full_name, role, is_active) VALUES (101, 'student1', '$2a$10$w09ZlM.O/x10QhJv9eU3T.n/fHk69d5uL5Y5YQ/D3qD3D5D5D3D5q', 'Student One', 'STUDENT', 1)");
             stmt.execute("INSERT IGNORE INTO users (id, username, password, full_name, role, is_active) VALUES (102, 'student2', '$2a$10$w09ZlM.O/x10QhJv9eU3T.n/fHk69d5uL5Y5YQ/D3qD3D5D5D3D5q', 'Student Two', 'STUDENT', 1)");

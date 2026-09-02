@@ -20,4 +20,11 @@ public class ApplicationArchitectureTest {
                 "java.net.http..",
                 "javax.servlet.."
             ).allowEmptyShould(true);
+
+    @ArchTest
+    public static final ArchRule application_should_not_depend_on_network_contracts =
+        noClasses().that().resideInAPackage("..application..")
+            .should().dependOnClassesThat().resideInAnyPackage(
+                "com.examsystem.contracts.."
+            ).allowEmptyShould(true);
 }

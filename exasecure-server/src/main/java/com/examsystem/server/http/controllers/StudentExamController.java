@@ -12,6 +12,7 @@ import com.examsystem.domain.models.Exam;
 import com.examsystem.domain.models.ExamAttempt;
 import com.examsystem.domain.models.Question;
 import com.examsystem.domain.models.User;
+import com.examsystem.server.http.mappers.StudentContractMapper;
 import io.javalin.http.Context;
 import io.javalin.http.NotFoundResponse;
 import io.javalin.http.BadRequestResponse;
@@ -47,7 +48,9 @@ public class StudentExamController {
 
     public void listHistory(Context ctx) {
         User user = ctx.attribute("user");
-        ctx.json(studentQueryPort.listHistory(user.id()));
+        ctx.json(studentQueryPort.listHistory(user.id()).stream()
+                .map(StudentContractMapper::toAttemptHistoryDto)
+                .toList());
     }
 
     public void startOrResumeExam(Context ctx) {
@@ -118,16 +121,16 @@ public class StudentExamController {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
         enforceOwnership(ctx, attemptId);
         int eventId = Integer.parseInt(ctx.pathParam("eventId"));
-        
+
         var uploadedFile = ctx.uploadedFile("screenshot");
         if (uploadedFile == null) throw new BadRequestResponse("Missing screenshot");
-        
+
         if (uploadedFile.size() > 5 * 1024 * 1024) throw new BadRequestResponse("Screenshot too large (max 5MB)");
         String contentType = uploadedFile.contentType();
         if (contentType == null || (!contentType.equals("image/jpeg") && !contentType.equals("image/png"))) {
             throw new BadRequestResponse("Invalid content type, must be image/jpeg or image/png");
         }
-        
+
         try {
             byte[] data = uploadedFile.content().readAllBytes();
             proctorRepository.saveEvidence(eventId, data, contentType, java.time.Instant.now());

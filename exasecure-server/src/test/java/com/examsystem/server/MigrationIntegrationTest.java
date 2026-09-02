@@ -14,7 +14,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class MigrationIntegrationTest {
 
     @Test
-    void testRealMigrationFromV3() throws Exception {
+    void testH2CompatibleMigrationFromV3() throws Exception {
         String url = "jdbc:h2:mem:migratedb;MODE=MySQL;DB_CLOSE_DELAY=-1";
         
         try (Connection conn = DriverManager.getConnection(url, "sa", "");
@@ -28,9 +28,9 @@ class MigrationIntegrationTest {
             // 2. Insert representative legacy data
             stmt.execute("INSERT INTO users (id, username, password, full_name, role) VALUES (1, 'legacy_stu', '.O/x10QhJv9eU3T.n/fHk69d5uL5Y5YQ/D3qD3D5D5D3D5q', 'Legacy Student', 'STUDENT')");
             stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (1, 'Legacy Exam', 60, 1, 1)");
-            stmt.execute("INSERT INTO questions (id, exam_id, question_text, question_type) VALUES (1, 1, 'Legacy Q?', 'SINGLE')");
-            stmt.execute("INSERT INTO options (id, question_id, option_text, is_correct) VALUES (1, 1, 'A', 1), (2, 1, 'B', 0)");
-            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (1, 1, 1, '2023-01-01 10:00:00', 'ACTIVE')");
+            stmt.execute("INSERT INTO questions (id, exam_id, question_text, correct_option_number, question_type) VALUES (1, 1, 'Legacy Q?', 1, 'SINGLE')");
+            stmt.execute("INSERT INTO options (id, question_id, option_number, option_text, is_correct) VALUES (1, 1, 1, 'A', 1), (2, 1, 2, 'B', 0)");
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time) VALUES (1, 1, 1, '2023-01-01 10:00:00')");
             // Legacy proctor logs
             stmt.execute("INSERT INTO proctor_logs (id, attempt_id, violation_type, screenshot_data, violation_time) VALUES (1, 1, 'FOCUS_LOST', X'89504E47', '2023-01-01 10:05:00')");
         }

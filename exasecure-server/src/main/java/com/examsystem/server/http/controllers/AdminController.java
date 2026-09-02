@@ -2,6 +2,7 @@ package com.examsystem.server.http.controllers;
 
 import com.examsystem.application.ports.AdminQueryPort;
 import com.examsystem.contracts.admin.AdminEvidenceDto;
+import com.examsystem.server.http.mappers.AdminContractMapper;
 import io.javalin.http.Context;
 import io.javalin.http.NotFoundResponse;
 
@@ -13,29 +14,36 @@ public class AdminController {
     }
 
     public void listExams(Context ctx) {
-        ctx.json(adminQueryPort.listExams());
+        ctx.json(adminQueryPort.listExams().stream()
+                .map(AdminContractMapper::toExamDto)
+                .toList());
     }
 
     public void listUsers(Context ctx) {
-        ctx.json(adminQueryPort.listUsers());
+        ctx.json(adminQueryPort.listUsers().stream()
+                .map(AdminContractMapper::toUserDto)
+                .toList());
     }
-    
+
     public void getAttemptHistory(Context ctx) {
         int examId = Integer.parseInt(ctx.pathParam("examId"));
-        ctx.json(adminQueryPort.getAttemptHistory(examId));
+        ctx.json(adminQueryPort.getAttemptHistory(examId).stream()
+                .map(AdminContractMapper::toAttemptDto)
+                .toList());
     }
-    
+
     public void getProctorEvents(Context ctx) {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
-        ctx.json(adminQueryPort.getProctorEvents(attemptId));
+        ctx.json(adminQueryPort.getProctorEvents(attemptId).stream()
+                .map(AdminContractMapper::toProctorEventDto)
+                .toList());
     }
 
     public void getAttemptEvidence(Context ctx) {
-        // Wait, the new API fetches evidence by eventId, not attemptId. Let's make an endpoint for that.
-        // Actually, I can just use getEvidenceByEventId directly.
         int eventId = Integer.parseInt(ctx.pathParam("eventId"));
         AdminEvidenceDto evidence = adminQueryPort.getEvidenceByEventId(eventId)
-            .orElseThrow(() -> new NotFoundResponse("No evidence found"));
+                .map(AdminContractMapper::toEvidenceDto)
+                .orElseThrow(() -> new NotFoundResponse("No evidence found"));
         ctx.contentType(evidence.contentType()).result(evidence.data());
     }
 }
