@@ -1,10 +1,14 @@
 package com.examsystem.server.http.mappers;
 
+import com.examsystem.application.query.AdminAttemptDetailResult;
 import com.examsystem.application.query.AdminAttemptResult;
 import com.examsystem.application.query.AdminEvidenceResult;
 import com.examsystem.application.query.AdminExamResult;
+import com.examsystem.application.query.AdminExamStatisticsResult;
 import com.examsystem.application.query.AdminProctorEventResult;
 import com.examsystem.application.query.AdminUserResult;
+import com.examsystem.contracts.AdminAttemptDetailDto;
+import com.examsystem.contracts.AdminExamStatisticsDto;
 import com.examsystem.contracts.admin.AdminAttemptDto;
 import com.examsystem.contracts.admin.AdminEvidenceDto;
 import com.examsystem.contracts.admin.AdminExamDto;
@@ -20,7 +24,9 @@ public final class AdminContractMapper {
                 result.username(),
                 result.fullName(),
                 result.role(),
-                result.active());
+                result.active(),
+                result.enrollmentNumber(),
+                result.section());
     }
 
     public static AdminExamDto toExamDto(AdminExamResult result) {
@@ -42,6 +48,34 @@ public final class AdminContractMapper {
                 result.startTime().toString(),
                 result.status(),
                 result.score());
+    }
+
+    public static AdminAttemptDetailDto toAttemptDetailDto(AdminAttemptDetailResult result) {
+        return new AdminAttemptDetailDto(
+                result.questionId(),
+                result.questionNumber(),
+                result.questionText(),
+                result.questionType(),
+                result.marks(),
+                result.selectedOptionNumbers(),
+                result.selectedOptionTexts(),
+                result.correctOptionNumbers(),
+                result.correctOptionTexts(),
+                result.isCorrect(),
+                result.marksAwarded());
+    }
+
+    public static AdminExamStatisticsDto toExamStatisticsDto(AdminExamStatisticsResult result) {
+        return new AdminExamStatisticsDto(
+                result.examId(),
+                result.examTitle(),
+                result.totalAttempts(),
+                result.completedAttempts(),
+                result.averageScore(),
+                result.highestScore(),
+                result.lowestScore(),
+                result.passRate(),
+                result.scoreDistribution());
     }
 
     public static AdminProctorEventDto toProctorEventDto(AdminProctorEventResult result) {

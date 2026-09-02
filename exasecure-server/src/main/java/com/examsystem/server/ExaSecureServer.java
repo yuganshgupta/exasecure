@@ -116,6 +116,8 @@ public class ExaSecureServer {
                         io.javalin.apibuilder.ApiBuilder.delete(
                                 "/exams/{examId}", adminController::deactivateExamDefinition);
                         io.javalin.apibuilder.ApiBuilder.get("/exams/{examId}/attempts", adminController::getAttemptHistory);
+                        io.javalin.apibuilder.ApiBuilder.get("/exams/{examId}/statistics", adminController::getExamStatistics);
+                        io.javalin.apibuilder.ApiBuilder.get("/attempts/{attemptId}/details", adminController::getAttemptDetails);
                         io.javalin.apibuilder.ApiBuilder.get("/attempts/{attemptId}/events", adminController::getProctorEvents);
                         io.javalin.apibuilder.ApiBuilder.get("/events/{eventId}/evidence", adminController::getAttemptEvidence);
                     });

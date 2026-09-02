@@ -174,6 +174,20 @@ public class AdminController {
                 .toList());
     }
 
+    public void getAttemptDetails(Context ctx) {
+        int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
+        ctx.json(adminQueryPort.getAttemptDetails(attemptId).stream()
+                .map(AdminContractMapper::toAttemptDetailDto)
+                .toList());
+    }
+
+    public void getExamStatistics(Context ctx) {
+        int examId = Integer.parseInt(ctx.pathParam("examId"));
+        ctx.json(adminQueryPort.getExamStatistics(examId)
+                .map(AdminContractMapper::toExamStatisticsDto)
+                .orElseThrow(() -> new NotFoundResponse("Exam statistics not found")));
+    }
+
     public void getProctorEvents(Context ctx) {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
         ctx.json(adminQueryPort.getProctorEvents(attemptId).stream()

@@ -10,6 +10,8 @@ import com.examsystem.contracts.StudentAttemptHistoryDto;
 import com.examsystem.contracts.StudentExamDto;
 import com.examsystem.contracts.StudentQuestionDto;
 import com.examsystem.contracts.StudentSaveAnswerRequestDto;
+import com.examsystem.contracts.AdminAttemptDetailDto;
+import com.examsystem.contracts.AdminExamStatisticsDto;
 import com.examsystem.contracts.admin.*;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -206,6 +208,14 @@ public class ApiClient {
         return get("/admin/exams/" + examId + "/attempts", new TypeReference<List<AdminAttemptDto>>() {});
     }
 
+    public List<AdminAttemptDetailDto> adminGetAttemptDetails(int attemptId) {
+        return get("/admin/attempts/" + attemptId + "/details", new TypeReference<List<AdminAttemptDetailDto>>() {});
+    }
+
+    public AdminExamStatisticsDto adminGetExamStatistics(int examId) {
+        return get("/admin/exams/" + examId + "/statistics", AdminExamStatisticsDto.class);
+    }
+
     public List<AdminProctorEventDto> adminGetProctorEvents(int attemptId) {
         return get("/admin/attempts/" + attemptId + "/events", new TypeReference<List<AdminProctorEventDto>>() {});
     }
@@ -245,6 +255,19 @@ public class ApiClient {
         HttpResponse<String> response = send(builder.build());
         handleErrorStatus(response);
         return parse(response.body(), typeRef);
+    }
+
+    private <T> T get(String path, Class<T> responseClass) {
+        HttpRequest.Builder builder = HttpRequest.newBuilder()
+                .uri(URI.create(config.apiV1Url() + path))
+                .timeout(Duration.ofSeconds(10))
+                .header("Accept", "application/json")
+                .GET();
+        attachAuth(builder);
+
+        HttpResponse<String> response = send(builder.build());
+        handleErrorStatus(response);
+        return parse(response.body(), responseClass);
     }
 
     private <T> T postJson(String path, Object bodyObj, Class<T> responseClass, boolean authRequired) {

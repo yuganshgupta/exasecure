@@ -596,6 +596,18 @@ class ServerIntegrationTest {
                 client, "GET", "/api/v1/admin/exams/1/questions", "token-admin1", null);
         assertThat(adminQuestionsRes.statusCode()).isEqualTo(200);
         assertThat(adminQuestionsRes.body()).contains("\"correct\"");
+
+        // 5. Admin gets attempt details with correctness
+        HttpResponse<String> attemptDetailsRes = sendJson(
+                client, "GET", "/api/v1/admin/attempts/201/details", "token-admin1", null);
+        assertThat(attemptDetailsRes.statusCode()).isEqualTo(200);
+        assertThat(attemptDetailsRes.body()).contains("questionNumber");
+
+        // 6. Admin gets exam statistics
+        HttpResponse<String> statsRes = sendJson(
+                client, "GET", "/api/v1/admin/exams/1/statistics", "token-admin1", null);
+        assertThat(statsRes.statusCode()).isEqualTo(200);
+        assertThat(statsRes.body()).contains("totalAttempts");
     }
 
     private static void assertDatabaseCount(String sql, int expected) throws Exception {

@@ -1,8 +1,10 @@
 package com.examsystem.application.ports;
 
+import com.examsystem.application.query.AdminAttemptDetailResult;
 import com.examsystem.application.query.AdminAttemptResult;
 import com.examsystem.application.query.AdminEvidenceResult;
 import com.examsystem.application.query.AdminExamResult;
+import com.examsystem.application.query.AdminExamStatisticsResult;
 import com.examsystem.application.query.AdminProctorEventResult;
 import com.examsystem.application.query.AdminUserResult;
 import java.util.List;
@@ -12,6 +14,8 @@ public interface AdminQueryPort {
     List<AdminUserResult> listUsers();
     List<AdminExamResult> listExams();
     List<AdminAttemptResult> getAttemptHistory(int examId);
+    List<AdminAttemptDetailResult> getAttemptDetails(int attemptId);
+    Optional<AdminExamStatisticsResult> getExamStatistics(int examId);
     List<AdminProctorEventResult> getProctorEvents(int attemptId);
     Optional<AdminEvidenceResult> getEvidenceByEventId(int eventId);
 }
