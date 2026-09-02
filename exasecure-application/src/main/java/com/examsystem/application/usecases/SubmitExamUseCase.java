@@ -82,21 +82,20 @@ public class SubmitExamUseCase {
             return attempt.score();
         }
             
-        int correct = 0;
-        var answers = answerRepository.getSelectedOptionsForAttempt(attemptId);
         List<Question> questions = questionRepository.findByExamId(attempt.examId());
-        
-        for (Question q : questions) {
-            List<Integer> selected = answers.getOrDefault(q.id(), java.util.Collections.emptyList());
-            if (GradingPolicy.isAnswerCorrect(q, selected)) {
-                correct++;
-            }
-        }
-        
         int focusLostCount = proctorRepository.countEvents(attemptId, "FOCUS_LOST");
         
         try {
-            attemptRepository.calculateAndSetScore(attemptId, focusLostCount, correct, submittedAt);
+            return attemptRepository.finalizeAndGradeAttempt(attemptId, submittedAt, focusLostCount, answers -> {
+                int correct = 0;
+                for (Question q : questions) {
+                    List<Integer> selected = answers.getOrDefault(q.id(), java.util.Collections.emptyList());
+                    if (GradingPolicy.isAnswerCorrect(q, selected)) {
+                        correct++;
+                    }
+                }
+                return correct;
+            }, answerRepository);
         } catch (IllegalStateException e) {
             var fresh = attemptRepository.findById(attemptId);
             if (fresh.isPresent() && fresh.get().finalized() && fresh.get().score() != null) {
@@ -104,6 +103,5 @@ public class SubmitExamUseCase {
             }
             throw e;
         }
-        return correct;
     }
 }

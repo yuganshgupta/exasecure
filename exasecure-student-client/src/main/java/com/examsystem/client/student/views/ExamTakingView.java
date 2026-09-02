@@ -31,6 +31,28 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public class ExamTakingView {
+
+    public static class QuestionSaveState {
+        final int questionId;
+        final int questionIndex;
+        List<Integer> intended = new ArrayList<>();
+        List<Integer> acknowledged = null;
+        long currentGen = 0;
+        long acknowledgedGen = 0;
+        boolean inFlight = false;
+        boolean failed = false;
+        String lastError = null;
+
+        QuestionSaveState(int questionId, int questionIndex) {
+            this.questionId = questionId;
+            this.questionIndex = questionIndex;
+        }
+
+        public boolean isSynchronized() {
+            return !inFlight && !failed && acknowledged != null && acknowledged.equals(intended);
+        }
+    }
+
     private final StudentApp app;
     private final ApiClient apiClient;
     private final Stage stage;
@@ -39,6 +61,7 @@ public class ExamTakingView {
     private final List<StudentQuestionDto> questions;
     private final Map<Integer, List<Integer>> answers;
     private final Set<Integer> flaggedQuestions = new HashSet<>();
+    private final Map<Integer, QuestionSaveState> saveStates = new HashMap<>();
 
     private final BorderPane view;
     private final Label timerLabel;
@@ -63,6 +86,7 @@ public class ExamTakingView {
     private ChangeListener<Boolean> focusListener;
     private boolean isDialogActive = false;
     private boolean isSubmitted = false;
+    private boolean isSubmissionPending = false;
     private long lastProctorEventTime = 0;
 
     public ExamTakingView(StudentApp app, ApiClient apiClient, Stage stage,
@@ -80,6 +104,16 @@ public class ExamTakingView {
             for (var entry : initialAnswers.entrySet()) {
                 this.answers.put(entry.getKey(), new ArrayList<>(entry.getValue()));
             }
+        }
+
+        for (int i = 0; i < questions.size(); i++) {
+            StudentQuestionDto q = questions.get(i);
+            QuestionSaveState state = new QuestionSaveState(q.id(), i);
+            if (this.answers.containsKey(q.id())) {
+                state.intended = new ArrayList<>(this.answers.get(q.id()));
+                state.acknowledged = new ArrayList<>(state.intended);
+            }
+            this.saveStates.put(q.id(), state);
         }
 
         this.view = new BorderPane();
@@ -188,9 +222,9 @@ public class ExamTakingView {
         retryAutosaveBtn.setManaged(false);
         retryAutosaveBtn.setStyle("-fx-background-color: #fee2e2; -fx-text-fill: #b91c1c; -fx-font-size: 11px; -fx-padding: 2 8; -fx-background-radius: 4px; -fx-cursor: hand;");
         retryAutosaveBtn.setOnAction(e -> {
+            if (questions.isEmpty()) return;
             StudentQuestionDto q = questions.get(currentIndex);
-            List<Integer> currentAnswers = answers.getOrDefault(q.id(), List.of());
-            triggerAutosave(q.id(), currentAnswers);
+            retryQuestionSave(q.id());
         });
 
         questionHeader.getChildren().addAll(questionNumberLabel, questionTypeBadge, qSpacer, autosaveStatusLabel, retryAutosaveBtn);
@@ -261,9 +295,11 @@ public class ExamTakingView {
         greenDot.setStyle("-fx-text-fill: #16a34a; -fx-font-size: 11px;");
         Label purpleDot = new Label("● Flagged for Review");
         purpleDot.setStyle("-fx-text-fill: #8b5cf6; -fx-font-size: 11px;");
+        Label redDot = new Label("● Save Failed (Click to retry)");
+        redDot.setStyle("-fx-text-fill: #dc2626; -fx-font-size: 11px;");
         Label grayDot = new Label("○ Unanswered");
         grayDot.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
-        legend.getChildren().addAll(greenDot, purpleDot, grayDot);
+        legend.getChildren().addAll(greenDot, purpleDot, redDot, grayDot);
 
         rightSidebar.getChildren().addAll(paletteTitle, answeredSummaryLabel, palettePane, legend);
         view.setRight(rightSidebar);
@@ -286,18 +322,18 @@ public class ExamTakingView {
         long remaining = examTimer.getRemainingSeconds();
         timerLabel.setText(ExamTimer.formatRemainingTime(remaining));
         if (remaining <= 60) {
-            timerLabel.setStyle("-fx-text-fill: #ef4444;"); // Red critical
+            timerLabel.setStyle("-fx-text-fill: #ef4444;");
         } else if (remaining <= 300) {
-            timerLabel.setStyle("-fx-text-fill: #f59e0b;"); // Amber warning
+            timerLabel.setStyle("-fx-text-fill: #f59e0b;");
         } else {
-            timerLabel.setStyle("-fx-text-fill: #38bdf8;"); // Blue normal
+            timerLabel.setStyle("-fx-text-fill: #38bdf8;");
         }
     }
 
     private void setupProctoring() {
         if (stage == null) return;
         focusListener = (obs, oldVal, newVal) -> {
-            if (!newVal && !isDialogActive && !isSubmitted) {
+            if (!newVal && !isDialogActive && !isSubmitted && !isSubmissionPending) {
                 handleFocusLost();
             }
         };
@@ -309,26 +345,39 @@ public class ExamTakingView {
         if (now - lastProctorEventTime < 3000) return; // Debounce
         lastProctorEventTime = now;
 
-        proctorNoticeBanner.setText("⚠️ Warning: Window focus lost. Proctoring event recorded and evidence uploaded to the server.");
+        proctorNoticeBanner.setText("⚠️ Warning: Window focus lost. Recording proctoring incident...");
         proctorNoticeBanner.setVisible(true);
         proctorNoticeBanner.setManaged(true);
-
-        byte[] screenshot = ScreenCaptureService.captureScreenAsJpeg();
 
         AsyncRunner.runAsync(
                 () -> {
                     int eventId = apiClient.recordProctorEvent(attempt.id(), "FOCUS_LOST");
+                    byte[] screenshot = ScreenCaptureService.captureScreenAsJpeg();
+                    boolean uploaded = false;
                     if (screenshot != null && screenshot.length > 0) {
                         try {
                             apiClient.uploadProctorEvidence(attempt.id(), eventId, screenshot, "image/jpeg");
-                        } catch (Exception ignored) {}
+                            uploaded = true;
+                        } catch (Exception ignored) {
+                            uploaded = false;
+                        }
                     }
-                    return true;
+                    return new ProctorOutcome(eventId, uploaded);
                 },
-                (Boolean ok) -> {},
-                (Throwable err) -> {}
+                (ProctorOutcome outcome) -> {
+                    if (outcome.uploaded()) {
+                        proctorNoticeBanner.setText("⚠️ Warning: Window focus lost. Incident recorded and screenshot evidence uploaded.");
+                    } else {
+                        proctorNoticeBanner.setText("⚠️ Warning: Window focus lost. Incident recorded (Event #" + outcome.eventId() + "), but screenshot upload failed.");
+                    }
+                },
+                (Throwable err) -> {
+                    proctorNoticeBanner.setText("⚠️ Warning: Window focus lost. Failed to report incident to server: " + err.getMessage());
+                }
         );
     }
+
+    private record ProctorOutcome(int eventId, boolean uploaded) {}
 
     private void renderCurrentQuestion() {
         if (questions.isEmpty()) return;
@@ -354,8 +403,10 @@ public class ExamTakingView {
             flagBtn.setStyle("-fx-background-color: white; -fx-border-color: #8b5cf6; -fx-text-fill: #7c3aed; -fx-background-radius: 6px; -fx-border-radius: 6px; -fx-padding: 8 12; -fx-cursor: hand; -fx-font-weight: bold;");
         }
 
-        prevBtn.setDisable(currentIndex == 0);
-        nextBtn.setDisable(currentIndex == questions.size() - 1);
+        prevBtn.setDisable(currentIndex == 0 || isSubmitted || isSubmissionPending);
+        nextBtn.setDisable(currentIndex == questions.size() - 1 || isSubmitted || isSubmissionPending);
+        clearBtn.setDisable(isSubmitted || isSubmissionPending);
+        flagBtn.setDisable(isSubmitted || isSubmissionPending);
 
         optionsBox.getChildren().clear();
         List<Integer> selectedOptions = answers.getOrDefault(q.id(), List.of());
@@ -371,6 +422,7 @@ public class ExamTakingView {
                 CheckBox cb = new CheckBox(opt.optionNumber() + ". " + opt.text());
                 cb.setFont(Font.font("Segoe UI", 14));
                 cb.setSelected(selectedOptions.contains(opt.optionNumber()));
+                cb.setDisable(isSubmitted || isSubmissionPending);
                 cb.selectedProperty().addListener((obs, oldVal, newVal) -> {
                     List<Integer> current = answers.computeIfAbsent(q.id(), k -> new ArrayList<>());
                     if (newVal && !current.contains(opt.optionNumber())) {
@@ -378,23 +430,20 @@ public class ExamTakingView {
                     } else if (!newVal) {
                         current.remove(Integer.valueOf(opt.optionNumber()));
                     }
-                    triggerAutosave(q.id(), current);
-                    updatePalette();
+                    onAnswerChanged(q.id(), current);
                 });
                 optRow.getChildren().add(cb);
             } else {
                 RadioButton rb = new RadioButton(opt.optionNumber() + ". " + opt.text());
                 rb.setFont(Font.font("Segoe UI", 14));
                 rb.setToggleGroup(singleGroup);
-                if (selectedOptions.contains(opt.optionNumber())) {
-                    rb.setSelected(true);
-                }
+                rb.setSelected(selectedOptions.contains(opt.optionNumber()));
+                rb.setDisable(isSubmitted || isSubmissionPending);
                 rb.selectedProperty().addListener((obs, oldVal, newVal) -> {
                     if (newVal) {
                         List<Integer> current = List.of(opt.optionNumber());
                         answers.put(q.id(), new ArrayList<>(current));
-                        triggerAutosave(q.id(), current);
-                        updatePalette();
+                        onAnswerChanged(q.id(), current);
                     }
                 });
                 optRow.getChildren().add(rb);
@@ -402,17 +451,20 @@ public class ExamTakingView {
 
             optionsBox.getChildren().add(optRow);
         }
+
+        updateAutosaveUIForCurrentQuestion();
     }
 
     private void clearCurrentAnswer() {
+        if (isSubmitted || isSubmissionPending) return;
         StudentQuestionDto q = questions.get(currentIndex);
         answers.remove(q.id());
-        triggerAutosave(q.id(), List.of());
+        onAnswerChanged(q.id(), List.of());
         renderCurrentQuestion();
-        updatePalette();
     }
 
     private void toggleCurrentFlag() {
+        if (isSubmitted || isSubmissionPending) return;
         StudentQuestionDto q = questions.get(currentIndex);
         if (flaggedQuestions.contains(q.id())) {
             flaggedQuestions.remove(q.id());
@@ -423,31 +475,116 @@ public class ExamTakingView {
         updatePalette();
     }
 
-    private void triggerAutosave(int questionId, List<Integer> selected) {
-        autosaveStatusLabel.setText("Saving answer...");
-        autosaveStatusLabel.setTextFill(Color.web("#d97706"));
-        retryAutosaveBtn.setVisible(false);
-        retryAutosaveBtn.setManaged(false);
+    private void onAnswerChanged(int questionId, List<Integer> newSelections) {
+        if (isSubmitted || isSubmissionPending) return;
+        QuestionSaveState state = saveStates.get(questionId);
+        if (state == null) return;
+
+        state.intended = new ArrayList<>(newSelections);
+        state.currentGen++;
+        state.failed = false;
+        state.lastError = null;
+
+        dispatchAutosave(state, state.currentGen, new ArrayList<>(newSelections));
+        updatePalette();
+    }
+
+    private void retryQuestionSave(int questionId) {
+        if (isSubmitted || isSubmissionPending) return;
+        QuestionSaveState state = saveStates.get(questionId);
+        if (state == null) return;
+
+        state.currentGen++;
+        state.failed = false;
+        state.lastError = null;
+        dispatchAutosave(state, state.currentGen, new ArrayList<>(state.intended));
+    }
+
+    private void dispatchAutosave(QuestionSaveState state, long gen, List<Integer> snapshot) {
+        state.inFlight = true;
+        updateAutosaveUIForCurrentQuestion();
 
         AsyncRunner.runAsync(
                 () -> {
-                    apiClient.saveAnswer(attempt.id(), questionId, selected);
-                    return true;
+                    apiClient.saveAnswer(attempt.id(), state.questionId, snapshot);
+                    return snapshot;
                 },
-                (Boolean ok) -> {
-                    String time = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
-                    autosaveStatusLabel.setText("✓ Saved (" + time + ")");
-                    autosaveStatusLabel.setTextFill(Color.web("#16a34a"));
-                    retryAutosaveBtn.setVisible(false);
-                    retryAutosaveBtn.setManaged(false);
+                (List<Integer> ack) -> {
+                    // Ignore stale responses from earlier generations
+                    if (gen < state.currentGen) {
+                        return;
+                    }
+                    if (gen == state.currentGen) {
+                        state.acknowledged = new ArrayList<>(snapshot);
+                        state.acknowledgedGen = gen;
+                        state.inFlight = false;
+                        state.failed = false;
+                        state.lastError = null;
+                        updateAutosaveUIForCurrentQuestion();
+                        updatePalette();
+
+                        if (isSubmissionPending) {
+                            checkAndProceedWithPendingSubmission();
+                        }
+                    }
                 },
                 (Throwable err) -> {
-                    autosaveStatusLabel.setText("✗ Autosave failed: " + err.getMessage());
-                    autosaveStatusLabel.setTextFill(Color.web("#dc2626"));
-                    retryAutosaveBtn.setVisible(true);
-                    retryAutosaveBtn.setManaged(true);
+                    if (gen == state.currentGen) {
+                        state.inFlight = false;
+                        state.failed = true;
+                        state.lastError = err.getMessage();
+                        updateAutosaveUIForCurrentQuestion();
+                        updatePalette();
+
+                        if (isSubmissionPending) {
+                            isSubmissionPending = false;
+                            setControlsDisabled(false);
+                            submitBtn.setText("Submit Exam");
+                            UiFeedback.showError("Submission Aborted",
+                                    "Cannot submit exam: Question " + (state.questionIndex + 1)
+                                            + " failed to save (" + err.getMessage() + "). Please retry saving before submitting.");
+                            currentIndex = state.questionIndex;
+                            renderCurrentQuestion();
+                            updatePalette();
+                        }
+                    }
                 }
         );
+    }
+
+    private void updateAutosaveUIForCurrentQuestion() {
+        if (questions.isEmpty()) return;
+        StudentQuestionDto q = questions.get(currentIndex);
+        QuestionSaveState state = saveStates.get(q.id());
+        if (state == null) {
+            autosaveStatusLabel.setText("");
+            retryAutosaveBtn.setVisible(false);
+            retryAutosaveBtn.setManaged(false);
+            return;
+        }
+
+        if (state.failed) {
+            autosaveStatusLabel.setText("✗ Autosave failed: " + (state.lastError != null ? state.lastError : "unknown error"));
+            autosaveStatusLabel.setTextFill(Color.web("#dc2626"));
+            retryAutosaveBtn.setVisible(true);
+            retryAutosaveBtn.setManaged(true);
+            retryAutosaveBtn.setDisable(isSubmitted || isSubmissionPending);
+        } else if (state.inFlight) {
+            autosaveStatusLabel.setText("Saving answer...");
+            autosaveStatusLabel.setTextFill(Color.web("#d97706"));
+            retryAutosaveBtn.setVisible(false);
+            retryAutosaveBtn.setManaged(false);
+        } else if (state.acknowledged != null) {
+            String time = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
+            autosaveStatusLabel.setText("✓ Saved (" + time + ")");
+            autosaveStatusLabel.setTextFill(Color.web("#16a34a"));
+            retryAutosaveBtn.setVisible(false);
+            retryAutosaveBtn.setManaged(false);
+        } else {
+            autosaveStatusLabel.setText("");
+            retryAutosaveBtn.setVisible(false);
+            retryAutosaveBtn.setManaged(false);
+        }
     }
 
     private void updatePalette() {
@@ -460,6 +597,8 @@ public class ExamTakingView {
             List<Integer> sel = answers.get(q.id());
             boolean answered = sel != null && !sel.isEmpty();
             boolean flagged = flaggedQuestions.contains(q.id());
+            QuestionSaveState sState = saveStates.get(q.id());
+            boolean failed = sState != null && sState.failed;
 
             if (answered) answeredCount++;
             if (flagged) flaggedCount++;
@@ -467,6 +606,7 @@ public class ExamTakingView {
             Button pBtn = new Button(String.valueOf(i + 1));
             pBtn.setPrefSize(38, 38);
             pBtn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+            pBtn.setDisable(isSubmitted || isSubmissionPending);
 
             final int index = i;
             pBtn.setOnAction(e -> {
@@ -476,7 +616,14 @@ public class ExamTakingView {
             });
 
             boolean isCurrent = (i == currentIndex);
-            String border = isCurrent ? "-fx-border-color: #2563eb; -fx-border-width: 2px; -fx-border-radius: 4px;" : "-fx-border-width: 0;";
+            String border;
+            if (failed) {
+                border = "-fx-border-color: #dc2626; -fx-border-width: 2.5px; -fx-border-radius: 4px;";
+            } else if (isCurrent) {
+                border = "-fx-border-color: #2563eb; -fx-border-width: 2.5px; -fx-border-radius: 4px;";
+            } else {
+                border = "-fx-border-width: 0;";
+            }
 
             if (flagged) {
                 pBtn.setStyle("-fx-background-color: #8b5cf6; -fx-text-fill: white; -fx-background-radius: 4px; " + border + " -fx-cursor: hand;");
@@ -494,6 +641,21 @@ public class ExamTakingView {
     }
 
     private void confirmAndSubmitExam() {
+        if (isSubmitted || isSubmissionPending) return;
+
+        // Check if any question has already failed to save
+        for (QuestionSaveState s : saveStates.values()) {
+            if (s.failed) {
+                UiFeedback.showError("Save Failure Pending",
+                        "Question " + (s.questionIndex + 1)
+                                + " failed to save to the server. Please review and click '🔄 Retry Save' before submitting.");
+                currentIndex = s.questionIndex;
+                renderCurrentQuestion();
+                updatePalette();
+                return;
+            }
+        }
+
         isDialogActive = true;
         int answeredCount = 0;
         for (var q : questions) {
@@ -517,6 +679,60 @@ public class ExamTakingView {
         isDialogActive = false;
 
         if (confirmed) {
+            startSubmissionProcess();
+        }
+    }
+
+    private void startSubmissionProcess() {
+        setControlsDisabled(true);
+
+        boolean allSynced = true;
+        for (QuestionSaveState s : saveStates.values()) {
+            if (s.failed) {
+                setControlsDisabled(false);
+                UiFeedback.showError("Save Failure", "Question " + (s.questionIndex + 1) + " failed to save. Please retry saving before submitting.");
+                currentIndex = s.questionIndex;
+                renderCurrentQuestion();
+                updatePalette();
+                return;
+            }
+            if (s.inFlight || !s.isSynchronized()) {
+                allSynced = false;
+            }
+        }
+
+        if (allSynced) {
+            performSubmission();
+        } else {
+            isSubmissionPending = true;
+            submitBtn.setText("Saving answers...");
+            autosaveStatusLabel.setText("Synchronizing answers with server before final submit...");
+            autosaveStatusLabel.setTextFill(Color.web("#d97706"));
+        }
+    }
+
+    private void checkAndProceedWithPendingSubmission() {
+        if (!isSubmissionPending) return;
+
+        boolean allSynced = true;
+        for (QuestionSaveState s : saveStates.values()) {
+            if (s.failed) {
+                isSubmissionPending = false;
+                setControlsDisabled(false);
+                submitBtn.setText("Submit Exam");
+                UiFeedback.showError("Save Failure", "Question " + (s.questionIndex + 1) + " failed to save. Please retry saving before submitting.");
+                currentIndex = s.questionIndex;
+                renderCurrentQuestion();
+                updatePalette();
+                return;
+            }
+            if (s.inFlight || !s.isSynchronized()) {
+                allSynced = false;
+            }
+        }
+
+        if (allSynced) {
+            isSubmissionPending = false;
             performSubmission();
         }
     }
@@ -525,14 +741,15 @@ public class ExamTakingView {
         isSubmitted = true;
         cleanupListeners();
         UiFeedback.showError("Exam Time Expired", "The authoritative examination duration has expired. Submitting answers now...");
-        performSubmission();
+        startSubmissionProcess();
     }
 
     private void performSubmission() {
         isSubmitted = true;
+        isSubmissionPending = false;
         cleanupListeners();
-        submitBtn.setDisable(true);
-        submitBtn.setText("Submitting...");
+        setControlsDisabled(true);
+        submitBtn.setText("Finalizing...");
 
         AsyncRunner.runAsync(
                 () -> apiClient.submitExam(attempt.id()),
@@ -542,7 +759,7 @@ public class ExamTakingView {
                     app.showHistory();
                 },
                 (Throwable err) -> {
-                    submitBtn.setDisable(false);
+                    setControlsDisabled(false);
                     submitBtn.setText("Submit Exam");
                     if (err instanceof ApiException apiEx && apiEx.isConflict()) {
                         UiFeedback.showInfo("Attempt Finalized", "This exam attempt has already been finalized by the server.");
@@ -552,6 +769,17 @@ public class ExamTakingView {
                     }
                 }
         );
+    }
+
+    private void setControlsDisabled(boolean disabled) {
+        optionsBox.setDisable(disabled);
+        clearBtn.setDisable(disabled);
+        flagBtn.setDisable(disabled);
+        submitBtn.setDisable(disabled);
+        retryAutosaveBtn.setDisable(disabled);
+        palettePane.setDisable(disabled);
+        prevBtn.setDisable(disabled || currentIndex == 0);
+        nextBtn.setDisable(disabled || currentIndex == questions.size() - 1);
     }
 
     private void cleanupListeners() {

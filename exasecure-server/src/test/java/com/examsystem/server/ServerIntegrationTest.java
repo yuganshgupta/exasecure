@@ -610,6 +610,204 @@ class ServerIntegrationTest {
         assertThat(statsRes.body()).contains("totalAttempts");
     }
 
+    @Test
+    void adminAttemptDetails_comprehensiveVerificationOfScoringAndTypes() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // Dedicated attempt 293 on Exam 3 (student 102)
+        int detailsAttemptId = 293;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (" + detailsAttemptId + ", 3, 102, NOW(), 'ACTIVE')");
+        }
+
+        // 1. Student access to admin details endpoint is rejected with 403
+        HttpResponse<String> studentDenial = sendJson(
+                client, "GET", "/api/v1/admin/attempts/" + detailsAttemptId + "/details", "token-stu1", null);
+        assertThat(studentDenial.statusCode()).isEqualTo(403);
+
+        // 2. Non-existent attempt returns empty details list
+        HttpResponse<String> notFound = sendJson(
+                client, "GET", "/api/v1/admin/attempts/99999/details", "token-admin1", null);
+        assertThat(notFound.statusCode()).isEqualTo(200);
+        assertThat(new ObjectMapper().readTree(notFound.body()).size()).isZero();
+
+        // 3. Exam 3 has question 403: MULTI with options 3 (correct), 7 (wrong), 9 (correct)
+        // Save answer with only option 3 (partially correct -> incorrect)
+        HttpResponse<String> savePart = sendJson(
+                client, "POST", "/api/v1/student/attempts/" + detailsAttemptId + "/answers", "token-stu2",
+                "{\"questionId\":403,\"selectedOptions\":[3]}");
+        assertThat(savePart.statusCode()).isEqualTo(200);
+
+        HttpResponse<String> detailsRes = sendJson(
+                client, "GET", "/api/v1/admin/attempts/" + detailsAttemptId + "/details", "token-admin1", null);
+        assertThat(detailsRes.statusCode()).isEqualTo(200);
+        var details = new ObjectMapper().readTree(detailsRes.body());
+        assertThat(details.size()).isEqualTo(1);
+
+        var q = details.get(0);
+        assertThat(q.required("questionId").asInt()).isEqualTo(403);
+        assertThat(q.required("questionNumber").asInt()).isEqualTo(1);
+        assertThat(q.required("questionType").asText()).isEqualTo("MULTI");
+        assertThat(q.required("isCorrect").asBoolean()).isFalse();
+        assertThat(q.required("marksAwarded").asInt()).isEqualTo(0);
+
+        // Check selected options and texts
+        var selNums = q.required("selectedOptionNumbers");
+        assertThat(selNums.size()).isEqualTo(1);
+        assertThat(selNums.get(0).asInt()).isEqualTo(3);
+
+        var selTexts = q.required("selectedOptionTexts");
+        assertThat(selTexts.size()).isEqualTo(1);
+        assertThat(selTexts.get(0).asText()).isEqualTo("First stable");
+
+        // Check correct options (stable option numbers 3 and 9 preserved!)
+        var corNums = q.required("correctOptionNumbers");
+        assertThat(corNums.size()).isEqualTo(2);
+        assertThat(corNums.get(0).asInt()).isEqualTo(3);
+        assertThat(corNums.get(1).asInt()).isEqualTo(9);
+
+        var corTexts = q.required("correctOptionTexts");
+        assertThat(corTexts.size()).isEqualTo(2);
+        assertThat(corTexts.get(0).asText()).isEqualTo("First stable");
+        assertThat(corTexts.get(1).asText()).isEqualTo("Last stable");
+
+        // Now update answer to both [3, 9] -> should be scored correct
+        HttpResponse<String> saveFull = sendJson(
+                client, "POST", "/api/v1/student/attempts/" + detailsAttemptId + "/answers", "token-stu2",
+                "{\"questionId\":403,\"selectedOptions\":[3, 9]}");
+        assertThat(saveFull.statusCode()).isEqualTo(200);
+
+        HttpResponse<String> detailsFullRes = sendJson(
+                client, "GET", "/api/v1/admin/attempts/" + detailsAttemptId + "/details", "token-admin1", null);
+        var detailsFull = new ObjectMapper().readTree(detailsFullRes.body());
+        var qFull = detailsFull.get(0);
+        assertThat(qFull.required("isCorrect").asBoolean()).isTrue();
+        assertThat(qFull.required("marksAwarded").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void adminExamStatistics_truthfulMetricsAndDistribution() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // 1. Student access is rejected with 403
+        HttpResponse<String> studentDenial = sendJson(
+                client, "GET", "/api/v1/admin/exams/1/statistics", "token-stu1", null);
+        assertThat(studentDenial.statusCode()).isEqualTo(403);
+
+        // 2. Non-existent exam returns 404
+        HttpResponse<String> notFound = sendJson(
+                client, "GET", "/api/v1/admin/exams/99999/statistics", "token-admin1", null);
+        assertThat(notFound.statusCode()).isEqualTo(404);
+
+        // 3. Create a dedicated exam for statistics testing
+        int statsExamId;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO exams (title, duration_minutes, created_by, is_active) VALUES ('Stats Exam', 60, 103, 1)",
+                    java.sql.Statement.RETURN_GENERATED_KEYS);
+            try (ResultSet rs = stmt.getGeneratedKeys()) {
+                rs.next();
+                statsExamId = rs.getInt(1);
+            }
+        }
+
+        // 3a. Exam with 0 attempts: aggregates must be null and total 0
+        HttpResponse<String> zeroStats = sendJson(
+                client, "GET", "/api/v1/admin/exams/" + statsExamId + "/statistics", "token-admin1", null);
+        assertThat(zeroStats.statusCode()).isEqualTo(200);
+        var zeroJson = new ObjectMapper().readTree(zeroStats.body());
+        assertThat(zeroJson.required("totalAttempts").asInt()).isZero();
+        assertThat(zeroJson.required("submittedAttempts").asInt()).isZero();
+        assertThat(zeroJson.required("activeAttempts").asInt()).isZero();
+        assertThat(zeroJson.required("expiredAttempts").asInt()).isZero();
+        assertThat(zeroJson.get("averageScore").isNull()).isTrue();
+        assertThat(zeroJson.get("highestScore").isNull()).isTrue();
+        assertThat(zeroJson.get("lowestScore").isNull()).isTrue();
+        assertThat(zeroJson.required("scoreDistribution").size()).isZero();
+
+        // 3b. Add ACTIVE and EXPIRED attempts (unscored) -> aggregates must remain null
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO exam_attempts (exam_id, student_id, start_time, status) VALUES (" + statsExamId + ", 101, NOW(), 'ACTIVE')");
+            stmt.execute("INSERT INTO exam_attempts (exam_id, student_id, start_time, end_time, status) VALUES (" + statsExamId + ", 102, DATE_SUB(NOW(), INTERVAL 2 HOUR), NOW(), 'EXPIRED')");
+        }
+
+        HttpResponse<String> activeExpiredStats = sendJson(
+                client, "GET", "/api/v1/admin/exams/" + statsExamId + "/statistics", "token-admin1", null);
+        assertThat(activeExpiredStats.statusCode()).isEqualTo(200);
+        var aeJson = new ObjectMapper().readTree(activeExpiredStats.body());
+        assertThat(aeJson.required("totalAttempts").asInt()).isEqualTo(2);
+        assertThat(aeJson.required("submittedAttempts").asInt()).isZero();
+        assertThat(aeJson.required("activeAttempts").asInt()).isEqualTo(1);
+        assertThat(aeJson.required("expiredAttempts").asInt()).isEqualTo(1);
+        assertThat(aeJson.get("averageScore").isNull()).isTrue();
+
+        // 3c. Add 2 SUBMITTED attempts with scores 0 and 2
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO exam_attempts (exam_id, student_id, start_time, end_time, status, score) VALUES (" + statsExamId + ", 101, NOW(), NOW(), 'SUBMITTED', 0)");
+            stmt.execute("INSERT INTO exam_attempts (exam_id, student_id, start_time, end_time, status, score) VALUES (" + statsExamId + ", 102, NOW(), NOW(), 'SUBMITTED', 2)");
+        }
+
+        HttpResponse<String> fullStats = sendJson(
+                client, "GET", "/api/v1/admin/exams/" + statsExamId + "/statistics", "token-admin1", null);
+        assertThat(fullStats.statusCode()).isEqualTo(200);
+        var fullJson = new ObjectMapper().readTree(fullStats.body());
+        assertThat(fullJson.required("totalAttempts").asInt()).isEqualTo(4);
+        assertThat(fullJson.required("submittedAttempts").asInt()).isEqualTo(2);
+        assertThat(fullJson.required("activeAttempts").asInt()).isEqualTo(1);
+        assertThat(fullJson.required("expiredAttempts").asInt()).isEqualTo(1);
+        assertThat(fullJson.required("averageScore").asDouble()).isEqualTo(1.0);
+        assertThat(fullJson.required("highestScore").asInt()).isEqualTo(2);
+        assertThat(fullJson.required("lowestScore").asInt()).isEqualTo(0);
+
+        var dist = fullJson.required("scoreDistribution");
+        assertThat(dist.required("0 pts").asInt()).isEqualTo(1);
+        assertThat(dist.required("2 pts").asInt()).isEqualTo(1);
+    }
+
+    @Test
+    void lateAnswerSaveArrivingAfterSubmission_isRejectedByRowLock() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // Dedicated attempt 296 on Exam 6 (student 102)
+        int lateAttemptId = 296;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (" + lateAttemptId + ", 6, 102, NOW(), 'ACTIVE')");
+        }
+
+        // 1. Save answer [1]
+        HttpResponse<String> saveInit = sendJson(
+                client, "POST", "/api/v1/student/attempts/" + lateAttemptId + "/answers", "token-stu2",
+                "{\"questionId\":406,\"selectedOptions\":[1]}");
+        assertThat(saveInit.statusCode()).isEqualTo(200);
+
+        // 2. Submit the attempt -> status becomes SUBMITTED
+        HttpResponse<String> submitRes = sendJson(
+                client, "POST", "/api/v1/student/attempts/" + lateAttemptId + "/submit", "token-stu2", null);
+        assertThat(submitRes.statusCode()).isEqualTo(200);
+        assertAttemptSubmittedWithScore(lateAttemptId, 1);
+
+        // 3. Try saving answer via HTTP on submitted attempt -> 409 Conflict
+        HttpResponse<String> postSubmitHttp = sendJson(
+                client, "POST", "/api/v1/student/attempts/" + lateAttemptId + "/answers", "token-stu2",
+                "{\"questionId\":406,\"selectedOptions\":[2]}");
+        assertThat(postSubmitHttp.statusCode()).isEqualTo(409);
+
+        // 4. Verify direct repository call fails with IllegalStateException
+        com.examsystem.server.adapters.jdbc.JdbcAnswerRepository answerRepo =
+                new com.examsystem.server.adapters.jdbc.JdbcAnswerRepository(server.getDataSource());
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> {
+            answerRepo.saveAnswer(lateAttemptId, 406, java.util.List.of(2), java.time.Instant.now());
+        });
+
+        // 5. Ensure database state for attempt 296 was not corrupted
+        assertStoredSelections(lateAttemptId, 406, 1);
+        assertAttemptSubmittedWithScore(lateAttemptId, 1);
+    }
+
     private static void assertDatabaseCount(String sql, int expected) throws Exception {
         try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              var statement = conn.createStatement();

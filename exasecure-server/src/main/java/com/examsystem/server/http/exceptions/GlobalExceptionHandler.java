@@ -11,26 +11,26 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     public static void register(io.javalin.config.JavalinConfig config) {
+        config.routes.exception(io.javalin.http.HttpResponseException.class, (e, ctx) -> {
+            ctx.status(e.getStatus());
+            ctx.json(new ErrorResponseDto(e.getStatus(), e.getMessage(), UUID.randomUUID().toString()));
+        });
+
+        config.routes.exception(IllegalArgumentException.class, (e, ctx) -> {
+            ctx.status(HttpStatus.BAD_REQUEST);
+            ctx.json(new ErrorResponseDto(400, e.getMessage(), UUID.randomUUID().toString()));
+        });
+
+        config.routes.exception(IllegalStateException.class, (e, ctx) -> {
+            ctx.status(HttpStatus.CONFLICT);
+            ctx.json(new ErrorResponseDto(409, e.getMessage(), UUID.randomUUID().toString()));
+        });
+
         config.routes.exception(Exception.class, (e, ctx) -> {
-                String requestId = UUID.randomUUID().toString();
-                log.error("Unhandled error [{}]: ", requestId, e);
-                ctx.status(HttpStatus.INTERNAL_SERVER_ERROR);
-                ctx.json(new ErrorResponseDto(500, "Internal Server Error", requestId));
-            });
-            
-            config.routes.exception(io.javalin.http.HttpResponseException.class, (e, ctx) -> {
-                ctx.status(e.getStatus());
-                ctx.json(new ErrorResponseDto(e.getStatus(), e.getMessage(), UUID.randomUUID().toString()));
-            });
-            
-            config.routes.exception(IllegalArgumentException.class, (e, ctx) -> {
-                ctx.status(HttpStatus.BAD_REQUEST);
-                ctx.json(new ErrorResponseDto(400, e.getMessage(), UUID.randomUUID().toString()));
-            });
-            
-            config.routes.exception(IllegalStateException.class, (e, ctx) -> {
-                ctx.status(HttpStatus.CONFLICT);
-                ctx.json(new ErrorResponseDto(409, e.getMessage(), UUID.randomUUID().toString()));
-            });
+            String requestId = UUID.randomUUID().toString();
+            log.error("Unhandled error [{}]: ", requestId, e);
+            ctx.status(HttpStatus.INTERNAL_SERVER_ERROR);
+            ctx.json(new ErrorResponseDto(500, "Internal Server Error", requestId));
+        });
     }
 }

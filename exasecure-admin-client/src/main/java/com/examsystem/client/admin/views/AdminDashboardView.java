@@ -71,6 +71,11 @@ public class AdminDashboardView {
     private final ImageView evidenceImageView = new ImageView();
     private final Label evidenceStatusLabel = new Label("Select a proctor event with evidence to inspect screenshot.");
     private byte[] currentEvidenceBytes = null;
+    private int currentEvidenceEventId = -1;
+    private long currentQbReqId = 0;
+    private long currentAttemptsReqId = 0;
+    private long currentProctorEventsReqId = 0;
+    private long currentEvidenceReqId = 0;
 
     public AdminDashboardView(AdminApp app, ApiClient apiClient) {
         this.app = app;
@@ -751,6 +756,7 @@ public class AdminDashboardView {
     }
 
     private void loadQuestionBank(int examId) {
+        long reqId = ++currentQbReqId;
         qbQuestionsTable.getItems().clear();
         qbOptionsDetailsBox.getChildren().clear();
         qbStatusLabel.setText("Loading question bank for exam #" + examId + "...");
@@ -758,6 +764,10 @@ public class AdminDashboardView {
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetExamQuestions(examId),
                 (List<AdminQuestionDefinitionDto> questions) -> {
+                    if (reqId != currentQbReqId) return;
+                    AdminExamDto curExam = questionBankExamCombo.getValue();
+                    if (curExam != null && curExam.id() != examId) return;
+
                     qbStatusLabel.setText("");
                     if (questions != null) {
                         qbQuestionsTable.getItems().setAll(questions);
@@ -766,7 +776,10 @@ public class AdminDashboardView {
                         }
                     }
                 },
-                (Throwable err) -> qbStatusLabel.setText("Failed to load questions: " + err.getMessage())
+                (Throwable err) -> {
+                    if (reqId != currentQbReqId) return;
+                    qbStatusLabel.setText("Failed to load questions: " + err.getMessage());
+                }
         );
     }
 
@@ -946,6 +959,17 @@ public class AdminDashboardView {
         });
     }
 
+    public static String escapeCsvCell(String value) {
+        if (value == null) return "\"\"";
+        if (!value.isEmpty()) {
+            char first = value.charAt(0);
+            if (first == '=' || first == '+' || first == '-' || first == '@' || first == '\t' || first == '\r') {
+                value = "'" + value;
+            }
+        }
+        return "\"" + value.replace("\"", "\"\"") + "\"";
+    }
+
     private void loadAttempts() {
         String input = attemptsExamIdField.getText().trim();
         if (input.isEmpty()) {
@@ -960,18 +984,26 @@ public class AdminDashboardView {
             return;
         }
 
+        long reqId = ++currentAttemptsReqId;
         attemptsTable.getItems().clear();
         attemptsStatusLabel.setText("Loading attempts for exam #" + examId + "...");
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetAttemptHistory(examId),
                 (List<AdminAttemptDto> attempts) -> {
+                    if (reqId != currentAttemptsReqId) return;
+                    String curInput = attemptsExamIdField.getText().trim();
+                    if (!curInput.equals(String.valueOf(examId))) return;
+
                     attemptsStatusLabel.setText("");
                     if (attempts != null) {
                         attemptsTable.getItems().addAll(attempts);
                         metricAttemptsLabel.setText("Attempts: " + attempts.size() + " for exam #" + examId);
                     }
                 },
-                (Throwable err) -> attemptsStatusLabel.setText("Failed to load attempts: " + err.getMessage())
+                (Throwable err) -> {
+                    if (reqId != currentAttemptsReqId) return;
+                    attemptsStatusLabel.setText("Failed to load attempts: " + err.getMessage());
+                }
         );
     }
 
@@ -1021,7 +1053,7 @@ public class AdminDashboardView {
     }
 
     private void exportAttemptsToCsv() {
-        List<AdminAttemptDto> items = attemptsTable.getItems();
+        List<AdminAttemptDto> items = new ArrayList<>(attemptsTable.getItems());
         if (items.isEmpty()) {
             UiFeedback.showError("Nothing to Export", "There are no attempts loaded in the table to export.");
             return;
@@ -1036,21 +1068,36 @@ public class AdminDashboardView {
         File file = fileChooser.showSaveDialog(view.getScene() != null ? view.getScene().getWindow() : null);
         if (file == null) return;
 
-        try (FileWriter writer = new FileWriter(file)) {
-            writer.write("Attempt ID,Student ID,Student Name,Start Time,Status,Score\n");
-            for (AdminAttemptDto a : items) {
-                writer.write(String.format("%d,%d,\"%s\",\"%s\",\"%s\",%s\n",
-                        a.id(),
-                        a.studentId(),
-                        a.studentName().replace("\"", "\"\""),
-                        a.startTime() != null ? a.startTime() : "",
-                        a.status(),
-                        a.score() != null ? String.valueOf(a.score()) : ""));
-            }
-            UiFeedback.showInfo("Export Complete", "Successfully exported " + items.size() + " attempts to:\n" + file.getAbsolutePath());
-        } catch (IOException e) {
-            UiFeedback.showError("Export Failed", "Error saving CSV file: " + e.getMessage());
-        }
+        attemptsStatusLabel.setText("Exporting attempts to CSV...");
+        AsyncRunner.runAsync(
+                () -> {
+                    try (FileWriter writer = new FileWriter(file)) {
+                        writer.write("Attempt ID,Student ID,Student Name,Start Time,Status,Score\n");
+                        for (AdminAttemptDto a : items) {
+                            String studentName = escapeCsvCell(a.studentName());
+                            String startTime = escapeCsvCell(a.startTime() != null ? a.startTime().toString() : "");
+                            String status = escapeCsvCell(a.status());
+                            String score = a.score() != null ? String.valueOf(a.score()) : "";
+                            writer.write(String.format("%d,%d,%s,%s,%s,%s\n",
+                                    a.id(),
+                                    a.studentId(),
+                                    studentName,
+                                    startTime,
+                                    status,
+                                    score));
+                        }
+                    }
+                    return items.size();
+                },
+                (Integer count) -> {
+                    attemptsStatusLabel.setText("");
+                    UiFeedback.showInfo("Export Complete", "Successfully exported " + count + " attempts to:\n" + file.getAbsolutePath());
+                },
+                (Throwable err) -> {
+                    attemptsStatusLabel.setText("");
+                    UiFeedback.showError("Export Failed", "Error saving CSV file: " + err.getMessage());
+                }
+        );
     }
 
     // ==========================================
@@ -1166,18 +1213,23 @@ public class AdminDashboardView {
             return;
         }
 
+        long reqId = ++currentProctorEventsReqId;
         proctorEventsTable.getItems().clear();
         evidenceImageView.setImage(null);
         currentEvidenceBytes = null;
+        currentEvidenceEventId = -1;
         evidenceStatusLabel.setText("Loading proctor events for attempt #" + attemptId + "...");
 
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetProctorEvents(attemptId),
                 (List<AdminProctorEventDto> events) -> {
+                    if (reqId != currentProctorEventsReqId) return;
+                    String curInput = proctorAttemptIdField.getText().trim();
+                    if (!curInput.equals(String.valueOf(attemptId))) return;
+
                     evidenceStatusLabel.setText("Loaded " + (events != null ? events.size() : 0) + " events.");
                     if (events != null) {
                         proctorEventsTable.getItems().addAll(events);
-                        // Auto-select first event with evidence
                         for (AdminProctorEventDto ev : events) {
                             if (ev.hasEvidence()) {
                                 proctorEventsTable.getSelectionModel().select(ev);
@@ -1186,7 +1238,10 @@ public class AdminDashboardView {
                         }
                     }
                 },
-                (Throwable err) -> evidenceStatusLabel.setText("Failed to load events: " + err.getMessage())
+                (Throwable err) -> {
+                    if (reqId != currentProctorEventsReqId) return;
+                    evidenceStatusLabel.setText("Failed to load events: " + err.getMessage());
+                }
         );
     }
 
@@ -1206,45 +1261,59 @@ public class AdminDashboardView {
     }
 
     private void loadEvidenceImage(AdminProctorEventDto event) {
+        int eventId = event.id();
+        long reqId = ++currentEvidenceReqId;
+
         if (!event.hasEvidence()) {
             evidenceImageView.setImage(null);
             currentEvidenceBytes = null;
-            evidenceStatusLabel.setText("Event #" + event.id() + " (" + event.eventType() + ") has no screenshot evidence.");
+            currentEvidenceEventId = -1;
+            evidenceStatusLabel.setText("Event #" + eventId + " (" + event.eventType() + ") has no screenshot evidence.");
             return;
         }
 
-        evidenceStatusLabel.setText("Fetching authenticated screenshot bytes for Event #" + event.id() + "...");
+        evidenceStatusLabel.setText("Fetching authenticated screenshot bytes for Event #" + eventId + "...");
         AsyncRunner.runAsync(
-                () -> apiClient.adminGetEvidence(event.id()),
+                () -> apiClient.adminGetEvidence(eventId),
                 (byte[] imageBytes) -> {
+                    if (reqId != currentEvidenceReqId) return;
+                    AdminProctorEventDto currentSel = proctorEventsTable.getSelectionModel().getSelectedItem();
+                    if (currentSel == null || currentSel.id() != eventId) return;
+
                     if (imageBytes == null || imageBytes.length == 0) {
                         evidenceImageView.setImage(null);
                         currentEvidenceBytes = null;
+                        currentEvidenceEventId = -1;
                         evidenceStatusLabel.setText("Evidence file is empty.");
                         return;
                     }
                     try {
                         currentEvidenceBytes = imageBytes;
+                        currentEvidenceEventId = eventId;
                         Image img = new Image(new ByteArrayInputStream(imageBytes));
                         evidenceImageView.setImage(img);
-                        evidenceStatusLabel.setText("Event #" + event.id() + " evidence loaded (" + imageBytes.length + " bytes).");
+                        evidenceStatusLabel.setText("Event #" + eventId + " evidence loaded (" + imageBytes.length + " bytes).");
                     } catch (Exception e) {
                         evidenceStatusLabel.setText("Failed to decode screenshot image: " + e.getMessage());
                     }
                 },
-                (Throwable err) -> evidenceStatusLabel.setText("Failed to retrieve screenshot: " + err.getMessage())
+                (Throwable err) -> {
+                    if (reqId != currentEvidenceReqId) return;
+                    evidenceStatusLabel.setText("Failed to retrieve screenshot: " + err.getMessage());
+                }
         );
     }
 
     private void showEnlargedEvidence() {
-        if (currentEvidenceBytes == null || currentEvidenceBytes.length == 0) {
-            UiFeedback.showError("No Evidence", "Please select an event with screenshot evidence to enlarge.");
+        AdminProctorEventDto sel = proctorEventsTable.getSelectionModel().getSelectedItem();
+        if (sel == null || currentEvidenceBytes == null || currentEvidenceBytes.length == 0 || currentEvidenceEventId != sel.id()) {
+            UiFeedback.showError("No Evidence", "Please select an event with screenshot evidence loaded to enlarge.");
             return;
         }
 
         Stage dialogStage = new Stage();
         dialogStage.initModality(Modality.NONE);
-        dialogStage.setTitle("Evidence Screenshot - Full View");
+        dialogStage.setTitle("Evidence Screenshot - Full View (#" + currentEvidenceEventId + ")");
 
         ImageView largeView = new ImageView(new Image(new ByteArrayInputStream(currentEvidenceBytes)));
         largeView.setPreserveRatio(true);

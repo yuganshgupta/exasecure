@@ -23,6 +23,21 @@ public class JdbcAnswerRepository implements AnswerRepository {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                // Lock attempt row and verify it is ACTIVE
+                try (PreparedStatement psLock = conn.prepareStatement(
+                        "SELECT status FROM exam_attempts WHERE id = ? FOR UPDATE")) {
+                    psLock.setInt(1, attemptId);
+                    try (ResultSet rs = psLock.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new IllegalArgumentException("Attempt not found: " + attemptId);
+                        }
+                        String status = rs.getString("status");
+                        if (!"ACTIVE".equals(status)) {
+                            throw new IllegalStateException("Exam attempt is not ACTIVE (status: " + status + ")");
+                        }
+                    }
+                }
+
                 // Check if answer already exists
                 int answerId = -1;
                 try (PreparedStatement psCheck = conn.prepareStatement("SELECT id FROM student_answers WHERE attempt_id = ? AND question_id = ?")) {
@@ -78,6 +93,8 @@ public class JdbcAnswerRepository implements AnswerRepository {
             } finally {
                 conn.setAutoCommit(true);
             }
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("DB error", e);
         }

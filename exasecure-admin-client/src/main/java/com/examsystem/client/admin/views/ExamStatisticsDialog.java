@@ -16,8 +16,8 @@ public class ExamStatisticsDialog extends Dialog<Void> {
 
         DialogPane pane = getDialogPane();
         pane.getButtonTypes().add(ButtonType.CLOSE);
-        pane.setPrefWidth(680);
-        pane.setPrefHeight(500);
+        pane.setPrefWidth(720);
+        pane.setPrefHeight(530);
 
         VBox root = new VBox(18);
         root.setPadding(new Insets(18));
@@ -27,26 +27,33 @@ public class ExamStatisticsDialog extends Dialog<Void> {
         Label title = new Label(stats.examTitle());
         title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
         title.setStyle("-fx-text-fill: #0f172a;");
-        Label subtitle = new Label("Performance metrics, pass rate, and score distribution across all student attempts.");
+        Label subtitle = new Label("Performance metrics and score distribution across all submitted attempts.");
         subtitle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
         titleBox.getChildren().addAll(title, subtitle);
 
         // Key Metrics Grid
         GridPane metricsGrid = new GridPane();
-        metricsGrid.setHgap(14);
-        metricsGrid.setVgap(14);
+        metricsGrid.setHgap(12);
+        metricsGrid.setVgap(12);
 
+        // Attempt Breakdown (Row 0)
         metricsGrid.add(createMetricCard("Total Attempts", String.valueOf(stats.totalAttempts()), "#2563eb"), 0, 0);
-        metricsGrid.add(createMetricCard("Completed", String.valueOf(stats.completedAttempts()), "#0891b2"), 1, 0);
-        metricsGrid.add(createMetricCard("Pass Rate", stats.passRate() + "%", "#16a34a"), 2, 0);
+        metricsGrid.add(createMetricCard("Submitted / Scored", String.valueOf(stats.submittedAttempts()), "#0891b2"), 1, 0);
+        metricsGrid.add(createMetricCard("Active In-Progress", String.valueOf(stats.activeAttempts()), "#d97706"), 2, 0);
+        metricsGrid.add(createMetricCard("Expired / Unsubmitted", String.valueOf(stats.expiredAttempts()), "#64748b"), 3, 0);
 
-        metricsGrid.add(createMetricCard("Average Score", stats.averageScore() + " pts", "#d97706"), 0, 1);
-        metricsGrid.add(createMetricCard("Highest Score", stats.highestScore() + " pts", "#059669"), 1, 1);
-        metricsGrid.add(createMetricCard("Lowest Score", stats.lowestScore() + " pts", "#dc2626"), 2, 1);
+        // Score Aggregates (Row 1)
+        String avgStr = stats.averageScore() != null ? stats.averageScore() + " pts" : "N/A";
+        String highStr = stats.highestScore() != null ? stats.highestScore() + " pts" : "N/A";
+        String lowStr = stats.lowestScore() != null ? stats.lowestScore() + " pts" : "N/A";
 
-        for (int i = 0; i < 3; i++) {
+        metricsGrid.add(createMetricCard("Average Score", avgStr, "#7c3aed"), 0, 1);
+        metricsGrid.add(createMetricCard("Highest Score", highStr, "#059669"), 1, 1);
+        metricsGrid.add(createMetricCard("Lowest Score", lowStr, "#dc2626"), 2, 1);
+
+        for (int i = 0; i < 4; i++) {
             ColumnConstraints col = new ColumnConstraints();
-            col.setPercentWidth(33.33);
+            col.setPercentWidth(25.0);
             metricsGrid.getColumnConstraints().add(col);
         }
 
@@ -55,7 +62,7 @@ public class ExamStatisticsDialog extends Dialog<Void> {
         distBox.setPadding(new Insets(14));
         distBox.setStyle("-fx-background-color: white; -fx-border-color: #e2e8f0; -fx-border-radius: 8px; -fx-background-radius: 8px;");
 
-        Label distTitle = new Label("Score Distribution");
+        Label distTitle = new Label("Score Distribution (Submitted Attempts)");
         distTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
         distTitle.setStyle("-fx-text-fill: #1e293b;");
         distBox.getChildren().add(distTitle);
@@ -84,7 +91,7 @@ public class ExamStatisticsDialog extends Dialog<Void> {
                 distBox.getChildren().add(row);
             }
         } else {
-            distBox.getChildren().add(new Label("No completed examination scores available yet."));
+            distBox.getChildren().add(new Label("No submitted examination scores available yet."));
         }
 
         root.getChildren().addAll(titleBox, metricsGrid, distBox);
@@ -97,7 +104,7 @@ public class ExamStatisticsDialog extends Dialog<Void> {
         card.setStyle("-fx-background-color: white; -fx-border-color: #e2e8f0; -fx-border-radius: 8px; -fx-background-radius: 8px;");
 
         Label valLabel = new Label(value);
-        valLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
+        valLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 17));
         valLabel.setStyle("-fx-text-fill: " + colorHex + ";");
 
         Label nameLabel = new Label(label);

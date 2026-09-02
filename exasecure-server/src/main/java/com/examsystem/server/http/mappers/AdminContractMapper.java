@@ -70,11 +70,12 @@ public final class AdminContractMapper {
                 result.examId(),
                 result.examTitle(),
                 result.totalAttempts(),
-                result.completedAttempts(),
+                result.submittedAttempts(),
+                result.activeAttempts(),
+                result.expiredAttempts(),
                 result.averageScore(),
                 result.highestScore(),
                 result.lowestScore(),
-                result.passRate(),
                 result.scoreDistribution());
     }
 

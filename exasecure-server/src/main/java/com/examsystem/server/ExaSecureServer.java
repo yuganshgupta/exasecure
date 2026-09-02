@@ -140,6 +140,10 @@ public class ExaSecureServer {
         }
     }
 
+    public DataSource getDataSource() {
+        return dataSource;
+    }
+
     public static void main(String[] args) {
         AppConfig config = new AppConfig();
         if ((args.length > 0 && "--bootstrap".equalsIgnoreCase(args[0])) || Boolean.getBoolean("exasecure.bootstrap")) {

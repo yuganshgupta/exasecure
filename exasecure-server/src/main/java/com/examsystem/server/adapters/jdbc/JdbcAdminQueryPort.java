@@ -140,44 +140,58 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
                 }
             }
 
-            // Load questions
-            record QData(int id, String text, String type, int marks) {}
-            List<QData> questions = new ArrayList<>();
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT id, question_text, question_type FROM questions WHERE exam_id = ? AND is_active = 1 ORDER BY id ASC")) {
-                ps.setInt(1, examId);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        questions.add(new QData(
-                                rs.getInt("id"),
-                                rs.getString("question_text"),
-                                rs.getString("question_type"),
-                                1));
-                    }
+            // 2. Load questions AND their options in a single ordered JOIN query (eliminates N+1)
+            record OptData(int num, String text, boolean correct) {}
+            class QData {
+                final int id;
+                final String text;
+                final String type;
+                final int marks = 1;
+                final List<OptData> options = new ArrayList<>();
+
+                QData(int id, String text, String type) {
+                    this.id = id;
+                    this.text = text;
+                    this.type = type;
                 }
             }
 
-            int qNum = 1;
-            for (QData q : questions) {
-                record OptData(int num, String text, boolean correct) {}
-                List<OptData> options = new ArrayList<>();
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "SELECT option_number, option_text, is_correct FROM options WHERE question_id = ? ORDER BY option_number ASC")) {
-                    ps.setInt(1, q.id());
-                    try (ResultSet rs = ps.executeQuery()) {
-                        while (rs.next()) {
-                            options.add(new OptData(
-                                    rs.getInt("option_number"),
+            Map<Integer, QData> qMap = new LinkedHashMap<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT q.id AS q_id, q.question_text, q.question_type, "
+                            + "o.option_number, o.option_text, o.is_correct "
+                            + "FROM questions q "
+                            + "LEFT JOIN options o ON q.id = o.question_id "
+                            + "WHERE q.exam_id = ? AND q.is_active = 1 "
+                            + "ORDER BY q.id ASC, o.option_number ASC")) {
+                ps.setInt(1, examId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        int qId = rs.getInt("q_id");
+                        QData qData = qMap.computeIfAbsent(qId, k -> {
+                            try {
+                                return new QData(qId, rs.getString("question_text"), rs.getString("question_type"));
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
+                        });
+                        int optNum = rs.getInt("option_number");
+                        if (!rs.wasNull() && optNum > 0) {
+                            qData.options.add(new OptData(
+                                    optNum,
                                     rs.getString("option_text"),
                                     rs.getBoolean("is_correct")));
                         }
                     }
                 }
+            }
 
-                List<Integer> selectedNums = selectedMap.getOrDefault(q.id(), List.of());
+            int qNum = 1;
+            for (QData q : qMap.values()) {
+                List<Integer> selectedNums = selectedMap.getOrDefault(q.id, List.of());
                 List<String> selectedTexts = new ArrayList<>();
                 for (int sNum : selectedNums) {
-                    for (OptData opt : options) {
+                    for (OptData opt : q.options) {
                         if (opt.num() == sNum) {
                             selectedTexts.add(opt.text());
                             break;
@@ -187,7 +201,7 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
 
                 List<Integer> correctNums = new ArrayList<>();
                 List<String> correctTexts = new ArrayList<>();
-                for (OptData opt : options) {
+                for (OptData opt : q.options) {
                     if (opt.correct()) {
                         correctNums.add(opt.num());
                         correctTexts.add(opt.text());
@@ -197,14 +211,14 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
                 Set<Integer> selSet = new HashSet<>(selectedNums);
                 Set<Integer> corSet = new HashSet<>(correctNums);
                 boolean isCorrect = !corSet.isEmpty() && selSet.equals(corSet);
-                int marksAwarded = isCorrect ? q.marks() : 0;
+                int marksAwarded = isCorrect ? q.marks : 0;
 
                 details.add(new AdminAttemptDetailResult(
-                        q.id(),
+                        q.id,
                         qNum++,
-                        q.text(),
-                        q.type(),
-                        q.marks(),
+                        q.text,
+                        q.type,
+                        q.marks,
                         selectedNums,
                         selectedTexts,
                         correctNums,
@@ -232,42 +246,50 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
             }
             if (examTitle == null) return Optional.empty();
 
-            List<Integer> completedScores = new ArrayList<>();
             int totalAttempts = 0;
+            int submittedAttempts = 0;
+            int activeAttempts = 0;
+            int expiredAttempts = 0;
+            List<Integer> scoredScores = new ArrayList<>();
+
             try (PreparedStatement ps = conn.prepareStatement("SELECT score, status FROM exam_attempts WHERE exam_id = ?")) {
                 ps.setInt(1, examId);
                 try (ResultSet rs = ps.executeQuery()) {
                     while (rs.next()) {
                         totalAttempts++;
-                        int sc = rs.getInt("score");
-                        boolean wasNull = rs.wasNull();
                         String st = rs.getString("status");
-                        if (!wasNull && ("SUBMITTED".equalsIgnoreCase(st) || "EXPIRED".equalsIgnoreCase(st))) {
-                            completedScores.add(sc);
+                        int sc = rs.getInt("score");
+                        boolean scoreWasNull = rs.wasNull();
+
+                        if ("SUBMITTED".equalsIgnoreCase(st)) {
+                            submittedAttempts++;
+                            if (!scoreWasNull) {
+                                scoredScores.add(sc);
+                            }
+                        } else if ("ACTIVE".equalsIgnoreCase(st)) {
+                            activeAttempts++;
+                        } else if ("EXPIRED".equalsIgnoreCase(st)) {
+                            expiredAttempts++;
                         }
                     }
                 }
             }
 
-            int completedCount = completedScores.size();
-            double avgScore = 0.0;
-            int highest = 0;
-            int lowest = 0;
-            double passRate = 0.0;
+            Double avgScore = null;
+            Integer highest = null;
+            Integer lowest = null;
             Map<String, Integer> distribution = new LinkedHashMap<>();
 
-            if (completedCount > 0) {
+            if (!scoredScores.isEmpty()) {
                 int sum = 0;
-                highest = completedScores.get(0);
-                lowest = completedScores.get(0);
-                int passCount = 0;
-
+                int high = scoredScores.get(0);
+                int low = scoredScores.get(0);
                 int b0 = 0, b1 = 0, b2 = 0, b3plus = 0;
-                for (int sc : completedScores) {
+
+                for (int sc : scoredScores) {
                     sum += sc;
-                    if (sc > highest) highest = sc;
-                    if (sc < lowest) lowest = sc;
-                    if (sc > 0) passCount++;
+                    if (sc > high) high = sc;
+                    if (sc < low) low = sc;
 
                     if (sc == 0) b0++;
                     else if (sc == 1) b1++;
@@ -275,8 +297,9 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
                     else b3plus++;
                 }
 
-                avgScore = Math.round(((double) sum / completedCount) * 10.0) / 10.0;
-                passRate = Math.round(((double) passCount / completedCount) * 1000.0) / 10.0;
+                avgScore = Math.round(((double) sum / scoredScores.size()) * 10.0) / 10.0;
+                highest = high;
+                lowest = low;
                 distribution.put("0 pts", b0);
                 distribution.put("1 pt", b1);
                 distribution.put("2 pts", b2);
@@ -287,11 +310,12 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
                     examId,
                     examTitle,
                     totalAttempts,
-                    completedCount,
+                    submittedAttempts,
+                    activeAttempts,
+                    expiredAttempts,
                     avgScore,
                     highest,
                     lowest,
-                    passRate,
                     distribution));
         } catch (Exception e) {
             throw new RuntimeException(e);

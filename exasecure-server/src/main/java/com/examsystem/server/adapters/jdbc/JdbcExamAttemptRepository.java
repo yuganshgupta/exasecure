@@ -140,4 +140,79 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
         }
         throw new IllegalStateException("Could not create attempt");
     }
+
+    @Override
+    public int finalizeAndGradeAttempt(int attemptId, Instant submittedAt, int focusLostCount,
+                                        java.util.function.ToIntFunction<java.util.Map<Integer, java.util.List<Integer>>> grader,
+                                        com.examsystem.application.ports.AnswerRepository answerRepository) {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                // Lock attempt row FOR UPDATE
+                try (PreparedStatement psLock = conn.prepareStatement(
+                        "SELECT status, score FROM exam_attempts WHERE id = ? FOR UPDATE")) {
+                    psLock.setInt(1, attemptId);
+                    try (ResultSet rs = psLock.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new IllegalArgumentException("Attempt not found: " + attemptId);
+                        }
+                        String status = rs.getString("status");
+                        if ("SUBMITTED".equals(status)) {
+                            conn.commit();
+                            return rs.getObject("score") != null ? rs.getInt("score") : 0;
+                        }
+                        if (!"ACTIVE".equals(status)) {
+                            throw new IllegalStateException("Attempt is not ACTIVE (status: " + status + ")");
+                        }
+                    }
+                }
+
+                // Read answers directly on the same connection under the lock
+                java.util.Map<Integer, java.util.List<Integer>> answers = new java.util.HashMap<>();
+                try (PreparedStatement psAnswers = conn.prepareStatement(
+                        "SELECT sa.question_id, sao.selected_option FROM student_answers sa " +
+                        "LEFT JOIN student_answer_options sao ON sa.id = sao.answer_id " +
+                        "WHERE sa.attempt_id = ?")) {
+                    psAnswers.setInt(1, attemptId);
+                    try (ResultSet rs = psAnswers.executeQuery()) {
+                        while (rs.next()) {
+                            int qId = rs.getInt("question_id");
+                            int opt = rs.getInt("selected_option");
+                            answers.computeIfAbsent(qId, k -> new java.util.ArrayList<>());
+                            if (!rs.wasNull()) {
+                                answers.get(qId).add(opt);
+                            }
+                        }
+                    }
+                }
+
+                int score = grader.applyAsInt(answers);
+
+                // Update attempt to SUBMITTED with score
+                try (PreparedStatement psUpdate = conn.prepareStatement(
+                        "UPDATE exam_attempts SET score = ?, end_time = ?, status = 'SUBMITTED', focus_lost_count = ? WHERE id = ? AND status = 'ACTIVE'")) {
+                    psUpdate.setInt(1, score);
+                    psUpdate.setTimestamp(2, Timestamp.from(submittedAt));
+                    psUpdate.setInt(3, focusLostCount);
+                    psUpdate.setInt(4, attemptId);
+                    int updated = psUpdate.executeUpdate();
+                    if (updated == 0) {
+                        throw new IllegalStateException("Attempt was not updated to SUBMITTED");
+                    }
+                }
+
+                conn.commit();
+                return score;
+            } catch (Exception e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("DB error", e);
+        }
+    }
 }
