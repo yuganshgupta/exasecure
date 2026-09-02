@@ -5,6 +5,6 @@ package com.examsystem.contracts;
  * Does not contain the 'isCorrect' boolean.
  */
 public record StudentOptionDto(
-    int id,
+    int optionNumber,
     String text
 ) {}

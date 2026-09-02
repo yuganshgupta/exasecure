@@ -8,7 +8,9 @@ import com.examsystem.domain.grading.GradingPolicy;
 import com.examsystem.domain.models.Question;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 public class SubmitExamUseCase {
 
@@ -42,8 +44,34 @@ public class SubmitExamUseCase {
         if (question.examId() != attempt.examId()) {
             throw new IllegalArgumentException("Question does not belong to the attempt exam");
         }
+
+        validateSelectedOptions(question, selectedOptions);
             
         answerRepository.saveAnswer(attemptId, questionId, selectedOptions, clockPort.now());
+    }
+
+    private static void validateSelectedOptions(Question question, List<Integer> selectedOptions) {
+        if (selectedOptions == null) {
+            throw new IllegalArgumentException("Selected options are required");
+        }
+        if (selectedOptions.stream().anyMatch(java.util.Objects::isNull)) {
+            throw new IllegalArgumentException("Selected option numbers cannot be null");
+        }
+
+        Set<Integer> uniqueSelections = new HashSet<>(selectedOptions);
+        if (uniqueSelections.size() != selectedOptions.size()) {
+            throw new IllegalArgumentException("Selected option numbers must be unique");
+        }
+
+        Set<Integer> availableNumbers = question.options().stream()
+                .map(com.examsystem.domain.models.Option::number)
+                .collect(java.util.stream.Collectors.toSet());
+        if (!availableNumbers.containsAll(uniqueSelections)) {
+            throw new IllegalArgumentException("Selected option number does not belong to the question");
+        }
+        if ("SINGLE".equals(question.type()) && selectedOptions.size() > 1) {
+            throw new IllegalArgumentException("Single-choice questions accept at most one option");
+        }
     }
 
     public int submitExam(int attemptId, Instant submittedAt) {

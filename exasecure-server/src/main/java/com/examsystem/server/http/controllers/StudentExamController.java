@@ -78,7 +78,7 @@ public class StudentExamController {
             question.text(),
             question.type(),
             question.options().stream()
-                .map(o -> new StudentOptionDto(o.id(), o.text()))
+                .map(o -> new StudentOptionDto(o.number(), o.text()))
                 .collect(Collectors.toList())
         );
         ctx.json(dto);

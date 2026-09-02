@@ -5,6 +5,7 @@ import com.examsystem.application.ports.ClockPort;
 import com.examsystem.application.ports.ExamAttemptRepository;
 import com.examsystem.application.ports.QuestionRepository;
 import com.examsystem.domain.models.ExamAttempt;
+import com.examsystem.domain.models.Option;
 import com.examsystem.domain.models.Question;
 import org.junit.jupiter.api.Test;
 
@@ -68,14 +69,20 @@ class SubmitExamUseCaseTest {
         @Override
         public Optional<Question> findById(int id) {
             if (id == 1) {
-                return Optional.of(new Question(1, 1, "Q1", "SINGLE", Collections.emptyList(), 2, true));
+                return Optional.of(question());
             }
             return Optional.empty();
         }
 
         @Override
         public List<Question> findByExamId(int examId) {
-            return List.of(new Question(1, 1, "Q1", "SINGLE", Collections.emptyList(), 2, true));
+            return List.of(question());
+        }
+
+        private Question question() {
+            return new Question(1, 1, "Q1", "SINGLE", List.of(
+                    new Option(501, 1, "Wrong", false),
+                    new Option(502, 2, "Right", true)), 2, true);
         }
     }
 
@@ -121,6 +128,30 @@ class SubmitExamUseCaseTest {
         assertThatThrownBy(() -> useCase.saveAnswer(100, 1, List.of(2), Duration.ofMinutes(60)))
             .isInstanceOf(IllegalStateException.class)
             .hasMessageContaining("expired or finalized");
+    }
+
+    @Test
+    void saveAnswer_unknownOptionNumber_throwsWithoutSaving() {
+        StubAnswerRepo answerRepo = new StubAnswerRepo();
+        SubmitExamUseCase useCase = new SubmitExamUseCase(
+                answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+
+        assertThatThrownBy(() -> useCase.saveAnswer(100, 1, List.of(502), Duration.ofMinutes(60)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("does not belong");
+        assertThat(answerRepo.saved).isFalse();
+    }
+
+    @Test
+    void saveAnswer_duplicateOptionNumber_throwsWithoutSaving() {
+        StubAnswerRepo answerRepo = new StubAnswerRepo();
+        SubmitExamUseCase useCase = new SubmitExamUseCase(
+                answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+
+        assertThatThrownBy(() -> useCase.saveAnswer(100, 1, List.of(2, 2), Duration.ofMinutes(60)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("unique");
+        assertThat(answerRepo.saved).isFalse();
     }
 
     @Test

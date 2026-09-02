@@ -66,10 +66,12 @@ class ServerIntegrationTest {
             stmt.execute("INSERT INTO users (id, username, password, full_name, role, is_active) VALUES (104, 'inactive1', '$2a$10$w09ZlM.O/x10QhJv9eU3T.n/fHk69d5uL5Y5YQ/D3qD3D5D5D3D5q', 'Inactive Student', 'STUDENT', 0)");
             stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (1, 'Test Exam', 60, 103, 1)");
             stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (2, 'Other Exam', 60, 103, 1)");
-            stmt.execute("INSERT INTO questions (id, exam_id, question_text, correct_option_number, question_type, is_active) VALUES (401, 1, 'Owned question', 1, 'SINGLE', 1), (402, 2, 'Other question', 1, 'SINGLE', 1)");
-            stmt.execute("INSERT INTO options (id, question_id, option_number, option_text, is_correct, is_active) VALUES (501, 401, 1, 'Owned correct', 1, 1), (502, 401, 2, 'Owned wrong', 0, 1), (503, 402, 1, 'Other correct', 1, 1), (504, 402, 2, 'Other wrong', 0, 1)");
+            stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (3, 'Option Number Exam', 60, 103, 1)");
+            stmt.execute("INSERT INTO questions (id, exam_id, question_text, correct_option_number, question_type, is_active) VALUES (401, 1, 'Owned question', 1, 'SINGLE', 1), (402, 2, 'Other question', 1, 'SINGLE', 1), (403, 3, 'Stable numbers', 3, 'MULTI', 1)");
+            stmt.execute("INSERT INTO options (id, question_id, option_number, option_text, is_correct, is_active) VALUES (501, 401, 1, 'Owned correct', 1, 1), (502, 401, 2, 'Owned wrong', 0, 1), (503, 402, 1, 'Other correct', 1, 1), (504, 402, 2, 'Other wrong', 0, 1), (601, 403, 3, 'First stable', 1, 1), (602, 403, 7, 'Middle stable', 0, 1), (603, 403, 9, 'Last stable', 1, 1)");
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (201, 1, 101, NOW(), 'ACTIVE')");
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (202, 2, 102, NOW(), 'ACTIVE')");
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (203, 3, 101, NOW(), 'ACTIVE')");
             stmt.execute("INSERT INTO proctor_events (id, attempt_id, event_type, recorded_at) VALUES (301, 202, 'FOCUS_LOST', NOW())");
             stmt.execute("INSERT INTO server_sessions (token, user_id, expires_at) VALUES ('token-stu1', 101, DATE_ADD(NOW(), INTERVAL 1 HOUR))");
             stmt.execute("INSERT INTO server_sessions (token, user_id, expires_at) VALUES ('token-stu2', 102, DATE_ADD(NOW(), INTERVAL 1 HOUR))");
@@ -387,12 +389,87 @@ class ServerIntegrationTest {
         assertDatabaseCount("SELECT COUNT(*) FROM proctor_evidence_v2 WHERE event_id = 301", 0);
     }
 
+    @Test
+    void optionNumbersRoundTripAndGradeIndependentlyOfDatabaseIds() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        HttpResponse<String> questionResponse = sendJson(
+                client, "GET", "/api/v1/student/attempts/203/questions/403", "token-stu1", null);
+        assertThat(questionResponse.statusCode()).isEqualTo(200);
+        var questionJson = new ObjectMapper().readTree(questionResponse.body());
+        assertThat(questionJson.required("options").findValuesAsText("optionNumber"))
+                .containsExactly("3", "7", "9");
+        assertThat(questionResponse.body()).doesNotContain("\"id\":601", "\"id\":602", "\"id\":603");
+        assertNoCorrectnessProperties(questionResponse.body());
+
+        HttpResponse<String> databaseIdSelection = sendJson(
+                client, "POST", "/api/v1/student/attempts/203/answers", "token-stu1",
+                "{\"questionId\":403,\"selectedOptions\":[601]}");
+        assertThat(databaseIdSelection.statusCode()).isEqualTo(400);
+        assertDatabaseCount(
+                "SELECT COUNT(*) FROM student_answers WHERE attempt_id = 203 AND question_id = 403", 0);
+
+        HttpResponse<String> duplicateSelection = sendJson(
+                client, "POST", "/api/v1/student/attempts/203/answers", "token-stu1",
+                "{\"questionId\":403,\"selectedOptions\":[3,3]}");
+        assertThat(duplicateSelection.statusCode()).isEqualTo(400);
+        assertDatabaseCount(
+                "SELECT COUNT(*) FROM student_answers WHERE attempt_id = 203 AND question_id = 403", 0);
+
+        HttpResponse<String> validSelection = sendJson(
+                client, "POST", "/api/v1/student/attempts/203/answers", "token-stu1",
+                "{\"questionId\":403,\"selectedOptions\":[9,3]}");
+        assertThat(validSelection.statusCode()).isEqualTo(200);
+        assertStoredSelections(203, 403, 3, 9);
+
+        HttpResponse<String> submit = sendJson(
+                client, "POST", "/api/v1/student/attempts/203/submit", "token-stu1", null);
+        assertThat(submit.statusCode()).isEqualTo(200);
+        assertThat(new ObjectMapper().readTree(submit.body()).asInt()).isEqualTo(1);
+        assertAttemptSubmittedWithScore(203, 1);
+    }
+
     private static void assertDatabaseCount(String sql, int expected) throws Exception {
         try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              var statement = conn.createStatement();
              ResultSet result = statement.executeQuery(sql)) {
             assertThat(result.next()).isTrue();
             assertThat(result.getInt(1)).isEqualTo(expected);
+        }
+    }
+
+    private static void assertStoredSelections(
+            int attemptId, int questionId, int... expectedSelections) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement statement = conn.prepareStatement(
+                     "SELECT sao.selected_option FROM student_answers sa "
+                             + "JOIN student_answer_options sao ON sao.answer_id = sa.id "
+                             + "WHERE sa.attempt_id = ? AND sa.question_id = ? "
+                             + "ORDER BY sao.selected_option")) {
+            statement.setInt(1, attemptId);
+            statement.setInt(2, questionId);
+            try (ResultSet result = statement.executeQuery()) {
+                java.util.List<Integer> actual = new java.util.ArrayList<>();
+                while (result.next()) {
+                    actual.add(result.getInt(1));
+                }
+                assertThat(actual).containsExactly(
+                        java.util.Arrays.stream(expectedSelections).boxed().toArray(Integer[]::new));
+            }
+        }
+    }
+
+    private static void assertAttemptSubmittedWithScore(int attemptId, int score) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement statement = conn.prepareStatement(
+                     "SELECT status, score, end_time FROM exam_attempts WHERE id = ?")) {
+            statement.setInt(1, attemptId);
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getString("status")).isEqualTo("SUBMITTED");
+                assertThat(result.getInt("score")).isEqualTo(score);
+                assertThat(result.getTimestamp("end_time")).isNotNull();
+            }
         }
     }
 

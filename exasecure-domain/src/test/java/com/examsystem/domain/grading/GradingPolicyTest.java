@@ -39,56 +39,56 @@ class GradingPolicyTest {
     @Test
     void isAnswerCorrect_multiExactMatch() {
         List<Option> options = Arrays.asList(
-                new Option(1, "A", true),
-                new Option(2, "B", false),
-                new Option(3, "C", true)
+                new Option(101, 3, "A", true),
+                new Option(102, 7, "B", false),
+                new Option(103, 9, "C", true)
         );
         Question q = new Question(1, 1, "Q2", "MULTI", options, 0, true);
-        assertThat(GradingPolicy.isAnswerCorrect(q, List.of(1, 3))).isTrue();
+        assertThat(GradingPolicy.isAnswerCorrect(q, List.of(3, 9))).isTrue();
     }
 
     @Test
     void isAnswerCorrect_multiOrderIndependent() {
         List<Option> options = Arrays.asList(
-                new Option(1, "A", true),
-                new Option(2, "B", false),
-                new Option(3, "C", true)
+                new Option(101, 3, "A", true),
+                new Option(102, 7, "B", false),
+                new Option(103, 9, "C", true)
         );
         Question q = new Question(1, 1, "Q2", "MULTI", options, 0, true);
-        assertThat(GradingPolicy.isAnswerCorrect(q, List.of(3, 1))).isTrue();
+        assertThat(GradingPolicy.isAnswerCorrect(q, List.of(9, 3))).isTrue();
     }
 
     @Test
     void isAnswerCorrect_multiWrong() {
         List<Option> options = Arrays.asList(
-                new Option(1, "A", true),
-                new Option(2, "B", false),
-                new Option(3, "C", true)
+                new Option(101, 3, "A", true),
+                new Option(102, 7, "B", false),
+                new Option(103, 9, "C", true)
         );
         Question q = new Question(1, 1, "Q2", "MULTI", options, 0, true);
-        assertThat(GradingPolicy.isAnswerCorrect(q, List.of(1, 2))).isFalse();
+        assertThat(GradingPolicy.isAnswerCorrect(q, List.of(3, 7))).isFalse();
     }
     
     @Test
     void isAnswerCorrect_multiMissing() {
         List<Option> options = Arrays.asList(
-                new Option(1, "A", true),
-                new Option(2, "B", false),
-                new Option(3, "C", true)
+                new Option(101, 3, "A", true),
+                new Option(102, 7, "B", false),
+                new Option(103, 9, "C", true)
         );
         Question q = new Question(1, 1, "Q2", "MULTI", options, 0, true);
-        assertThat(GradingPolicy.isAnswerCorrect(q, List.of(1))).isFalse();
+        assertThat(GradingPolicy.isAnswerCorrect(q, List.of(3))).isFalse();
     }
     
     @Test
     void isAnswerCorrect_multiDuplicateSelected() {
         List<Option> options = Arrays.asList(
-                new Option(1, "A", true),
-                new Option(2, "B", false),
-                new Option(3, "C", true)
+                new Option(101, 3, "A", true),
+                new Option(102, 7, "B", false),
+                new Option(103, 9, "C", true)
         );
         Question q = new Question(1, 1, "Q2", "MULTI", options, 0, true);
-        assertThat(GradingPolicy.isAnswerCorrect(q, List.of(1, 3, 1))).isTrue();
+        assertThat(GradingPolicy.isAnswerCorrect(q, List.of(3, 9, 3))).isFalse();
     }
 
     @Test

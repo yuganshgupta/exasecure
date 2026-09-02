@@ -34,6 +34,7 @@ public class JdbcQuestionRepository implements QuestionRepository {
                         while (rsO.next()) {
                             options.add(new Option(
                                     rsO.getInt("id"),
+                                    rsO.getInt("option_number"),
                                     rsO.getString("option_text"),
                                     rsO.getBoolean("is_correct")
                             ));
@@ -67,11 +68,15 @@ public class JdbcQuestionRepository implements QuestionRepository {
                 while (rsQ.next()) {
                     int id = rsQ.getInt("id");
                     List<Option> options = new ArrayList<>();
-                    try (PreparedStatement psOptions = conn.prepareStatement("SELECT id, option_text, is_correct FROM options WHERE question_id = ? AND is_active = 1 ORDER BY option_number")) {
+                    try (PreparedStatement psOptions = conn.prepareStatement("SELECT id, option_number, option_text, is_correct FROM options WHERE question_id = ? AND is_active = 1 ORDER BY option_number")) {
                         psOptions.setInt(1, id);
                         try (ResultSet rsO = psOptions.executeQuery()) {
                             while (rsO.next()) {
-                                options.add(new Option(rsO.getInt("id"), rsO.getString("option_text"), rsO.getBoolean("is_correct")));
+                                options.add(new Option(
+                                        rsO.getInt("id"),
+                                        rsO.getInt("option_number"),
+                                        rsO.getString("option_text"),
+                                        rsO.getBoolean("is_correct")));
                             }
                         }
                     }

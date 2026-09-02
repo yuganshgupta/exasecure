@@ -3,13 +3,16 @@ package com.examsystem.domain.grading;
 import com.examsystem.domain.models.Question;
 import com.examsystem.domain.models.Option;
 import java.util.List;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.TreeSet;
 
 public class GradingPolicy {
 
     public static boolean isAnswerCorrect(Question question, List<Integer> selectedOptions) {
-        if (question == null || selectedOptions == null || selectedOptions.isEmpty()) {
+        if (question == null || selectedOptions == null || selectedOptions.isEmpty()
+                || selectedOptions.stream().anyMatch(java.util.Objects::isNull)
+                || new HashSet<>(selectedOptions).size() != selectedOptions.size()) {
             return false;
         }
 
@@ -17,9 +20,12 @@ public class GradingPolicy {
             Set<Integer> selectedSet = new TreeSet<>(selectedOptions);
             Set<Integer> correctSet = new TreeSet<>();
             List<Option> options = question.options();
-            for (int i = 0; i < options.size(); i++) {
-                if (options.get(i).correct()) {
-                    correctSet.add(i + 1);
+            if (options == null) {
+                return false;
+            }
+            for (Option option : options) {
+                if (option.correct()) {
+                    correctSet.add(option.number());
                 }
             }
             return selectedSet.equals(correctSet);
