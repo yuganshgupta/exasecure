@@ -1,0 +1,315 @@
+package com.examsystem.gui.panels;
+
+import com.examsystem.gui.dialogs.AttemptDetailsDialog;
+import com.examsystem.gui.dialogs.ScreenshotViewer;
+import com.examsystem.gui.dialogs.StatisticsDialog; // Import the new dialog
+import com.examsystem.models.AttemptSummary;
+import com.examsystem.models.Exam;
+import com.examsystem.services.AdminService;
+import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+
+public class ReviewPanel extends JPanel {
+
+    private final AdminService adminService;
+
+    private final JComboBox<ExamItem> examCombo = new JComboBox<>();
+    private final JComboBox<String> dateFilterCombo = new JComboBox<>();
+    private final JComboBox<String> sectionFilterCombo = new JComboBox<>(new String[]{"All Sections", "A", "B"});
+    
+    private final DefaultTableModel summaryModel = new DefaultTableModel(
+            new Object[]{"ID", "Enrollment", "Name", "Section", "Score", "Focus Lost", "Start", "End"}, 0) {
+        @Override public boolean isCellEditable(int row, int column) { return false; }
+    };
+    private final JTable summaryTable = new JTable(summaryModel);
+
+    private List<AttemptSummary> allSummaries = new ArrayList<>();
+
+    public ReviewPanel(AdminService adminService) {
+        this.adminService = adminService;
+
+        setLayout(new BorderLayout(8, 8));
+
+        // Top Bar
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        JButton refreshExamsBtn = new JButton("Refresh Exams");
+        JButton loadBtn = new JButton("Load Data");
+        
+        top.add(new JLabel("Exam:"));
+        top.add(examCombo);
+        top.add(refreshExamsBtn);
+        top.add(loadBtn);
+        
+        JButton exportBtn = new JButton("Export to CSV");
+        top.add(exportBtn);
+        
+        // Filter Bar
+        top.add(new JSeparator(SwingConstants.VERTICAL));
+        top.add(new JLabel("Filter Date:"));
+        top.add(dateFilterCombo);
+        top.add(new JLabel("Section:"));
+        top.add(sectionFilterCombo);
+
+        // Action Bar (Bottom)
+        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        
+        JButton statsBtn = new JButton("Analysis Charts");
+        // --- NEW BUTTON ---
+        JButton evidenceBtn = new JButton("View Screenshots");
+        // ------------------
+        JButton deleteBtn = new JButton("Delete Result");
+        deleteBtn.setForeground(Color.RED);
+        
+        bottom.add(statsBtn);
+        bottom.add(evidenceBtn); // Add to panel
+        bottom.add(deleteBtn);
+
+        add(top, BorderLayout.NORTH);
+        add(new JScrollPane(summaryTable), BorderLayout.CENTER);
+        add(bottom, BorderLayout.SOUTH);
+
+        // Listeners
+        refreshExamsBtn.addActionListener(e -> loadExams());
+        loadBtn.addActionListener(e -> loadSummariesAndDates());
+        dateFilterCombo.addActionListener(e -> applyFilters());
+        sectionFilterCombo.addActionListener(e -> applyFilters());
+        
+        deleteBtn.addActionListener(e -> onDelete());
+        statsBtn.addActionListener(e -> onShowStats());
+        evidenceBtn.addActionListener(e -> onViewScreenshots()); // Link button
+        exportBtn.addActionListener(e -> onExportCsv());
+
+        // Double Click Listener
+        summaryTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
+                    onViewDetails();
+                }
+            }
+        });
+
+        loadExams();
+    }
+
+    private void onViewDetails() {
+        int row = summaryTable.getSelectedRow();
+        if (row < 0) return;
+        
+        int attemptId = (Integer) summaryTable.getValueAt(row, 0);
+        
+        AttemptSummary selected = allSummaries.stream()
+                .filter(s -> s.getAttemptId() == attemptId)
+                .findFirst().orElse(null);
+        
+        if (selected != null) {
+            new AttemptDetailsDialog(SwingUtilities.getWindowAncestor(this), adminService, selected).setVisible(true);
+        }
+    }
+
+    private void onShowStats() {
+        if (allSummaries.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No data to analyze.");
+            return;
+        }
+        
+        ExamItem item = (ExamItem) examCombo.getSelectedItem();
+        if (item == null) return;
+
+        String dateFilter = (String) dateFilterCombo.getSelectedItem();
+        String sectionFilter = (String) sectionFilterCombo.getSelectedItem();
+
+        new StatisticsDialog(
+            SwingUtilities.getWindowAncestor(this), 
+            adminService, 
+            item.id, 
+            dateFilter, 
+            sectionFilter, 
+            allSummaries 
+        ).setVisible(true);
+    }
+
+    private void onViewScreenshots() {
+        int row = summaryTable.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "Select a result first.", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
+        int attemptId = (Integer) summaryTable.getValueAt(row, 0);
+        
+        // Open the new Screenshot Viewer
+        new ScreenshotViewer(SwingUtilities.getWindowAncestor(this), adminService, attemptId).setVisible(true);
+    }
+
+    private void loadExams() {
+        examCombo.removeAllItems();
+        examCombo.addItem(new ExamItem(-1, "Loading..."));
+        
+        SwingWorker<List<Exam>, Void> worker = new SwingWorker<List<Exam>, Void>() {
+            @Override
+            protected List<Exam> doInBackground() {
+                return adminService.listAllExams();
+            }
+            @Override
+            protected void done() {
+                try {
+                    examCombo.removeAllItems();
+                    for (Exam ex : get()) {
+                        examCombo.addItem(new ExamItem(ex.getId(), ex.getTitle()));
+                    }
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
+            }
+        };
+        worker.execute();
+    }
+
+    private void loadSummariesAndDates() {
+        ExamItem item = (ExamItem) examCombo.getSelectedItem();
+        if (item == null || item.id == -1) {
+            JOptionPane.showMessageDialog(this, "Select a valid exam first.", "Validation", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        
+        summaryModel.setRowCount(0);
+        
+        SwingWorker<Object[], Void> worker = new SwingWorker<Object[], Void>() {
+            @Override
+            protected Object[] doInBackground() {
+                List<AttemptSummary> summaries = adminService.getExamAttemptSummaries(item.id);
+                List<String> dates = adminService.getDistinctDatesForExam(item.id);
+                return new Object[]{summaries, dates};
+            }
+            @Override
+            @SuppressWarnings("unchecked")
+            protected void done() {
+                try {
+                    Object[] results = get();
+                    allSummaries = (List<AttemptSummary>) results[0];
+                    List<String> dates = (List<String>) results[1];
+                    
+                    dateFilterCombo.removeAllItems();
+                    dateFilterCombo.addItem("All Dates");
+                    for (String d : dates) dateFilterCombo.addItem(d);
+                    
+                    sectionFilterCombo.setSelectedIndex(0);
+                    updateTable(allSummaries);
+                } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
+            }
+        };
+        worker.execute();
+    }
+
+    private void applyFilters() {
+        String selectedDate = (String) dateFilterCombo.getSelectedItem();
+        String selectedSection = (String) sectionFilterCombo.getSelectedItem();
+        
+        if (selectedDate == null || selectedSection == null) return;
+
+        List<AttemptSummary> filtered = allSummaries.stream()
+                .filter(s -> {
+                    boolean dateMatch = "All Dates".equals(selectedDate);
+                    if (!dateMatch && s.getStartTime() != null) {
+                        String rowDate = new SimpleDateFormat("yyyy-MM-dd").format(s.getStartTime());
+                        dateMatch = rowDate.equals(selectedDate);
+                    }
+                    boolean sectionMatch = "All Sections".equals(selectedSection);
+                    if (!sectionMatch) {
+                        sectionMatch = selectedSection.equals(s.getSection());
+                    }
+                    return dateMatch && sectionMatch;
+                })
+                .collect(Collectors.toList());
+        
+        updateTable(filtered);
+    }
+
+    private void updateTable(List<AttemptSummary> data) {
+        summaryModel.setRowCount(0);
+        for (AttemptSummary s : data) {
+            summaryModel.addRow(new Object[]{
+                    s.getAttemptId(), s.getEnrollmentNumber(), s.getStudentName(),
+                    s.getSection(), s.getScore(), s.getFocusLostCount(),
+                    s.getStartTime(), s.getEndTime()
+            });
+        }
+    }
+
+    private void onDelete() {
+        int row = summaryTable.getSelectedRow();
+        if (row < 0) {
+            JOptionPane.showMessageDialog(this, "Select a result to delete.");
+            return;
+        }
+        int attemptId = (Integer) summaryTable.getValueAt(row, 0);
+        String name = (String) summaryTable.getValueAt(row, 2);
+
+        if (JOptionPane.showConfirmDialog(this, "Delete result for " + name + "?", "Confirm", JOptionPane.YES_NO_OPTION) == JOptionPane.YES_OPTION) {
+            SwingWorker<Boolean, Void> worker = new SwingWorker<Boolean, Void>() {
+                @Override
+                protected Boolean doInBackground() {
+                    return adminService.deleteExamAttempt(attemptId);
+                }
+                @Override
+                protected void done() {
+                    try {
+                        if (get()) {
+                            JOptionPane.showMessageDialog(ReviewPanel.this, "Deleted.");
+                            loadSummariesAndDates();
+                        } else {
+                            JOptionPane.showMessageDialog(ReviewPanel.this, "Failed to delete.");
+                        }
+                    } catch(Exception ex) { javax.swing.JOptionPane.showMessageDialog(null, "Background error: " + ex.getMessage(), "Error", javax.swing.JOptionPane.ERROR_MESSAGE); }
+                }
+            };
+            worker.execute();
+        }
+    }
+
+    private void onExportCsv() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("Save CSV Report");
+        fileChooser.setSelectedFile(new java.io.File("exam_results_report.csv"));
+        
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            java.io.File dest = fileChooser.getSelectedFile();
+            
+            ExamItem item = (ExamItem) examCombo.getSelectedItem();
+            Integer examId = (item != null && item.id != -1) ? item.id : null;
+            
+            SwingWorker<Void, Void> worker = new SwingWorker<Void, Void>() {
+                @Override
+                protected Void doInBackground() throws Exception {
+                    com.examsystem.dao.ExamAttemptDAO dao = new com.examsystem.dao.ExamAttemptDAO();
+                    java.util.List<String[]> data = dao.getExportableResults(examId);
+                    com.examsystem.utils.CsvExporter.exportAttemptReport(data, dest);
+                    return null;
+                }
+                
+                @Override
+                protected void done() {
+                    try {
+                        get(); // Check for exceptions
+                        JOptionPane.showMessageDialog(ReviewPanel.this, "Export successful!", "Success", JOptionPane.INFORMATION_MESSAGE);
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(ReviewPanel.this, "Export failed: " + ex.getCause().getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                    }
+                }
+            };
+            worker.execute();
+        }
+    }
+
+    private static class ExamItem {
+        final int id; final String title;
+        ExamItem(int id, String title) { this.id = id; this.title = title; }
+        @Override public String toString() { return "[" + id + "] " + title; }
+    }
+}
