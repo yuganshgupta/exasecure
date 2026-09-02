@@ -23,6 +23,7 @@
         <module>exasecure-contracts</module>
         <module>exasecure-legacy</module>
         <module>exasecure-server</module>
+        <module>exasecure-client-common</module>
     </modules>
 
     <dependencyManagement>

@@ -1,0 +1,150 @@
+package com.examsystem.client.api;
+
+import com.examsystem.client.config.ServerConfig;
+import com.examsystem.client.session.SessionState;
+import com.examsystem.contracts.AuthResponseDto;
+import com.examsystem.contracts.StudentExamDto;
+import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+class ApiClientTest {
+    private HttpServer server;
+    private int port;
+    private ApiClient client;
+    private SessionState sessionState;
+
+    @BeforeEach
+    void setUp() throws IOException {
+        server = HttpServer.create(new InetSocketAddress(0), 0);
+        port = server.getAddress().getPort();
+        server.start();
+
+        sessionState = new SessionState();
+        ServerConfig config = new ServerConfig("http://localhost:" + port);
+        client = new ApiClient(config, sessionState);
+    }
+
+    @AfterEach
+    void tearDown() {
+        if (server != null) {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void login_populatesSessionState_onSuccess() {
+        server.createContext("/api/v1/auth/login", exchange -> {
+            String json = """
+                    {"token":"test-token-xyz","role":"STUDENT","fullName":"Alice Smith"}
+                    """;
+            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        AuthResponseDto res = client.login("alice", "password123");
+        assertThat(res.token()).isEqualTo("test-token-xyz");
+        assertThat(res.role()).isEqualTo("STUDENT");
+        assertThat(res.fullName()).isEqualTo("Alice Smith");
+        assertThat(sessionState.isAuthenticated()).isTrue();
+        assertThat(sessionState.username()).isEqualTo("alice");
+        assertThat(sessionState.token()).isEqualTo("test-token-xyz");
+        assertThat(sessionState.isStudent()).isTrue();
+    }
+
+    @Test
+    void authenticatedRequest_sendsBearerTokenHeader() {
+        sessionState.setSession("alice", "Alice", "STUDENT", "valid-bearer-token");
+
+        AtomicReference<String> authHeader = new AtomicReference<>();
+        server.createContext("/api/v1/student/exams", exchange -> {
+            authHeader.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            String json = """
+                    [{"id":1,"title":"Java 25 Exam","durationMinutes":60}]
+                    """;
+            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        List<StudentExamDto> exams = client.listAvailableExams();
+        assertThat(exams).hasSize(1);
+        assertThat(exams.get(0).title()).isEqualTo("Java 25 Exam");
+        assertThat(authHeader.get()).isEqualTo("Bearer valid-bearer-token");
+    }
+
+    @Test
+    void unauthorized_clearsSession_andThrowsApiException() {
+        sessionState.setSession("alice", "Alice", "STUDENT", "expired-token");
+
+        server.createContext("/api/v1/student/exams", exchange -> {
+            String json = "{\"message\":\"Session expired\"}";
+            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(401, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        assertThatThrownBy(() -> client.listAvailableExams())
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> {
+                    ApiException apiEx = (ApiException) e;
+                    assertThat(apiEx.getStatusCode()).isEqualTo(401);
+                    assertThat(apiEx.isUnauthorized()).isTrue();
+                });
+
+        assertThat(sessionState.isAuthenticated()).isFalse();
+    }
+
+    @Test
+    void conflict_throwsApiExceptionWith409() {
+        sessionState.setSession("alice", "Alice", "STUDENT", "token");
+
+        server.createContext("/api/v1/student/attempts/55/submit", exchange -> {
+            String json = "{\"message\":\"Exam attempt is already finalized\"}";
+            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(409, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(bytes);
+            }
+        });
+
+        assertThatThrownBy(() -> client.submitExam(55))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> {
+                    ApiException apiEx = (ApiException) e;
+                    assertThat(apiEx.getStatusCode()).isEqualTo(409);
+                    assertThat(apiEx.isConflict()).isTrue();
+                    assertThat(apiEx.getServerMessage()).contains("already finalized");
+                });
+    }
+
+    @Test
+    void serverDown_throwsApiExceptionWithCause() {
+        server.stop(0); // Stop immediately
+        assertThatThrownBy(() -> client.listAvailableExams())
+                .isInstanceOf(ApiException.class)
+                .hasMessageContaining("Server unavailable");
+    }
+}
