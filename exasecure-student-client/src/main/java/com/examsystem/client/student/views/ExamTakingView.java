@@ -33,6 +33,11 @@ import com.examsystem.client.student.autosave.QuestionAutosaveCoordinator.Questi
 
 public class ExamTakingView {
 
+    static final int MIN_READING_SCALE = 80;
+    static final int MAX_READING_SCALE = 160;
+    static final int READING_SCALE_STEP = 10;
+    static final int DEFAULT_READING_SCALE = 100;
+
     private final StudentApp app;
     private final ApiClient apiClient;
     private final Stage stage;
@@ -59,8 +64,13 @@ public class ExamTakingView {
     private final FlowPane palettePane;
     private final Label answeredSummaryLabel;
     private final Label proctorNoticeBanner;
+    private final VBox questionCard;
+    private final Label readingScaleLabel;
+    private final Button decreaseReadingScaleBtn;
+    private final Button increaseReadingScaleBtn;
 
     private int currentIndex = 0;
+    private int readingScalePercent = DEFAULT_READING_SCALE;
     private final ExamTimer examTimer;
     private Timeline countdownTimeline;
     private ChangeListener<Boolean> focusListener;
@@ -145,6 +155,10 @@ public class ExamTakingView {
         this.palettePane = new FlowPane();
         this.answeredSummaryLabel = new Label();
         this.proctorNoticeBanner = new Label();
+        this.questionCard = new VBox(20);
+        this.readingScaleLabel = new Label();
+        this.decreaseReadingScaleBtn = new Button("A−");
+        this.increaseReadingScaleBtn = new Button("A+");
 
         Instant start = attempt.startTime() != null ? attempt.startTime() : Instant.now();
         this.examTimer = new ExamTimer(start, exam.durationMinutes());
@@ -193,10 +207,23 @@ public class ExamTakingView {
         timerLabel.getStyleClass().addAll("timer-value", "timer-normal");
         timerBox.getChildren().addAll(timerIcon, timerLabel);
 
+        HBox readingControls = new HBox(6);
+        readingControls.setAlignment(Pos.CENTER);
+        readingScaleLabel.getStyleClass().addAll("header-meta", "small-text");
+        decreaseReadingScaleBtn.getStyleClass().add("btn-header");
+        decreaseReadingScaleBtn.setAccessibleText("Decrease question and answer text size");
+        decreaseReadingScaleBtn.setOnAction(e -> changeReadingScale(-1));
+        increaseReadingScaleBtn.getStyleClass().add("btn-header");
+        increaseReadingScaleBtn.setAccessibleText("Increase question and answer text size");
+        increaseReadingScaleBtn.setOnAction(e -> changeReadingScale(1));
+        readingControls.getChildren().addAll(
+                decreaseReadingScaleBtn, readingScaleLabel, increaseReadingScaleBtn);
+        applyReadingScale();
+
         submitBtn.getStyleClass().add("btn-success");
         submitBtn.setOnAction(e -> confirmAndSubmitExam());
 
-        topBar.getChildren().addAll(titleBox, spacer, timerBox, submitBtn);
+        topBar.getChildren().addAll(titleBox, spacer, readingControls, timerBox, submitBtn);
 
         // Proctor warning banner (hidden by default)
         proctorNoticeBanner.setVisible(false);
@@ -210,9 +237,9 @@ public class ExamTakingView {
         view.setTop(topContainer);
 
         // Center: Question Content Card
-        VBox card = new VBox(20);
-        card.setMaxWidth(900);
-        card.getStyleClass().addAll("theme-card", "question-card");
+        questionCard.setMinWidth(0);
+        questionCard.setMaxWidth(Double.MAX_VALUE);
+        questionCard.getStyleClass().addAll("theme-card", "question-card");
 
         HBox questionHeader = new HBox(12);
         questionHeader.setAlignment(Pos.CENTER_LEFT);
@@ -240,8 +267,12 @@ public class ExamTakingView {
 
         questionTextLabel.getStyleClass().add("question-text");
         questionTextLabel.setWrapText(true);
+        questionTextLabel.setMaxWidth(Double.MAX_VALUE);
 
         optionsBox.setPadding(new Insets(10, 0, 10, 0));
+        optionsBox.setFillWidth(true);
+        optionsBox.setMaxWidth(Double.MAX_VALUE);
+        VBox.setVgrow(optionsBox, Priority.ALWAYS);
 
         // Bottom Navigation
         HBox navBar = new HBox(12);
@@ -277,10 +308,11 @@ public class ExamTakingView {
 
         navBar.getChildren().addAll(prevBtn, clearBtn, flagBtn, navSpacer, nextBtn);
 
-        card.getChildren().addAll(questionHeader, questionTextLabel, optionsBox, navBar);
+        questionCard.getChildren().addAll(questionHeader, questionTextLabel, optionsBox, navBar);
 
-        ScrollPane centerScroll = new ScrollPane(card);
+        ScrollPane centerScroll = new ScrollPane(questionCard);
         centerScroll.setFitToWidth(true);
+        centerScroll.setFitToHeight(true);
         centerScroll.setPadding(new Insets(24));
         view.setCenter(centerScroll);
 
@@ -311,6 +343,26 @@ public class ExamTakingView {
 
         rightSidebar.getChildren().addAll(paletteTitle, answeredSummaryLabel, palettePane, legend);
         view.setRight(rightSidebar);
+    }
+
+    private void changeReadingScale(int direction) {
+        int adjusted = adjustedReadingScale(readingScalePercent, direction);
+        if (adjusted == readingScalePercent) return;
+        readingScalePercent = adjusted;
+        applyReadingScale();
+    }
+
+    private void applyReadingScale() {
+        questionCard.getStyleClass().removeIf(style -> style.startsWith("reading-scale-"));
+        questionCard.getStyleClass().add("reading-scale-" + readingScalePercent);
+        readingScaleLabel.setText(readingScalePercent + "%");
+        decreaseReadingScaleBtn.setDisable(readingScalePercent <= MIN_READING_SCALE);
+        increaseReadingScaleBtn.setDisable(readingScalePercent >= MAX_READING_SCALE);
+    }
+
+    static int adjustedReadingScale(int currentScale, int direction) {
+        int stepped = currentScale + Integer.signum(direction) * READING_SCALE_STEP;
+        return Math.max(MIN_READING_SCALE, Math.min(MAX_READING_SCALE, stepped));
     }
 
     private void setupTimer() {
