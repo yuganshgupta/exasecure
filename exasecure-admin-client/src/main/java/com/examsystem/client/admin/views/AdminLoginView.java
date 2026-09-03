@@ -11,9 +11,6 @@ import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
-import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
 public class AdminLoginView {
     private final AdminApp app;
@@ -32,60 +29,54 @@ public class AdminLoginView {
     }
 
     private void buildUI() {
-        view.setStyle("-fx-background-color: #0f172a;");
+        view.getStyleClass().addAll("app-root", "login-page");
 
         VBox card = new VBox(16);
-        card.getStyleClass().add("theme-card");
-        card.setMaxWidth(420);
-        card.setPadding(new Insets(36));
+        card.getStyleClass().addAll("theme-card", "login-card");
+        card.setMaxWidth(430);
         card.setAlignment(Pos.CENTER);
-        card.setStyle("-fx-background-radius: 12px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.3), 20, 0, 0, 6);");
 
         Label badge = new Label("ADMINISTRATIVE CONSOLE");
-        badge.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 4 10 4 10; -fx-background-radius: 12px;");
+        badge.getStyleClass().addAll("portal-badge", "portal-badge-admin");
 
         Label title = new Label("ExaSecure");
-        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 28));
-        title.setStyle("-fx-text-fill: #f8fafc;");
+        title.getStyleClass().add("app-title");
 
         Label subtitle = new Label("System Administration & Proctoring Portal");
-        subtitle.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 13px;");
+        subtitle.getStyleClass().add("secondary-text");
 
         Label serverLabel = new Label("Server: " + apiClient.getConfig().baseUrl());
-        serverLabel.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
+        serverLabel.getStyleClass().addAll("secondary-text", "small-text");
 
         VBox form = new VBox(12);
         form.setAlignment(Pos.CENTER_LEFT);
 
         Label userLabel = new Label("Administrator Username");
-        userLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12px; -fx-text-fill: #cbd5e1;");
+        userLabel.getStyleClass().add("field-label");
         TextField usernameField = new TextField();
         usernameField.setPromptText("Enter admin username");
         usernameField.setPrefHeight(40);
-        usernameField.setStyle("-fx-background-color: #334155; -fx-text-fill: white; -fx-background-radius: 6px; -fx-border-color: #475569; -fx-border-radius: 6px; -fx-padding: 0 10;");
 
         Label passLabel = new Label("Password");
-        passLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12px; -fx-text-fill: #cbd5e1;");
+        passLabel.getStyleClass().add("field-label");
         PasswordField passwordField = new PasswordField();
         passwordField.setPromptText("Enter admin password");
         passwordField.setPrefHeight(40);
-        passwordField.setStyle("-fx-background-color: #334155; -fx-text-fill: white; -fx-background-radius: 6px; -fx-border-color: #475569; -fx-border-radius: 6px; -fx-padding: 0 10;");
 
         Label errorLabel = new Label();
         errorLabel.setWrapText(true);
-        errorLabel.setTextFill(Color.web("#f87171"));
-        errorLabel.setStyle("-fx-font-size: 12px;");
+        errorLabel.getStyleClass().addAll("status-error", "small-text");
         errorLabel.setVisible(false);
 
         Button loginBtn = new Button("Sign In as Administrator");
         loginBtn.setMaxWidth(Double.MAX_VALUE);
         loginBtn.setPrefHeight(42);
-        loginBtn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
-        loginBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-background-radius: 6px; -fx-cursor: hand;");
+        loginBtn.getStyleClass().add("btn-admin");
 
         ProgressIndicator spinner = new ProgressIndicator();
         spinner.setMaxSize(24, 24);
         spinner.setVisible(false);
+        spinner.managedProperty().bind(spinner.visibleProperty());
 
         Runnable performLogin = () -> {
             String u = usernameField.getText().trim();
@@ -144,7 +135,7 @@ public class AdminLoginView {
 
         var themeSelector = com.examsystem.client.theme.ThemeManager.getInstance().createThemeSelector();
         StackPane.setAlignment(themeSelector, Pos.TOP_RIGHT);
-        StackPane.setMargin(themeSelector, new Insets(16));
+        StackPane.setMargin(themeSelector, new Insets(24));
 
         view.getChildren().addAll(card, themeSelector);
     }

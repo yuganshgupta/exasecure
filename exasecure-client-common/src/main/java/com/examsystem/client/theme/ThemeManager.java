@@ -1,5 +1,7 @@
 package com.examsystem.client.theme;
 
+import javafx.application.ColorScheme;
+import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.scene.Scene;
 import javafx.scene.control.ComboBox;
@@ -16,6 +18,7 @@ public class ThemeManager {
     private Theme currentTheme = Theme.SYSTEM;
     private final Set<Scene> registeredScenes = Collections.newSetFromMap(new WeakHashMap<>());
     private final Preferences preferences = Preferences.userNodeForPackage(ThemeManager.class);
+    private boolean systemPreferenceListenerRegistered;
 
     private ThemeManager() {
         try {
@@ -49,6 +52,7 @@ public class ThemeManager {
     public void applyTheme(Scene scene) {
         if (scene == null) return;
         registeredScenes.add(scene);
+        registerSystemPreferenceListener();
         applyThemeToScene(scene);
     }
 
@@ -89,17 +93,44 @@ public class ThemeManager {
     }
 
     private String getCssResourcePath() {
-        Theme effective = currentTheme;
-        if (effective == Theme.SYSTEM) {
-            effective = Theme.LIGHT;
-        }
+        Theme effective = resolveEffectiveTheme();
         return effective == Theme.DARK ? "/styles/dark.css" : "/styles/light.css";
+    }
+
+    private Theme resolveEffectiveTheme() {
+        if (currentTheme != Theme.SYSTEM) {
+            return currentTheme;
+        }
+        try {
+            return Platform.getPreferences().getColorScheme() == ColorScheme.DARK
+                    ? Theme.DARK
+                    : Theme.LIGHT;
+        } catch (IllegalStateException | UnsupportedOperationException ignored) {
+            return Theme.LIGHT;
+        }
+    }
+
+    private void registerSystemPreferenceListener() {
+        if (systemPreferenceListenerRegistered) return;
+        try {
+            Platform.getPreferences().colorSchemeProperty().addListener((obs, oldValue, newValue) -> {
+                if (currentTheme == Theme.SYSTEM) {
+                    for (Scene scene : registeredScenes) {
+                        applyThemeToScene(scene);
+                    }
+                }
+            });
+            systemPreferenceListenerRegistered = true;
+        } catch (IllegalStateException | UnsupportedOperationException ignored) {
+            // JavaFX is not initialized in a headless/unit-test context.
+        }
     }
 
     public ComboBox<Theme> createThemeSelector() {
         ComboBox<Theme> comboBox = new ComboBox<>(FXCollections.observableArrayList(Theme.values()));
         comboBox.setValue(currentTheme);
-        comboBox.setStyle("-fx-font-size: 11px; -fx-padding: 2 6;");
+        comboBox.getStyleClass().add("theme-selector");
+        comboBox.setAccessibleText("Application theme");
         comboBox.valueProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null && newVal != currentTheme) {
                 setTheme(newVal);

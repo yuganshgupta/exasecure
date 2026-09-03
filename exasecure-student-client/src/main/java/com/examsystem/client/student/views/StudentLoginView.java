@@ -10,9 +10,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
 public class StudentLoginView {
     private final StudentApp app;
@@ -31,63 +28,57 @@ public class StudentLoginView {
     }
 
     private void buildUI() {
-        view.setStyle("-fx-background-color: #f1f5f9;");
+        view.getStyleClass().addAll("app-root", "login-page");
 
         VBox card = new VBox(16);
-        card.getStyleClass().add("theme-card");
-        card.setMaxWidth(420);
-        card.setPadding(new Insets(36));
+        card.getStyleClass().addAll("theme-card", "login-card");
+        card.setMaxWidth(430);
         card.setAlignment(Pos.CENTER);
-        card.setStyle("-fx-background-radius: 12px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.08), 16, 0, 0, 4);");
 
         Label badge = new Label("STUDENT PORTAL");
-        badge.setStyle("-fx-background-color: #e0e7ff; -fx-text-fill: #3730a3; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 4 10 4 10; -fx-background-radius: 12px;");
+        badge.getStyleClass().add("portal-badge");
 
         Label title = new Label("ExaSecure");
-        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 28));
-        title.setStyle("-fx-text-fill: #0f172a;");
+        title.getStyleClass().add("app-title");
 
         Label subtitle = new Label("Secure Desktop Examination System");
-        subtitle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 13px;");
+        subtitle.getStyleClass().add("secondary-text");
 
         VBox serverInfoBox = new VBox(2);
         serverInfoBox.setAlignment(Pos.CENTER);
         Label serverLabel = new Label("Server: " + apiClient.getConfig().baseUrl());
-        serverLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 11px;");
+        serverLabel.getStyleClass().addAll("secondary-text", "small-text");
         serverInfoBox.getChildren().add(serverLabel);
 
         VBox form = new VBox(12);
         form.setAlignment(Pos.CENTER_LEFT);
 
         Label userLabel = new Label("Username or Enrollment");
-        userLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12px; -fx-text-fill: #334155;");
+        userLabel.getStyleClass().add("field-label");
         TextField usernameField = new TextField();
         usernameField.setPromptText("Enter your student username");
         usernameField.setPrefHeight(40);
-        usernameField.setStyle("-fx-background-radius: 6px; -fx-border-color: #cbd5e1; -fx-border-radius: 6px; -fx-padding: 0 10;");
 
         Label passLabel = new Label("Password");
-        passLabel.setStyle("-fx-font-weight: bold; -fx-font-size: 12px; -fx-text-fill: #334155;");
+        passLabel.getStyleClass().add("field-label");
         PasswordField passwordField = new PasswordField();
         passwordField.setPromptText("Enter your password");
         passwordField.setPrefHeight(40);
-        passwordField.setStyle("-fx-background-radius: 6px; -fx-border-color: #cbd5e1; -fx-border-radius: 6px; -fx-padding: 0 10;");
 
         Label errorLabel = new Label();
         errorLabel.setWrapText(true);
-        errorLabel.setTextFill(Color.web("#dc2626"));
-        errorLabel.setStyle("-fx-font-size: 12px;");
+        errorLabel.getStyleClass().addAll("status-error", "small-text");
         errorLabel.setVisible(false);
 
         Button loginBtn = new Button("Sign In to Examination Portal");
         loginBtn.setMaxWidth(Double.MAX_VALUE);
         loginBtn.setPrefHeight(42);
-        loginBtn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
-        loginBtn.setStyle("-fx-background-color: #2563eb; -fx-text-fill: white; -fx-background-radius: 6px; -fx-cursor: hand;");
+        loginBtn.getStyleClass().add("btn-primary");
 
         ProgressIndicator spinner = new ProgressIndicator();
         spinner.setMaxSize(24, 24);
         spinner.setVisible(false);
+        spinner.managedProperty().bind(spinner.visibleProperty());
 
         Runnable performLogin = () -> {
             String u = usernameField.getText().trim();
@@ -146,7 +137,7 @@ public class StudentLoginView {
 
         var themeSelector = com.examsystem.client.theme.ThemeManager.getInstance().createThemeSelector();
         StackPane.setAlignment(themeSelector, Pos.TOP_RIGHT);
-        StackPane.setMargin(themeSelector, new Insets(16));
+        StackPane.setMargin(themeSelector, new Insets(24));
 
         view.getChildren().addAll(card, themeSelector);
     }

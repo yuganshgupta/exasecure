@@ -5,6 +5,7 @@ import com.examsystem.client.theme.ThemeManager;
 import javafx.application.Platform;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
+import javafx.scene.layout.Region;
 import javafx.stage.Window;
 
 import java.util.Optional;
@@ -56,6 +57,7 @@ public class UiFeedback {
             alert.setTitle(title);
             alert.setHeaderText(header);
             alert.setContentText(content);
+            configureAlert(alert);
             ThemeManager.getInstance().applyTheme(alert);
             alert.showAndWait();
         } catch (Exception e) {
@@ -76,11 +78,22 @@ public class UiFeedback {
             alert.setTitle(title);
             alert.setHeaderText(header);
             alert.setContentText(content);
+            configureAlert(alert);
             ThemeManager.getInstance().applyTheme(alert);
             Optional<ButtonType> result = alert.showAndWait();
             return result.isPresent() && result.get() == ButtonType.OK;
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    private static void configureAlert(Alert alert) {
+        alert.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
+        alert.getDialogPane().setPrefWidth(480);
+        alert.getDialogPane().getStyleClass().add("product-dialog");
+        if (alert.getDialogPane().getContent() instanceof javafx.scene.control.Label label) {
+            label.setWrapText(true);
+            label.setMaxWidth(430);
         }
     }
 }

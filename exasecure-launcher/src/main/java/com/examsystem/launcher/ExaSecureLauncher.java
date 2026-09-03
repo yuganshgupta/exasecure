@@ -12,9 +12,6 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.Region;
 import javafx.scene.layout.VBox;
-import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 
 import java.io.IOException;
@@ -51,12 +48,10 @@ public class ExaSecureLauncher {
         @Override
         public void start(Stage stage) {
             Label titleLabel = new Label("ExaSecure Control Center");
-            titleLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 22));
-            titleLabel.getStyleClass().add("theme-label-bold");
+            titleLabel.getStyleClass().add("page-title");
 
             Label subtitleLabel = new Label("Operator & Administration Control Center");
-            subtitleLabel.setFont(Font.font("Segoe UI", 12));
-            subtitleLabel.getStyleClass().add("theme-label-muted");
+            subtitleLabel.getStyleClass().addAll("secondary-text", "small-text");
 
             var themeSelector = ThemeManager.getInstance().createThemeSelector();
 
@@ -68,51 +63,51 @@ public class ExaSecureLauncher {
             headerBox.getChildren().addAll(titlesBox, spacer, themeSelector);
 
             serverStatusLabel = new Label("Server: Checking...");
-            serverStatusLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
+            serverStatusLabel.getStyleClass().add("section-title");
             updateServerStatusDisplay(false, false);
 
             startServerBtn = new Button("Start Server");
             startServerBtn.setMaxWidth(Double.MAX_VALUE);
-            startServerBtn.setStyle("-fx-background-color: #0284c7; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 13px; -fx-padding: 9 16; -fx-background-radius: 6px; -fx-cursor: hand;");
+            startServerBtn.getStyleClass().add("btn-primary");
             startServerBtn.setOnAction(e -> onStartServerOnly());
 
             startServerAndAdminBtn = new Button("Start Server + Admin");
             startServerAndAdminBtn.setMaxWidth(Double.MAX_VALUE);
-            startServerAndAdminBtn.setStyle("-fx-background-color: #2563eb; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 13px; -fx-padding: 10 16; -fx-background-radius: 6px; -fx-cursor: hand;");
+            startServerAndAdminBtn.getStyleClass().add("btn-primary");
             startServerAndAdminBtn.setOnAction(e -> onStartServerAndAdmin());
 
             openAdminBtn = new Button("Open Admin Console");
             openAdminBtn.setMaxWidth(Double.MAX_VALUE);
-            openAdminBtn.setStyle("-fx-background-color: #4f46e5; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 13px; -fx-padding: 9 16; -fx-background-radius: 6px; -fx-cursor: hand;");
+            openAdminBtn.setText("Open Admin");
+            openAdminBtn.getStyleClass().add("btn-secondary");
             openAdminBtn.setOnAction(e -> onOpenAdminConsole());
 
-            stopBtn = new Button("Stop Server & Services");
+            stopBtn = new Button("Stop Server");
             stopBtn.setMaxWidth(Double.MAX_VALUE);
-            stopBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 12px; -fx-padding: 8 14; -fx-background-radius: 6px; -fx-cursor: hand;");
+            stopBtn.getStyleClass().add("btn-danger");
             stopBtn.setOnAction(e -> onStopExaSecure());
 
             infoStatusLabel = new Label("Ready.");
-            infoStatusLabel.setFont(Font.font("Segoe UI", 11));
-            infoStatusLabel.getStyleClass().add("theme-label-muted");
+            infoStatusLabel.getStyleClass().addAll("secondary-text", "small-text");
             infoStatusLabel.setWrapText(true);
             infoStatusLabel.setAlignment(Pos.CENTER);
 
             VBox card = new VBox(12, headerBox, serverStatusLabel, startServerBtn, startServerAndAdminBtn, openAdminBtn, stopBtn, infoStatusLabel);
-            card.getStyleClass().add("theme-card");
+            card.getStyleClass().addAll("theme-card", "login-card");
             card.setAlignment(Pos.CENTER);
-            card.setPadding(new Insets(24));
-            card.setStyle("-fx-background-radius: 12px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.08), 16, 0, 0, 4);");
 
             VBox root = new VBox(card);
             root.setAlignment(Pos.CENTER);
             root.setPadding(new Insets(20));
+            root.getStyleClass().add("app-root");
 
             Scene scene = new Scene(root, 440, 380);
             ThemeManager.getInstance().applyTheme(scene);
 
             stage.setTitle("ExaSecure Control Center");
             stage.setScene(scene);
-            stage.setResizable(false);
+            stage.setMinWidth(420);
+            stage.setMinHeight(380);
 
             stage.setOnCloseRequest(e -> onStopExaSecure());
             stage.show();
@@ -125,15 +120,16 @@ public class ExaSecureLauncher {
         }
 
         private void updateServerStatusDisplay(boolean running, boolean starting) {
+            serverStatusLabel.getStyleClass().removeAll("status-success", "status-warning", "status-error");
             if (starting) {
                 serverStatusLabel.setText("Server: Starting...");
-                serverStatusLabel.setTextFill(Color.web("#d97706"));
+                serverStatusLabel.getStyleClass().add("status-warning");
             } else if (running) {
                 serverStatusLabel.setText("Server: Running (Port 8089)");
-                serverStatusLabel.setTextFill(Color.web("#16a34a"));
+                serverStatusLabel.getStyleClass().add("status-success");
             } else {
                 serverStatusLabel.setText("Server: Stopped");
-                serverStatusLabel.setTextFill(Color.web("#dc2626"));
+                serverStatusLabel.getStyleClass().add("status-error");
             }
         }
 
@@ -175,7 +171,7 @@ public class ExaSecureLauncher {
                     });
                 } catch (Exception ex) {
                     Platform.runLater(() -> {
-                        infoStatusLabel.setText("Failed to start server: " + ex.getMessage());
+                        infoStatusLabel.setText("Unable to start the ExaSecure server. Check local configuration and try again.");
                         setButtonsDisabled(false);
                     });
                 }
@@ -222,7 +218,7 @@ public class ExaSecureLauncher {
                     });
                 } catch (Exception ex) {
                     Platform.runLater(() -> {
-                        infoStatusLabel.setText("Failed: " + ex.getMessage());
+                        infoStatusLabel.setText("Unable to start the server and Admin Console. Check local configuration and try again.");
                         setButtonsDisabled(false);
                     });
                 }
@@ -258,7 +254,7 @@ public class ExaSecureLauncher {
                     });
                 } catch (Exception ex) {
                     Platform.runLater(() -> {
-                        infoStatusLabel.setText("Unable to open Admin Console: " + ex.getMessage());
+                        infoStatusLabel.setText("Unable to open the Admin Console. Verify that the server is running and try again.");
                         setButtonsDisabled(false);
                     });
                 }
