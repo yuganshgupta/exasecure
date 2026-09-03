@@ -126,7 +126,8 @@ public class AdminDashboardView {
             app.showLogin();
         });
 
-        topBar.getChildren().addAll(brand, adminBadge, spacer, userLabel, logoutBtn);
+        var themeSelector = com.examsystem.client.theme.ThemeManager.getInstance().createThemeSelector();
+        topBar.getChildren().addAll(brand, adminBadge, spacer, themeSelector, userLabel, logoutBtn);
 
         // Command & Overview Strip
         HBox overviewStrip = new HBox(20);
@@ -219,11 +220,22 @@ public class AdminDashboardView {
             confirmDeactivateUser(selected);
         });
 
+        Button reactivateBtn = new Button("Reactivate");
+        reactivateBtn.setStyle("-fx-background-color: #dcfce7; -fx-text-fill: #15803d; -fx-font-weight: bold; -fx-background-radius: 6px; -fx-padding: 7 14; -fx-cursor: hand;");
+        reactivateBtn.setOnAction(e -> {
+            AdminUserDto selected = usersTable.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                UiFeedback.showError("Selection Required", "Please select a user to reactivate.");
+                return;
+            }
+            confirmReactivateUser(selected);
+        });
+
         Button refreshBtn = new Button("Refresh");
         refreshBtn.setStyle("-fx-background-color: white; -fx-border-color: #cbd5e1; -fx-border-radius: 6px; -fx-padding: 7 14; -fx-cursor: hand;");
         refreshBtn.setOnAction(e -> loadUsers());
 
-        toolbar.getChildren().addAll(title, userSearchField, spacer, addBtn, editBtn, deactivateBtn, refreshBtn);
+        toolbar.getChildren().addAll(title, userSearchField, spacer, addBtn, editBtn, deactivateBtn, reactivateBtn, refreshBtn);
 
         setupUsersTable();
 
@@ -459,6 +471,35 @@ public class AdminDashboardView {
         }
     }
 
+    private void confirmReactivateUser(AdminUserDto user) {
+        if (user.isActive()) {
+            UiFeedback.showInfo("User Active", "User @" + user.username() + " is already active.");
+            return;
+        }
+        boolean confirmed = UiFeedback.showConfirmation(
+                "Confirm Reactivation",
+                "Reactivate user @" + user.username() + "?",
+                "This will restore login access for " + user.fullName() + " (" + user.role() + ")."
+        );
+        if (!confirmed) return;
+
+        usersStatusLabel.setText("Reactivating user @" + user.username() + "...");
+        AsyncRunner.runAsync(
+                () -> {
+                    apiClient.adminReactivateUser(user.id());
+                    return null;
+                },
+                ignored -> {
+                    UiFeedback.showInfo("User Reactivated", "User @" + user.username() + " has been successfully reactivated.");
+                    loadUsers();
+                },
+                err -> {
+                    usersStatusLabel.setText("Failed to reactivate user: " + err.getMessage());
+                    UiFeedback.showError("Reactivation Failed", err.getMessage());
+                }
+        );
+    }
+
     // ==========================================
     // 2. Exams Management Tab
     // ==========================================
@@ -504,11 +545,22 @@ public class AdminDashboardView {
             confirmDeactivateExam(selected);
         });
 
+        Button reactivateBtn = new Button("Reactivate");
+        reactivateBtn.setStyle("-fx-background-color: #dcfce7; -fx-text-fill: #15803d; -fx-font-weight: bold; -fx-background-radius: 6px; -fx-padding: 7 14; -fx-cursor: hand;");
+        reactivateBtn.setOnAction(e -> {
+            AdminExamDto selected = examsTable.getSelectionModel().getSelectedItem();
+            if (selected == null) {
+                UiFeedback.showError("Selection Required", "Please select an exam to reactivate.");
+                return;
+            }
+            confirmReactivateExam(selected);
+        });
+
         Button refreshBtn = new Button("Refresh");
         refreshBtn.setStyle("-fx-background-color: white; -fx-border-color: #cbd5e1; -fx-border-radius: 6px; -fx-padding: 7 14; -fx-cursor: hand;");
         refreshBtn.setOnAction(e -> loadExams());
 
-        toolbar.getChildren().addAll(title, spacer, createBtn, reviseBtn, deactivateBtn, refreshBtn);
+        toolbar.getChildren().addAll(title, spacer, createBtn, reviseBtn, deactivateBtn, reactivateBtn, refreshBtn);
 
         setupExamsTable();
 
@@ -647,6 +699,35 @@ public class AdminDashboardView {
                     (Throwable err) -> UiFeedback.showError("Deactivation Failed", err.getMessage())
             );
         }
+    }
+
+    private void confirmReactivateExam(AdminExamDto exam) {
+        if (exam.isActive()) {
+            UiFeedback.showInfo("Exam Active", "Exam '" + exam.title() + "' is already active.");
+            return;
+        }
+        boolean confirmed = UiFeedback.showConfirmation(
+                "Confirm Reactivation",
+                "Reactivate exam #" + exam.id() + " (" + exam.title() + ")?",
+                "This will re-enable this exam definition for students without creating a new revision."
+        );
+        if (!confirmed) return;
+
+        examsStatusLabel.setText("Reactivating exam #" + exam.id() + "...");
+        AsyncRunner.runAsync(
+                () -> {
+                    apiClient.adminReactivateExam(exam.id());
+                    return null;
+                },
+                ignored -> {
+                    UiFeedback.showInfo("Exam Reactivated", "Exam #" + exam.id() + " has been successfully reactivated.");
+                    loadExams();
+                },
+                err -> {
+                    examsStatusLabel.setText("Failed to reactivate exam: " + err.getMessage());
+                    UiFeedback.showError("Reactivation Failed", err.getMessage());
+                }
+        );
     }
 
     // ==========================================
@@ -946,7 +1027,33 @@ public class AdminDashboardView {
         scoreCol.setCellValueFactory(d -> new SimpleStringProperty(
                 d.getValue().score() != null ? d.getValue().score() + " pts" : "Pending"));
 
-        attemptsTable.getColumns().addAll(idCol, stuIdCol, nameCol, startCol, statusCol, scoreCol);
+        TableColumn<AdminAttemptDto, String> violationsCol = new TableColumn<>("Violations");
+        violationsCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().focusLostCount())));
+        violationsCol.setMaxWidth(90);
+
+        TableColumn<AdminAttemptDto, String> proctoringCol = new TableColumn<>("Proctoring");
+        proctoringCol.setCellValueFactory(d -> new SimpleStringProperty(
+                d.getValue().flagged() ? "⚠️ FLAGGED" : "CLEAN"));
+        proctoringCol.setPrefWidth(120);
+        proctoringCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    setStyle("");
+                } else {
+                    setText(item);
+                    if (item.contains("FLAGGED")) {
+                        setStyle("-fx-text-fill: #dc2626; -fx-font-weight: bold;");
+                    } else {
+                        setStyle("-fx-text-fill: #16a34a; -fx-font-weight: bold;");
+                    }
+                }
+            }
+        });
+
+        attemptsTable.getColumns().addAll(idCol, stuIdCol, nameCol, startCol, statusCol, scoreCol, violationsCol, proctoringCol);
 
         attemptsTable.setRowFactory(tv -> {
             TableRow<AdminAttemptDto> row = new TableRow<>();
@@ -1072,19 +1179,25 @@ public class AdminDashboardView {
         AsyncRunner.runAsync(
                 () -> {
                     try (FileWriter writer = new FileWriter(file)) {
-                        writer.write("Attempt ID,Student ID,Student Name,Start Time,Status,Score\n");
+                        writer.write("Attempt ID,Student ID,Student Name,Start Time,Status,Score,Violations,Flagged,Proctoring Status\n");
                         for (AdminAttemptDto a : items) {
                             String studentName = escapeCsvCell(a.studentName());
                             String startTime = escapeCsvCell(a.startTime() != null ? a.startTime().toString() : "");
                             String status = escapeCsvCell(a.status());
                             String score = a.score() != null ? String.valueOf(a.score()) : "";
-                            writer.write(String.format("%d,%d,%s,%s,%s,%s\n",
+                            String violations = String.valueOf(a.focusLostCount());
+                            String flagged = String.valueOf(a.flagged());
+                            String proctoringStatus = escapeCsvCell(a.proctoringStatus() != null ? a.proctoringStatus() : "CLEAN");
+                            writer.write(String.format("%d,%d,%s,%s,%s,%s,%s,%s,%s\n",
                                     a.id(),
                                     a.studentId(),
                                     studentName,
                                     startTime,
                                     status,
-                                    score));
+                                    score,
+                                    violations,
+                                    flagged,
+                                    proctoringStatus));
                         }
                     }
                     return items.size();

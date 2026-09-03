@@ -98,6 +98,14 @@ public class AdminController {
         ctx.status(204);
     }
 
+    public void reactivateExamDefinition(Context ctx) {
+        int examId = Integer.parseInt(ctx.pathParam("examId"));
+        if (!examDefinitionUseCase.reactivateDefinition(examId)) {
+            throw new NotFoundResponse("Inactive exam not found");
+        }
+        ctx.status(204);
+    }
+
     private static AdminExamDefinitionCommand toDefinitionCommand(AdminExamDefinitionRequestDto request) {
         if (request == null) {
             throw new IllegalArgumentException("Exam definition is required");
@@ -152,6 +160,14 @@ public class AdminController {
         }
         if (!userMutationUseCase.deactivateUser(id)) {
             throw new NotFoundResponse("Active user not found");
+        }
+        ctx.status(204);
+    }
+
+    public void reactivateUser(Context ctx) {
+        int id = Integer.parseInt(ctx.pathParam("userId"));
+        if (!userMutationUseCase.reactivateUser(id)) {
+            throw new NotFoundResponse("Inactive user not found");
         }
         ctx.status(204);
     }

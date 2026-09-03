@@ -12,4 +12,6 @@ public interface AdminExamDefinitionMutationPort {
             int supersededExamId, AdminExamDefinitionCommand definition, int createdBy);
 
     boolean deactivateDefinition(int examId);
+
+    boolean reactivateDefinition(int examId);
 }

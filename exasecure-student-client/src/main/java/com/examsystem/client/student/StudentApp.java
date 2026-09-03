@@ -28,6 +28,7 @@ public class StudentApp extends Application {
         this.rootLayout = new StackPane();
 
         Scene scene = new Scene(rootLayout, 1080, 720);
+        com.examsystem.client.theme.ThemeManager.getInstance().applyTheme(scene);
         stage.setTitle("ExaSecure — Student Examination");
         stage.setScene(scene);
         stage.setMinWidth(900);
@@ -38,22 +39,35 @@ public class StudentApp extends Application {
     }
 
     public void showLogin() {
+        if (primaryStage != null && primaryStage.isFullScreen()) {
+            primaryStage.setFullScreen(false);
+        }
         StudentLoginView loginView = new StudentLoginView(this, apiClient);
         rootLayout.getChildren().setAll(loginView.getView());
     }
 
     public void showDashboard() {
+        if (primaryStage != null && primaryStage.isFullScreen()) {
+            primaryStage.setFullScreen(false);
+        }
         StudentDashboardView dashboardView = new StudentDashboardView(this, apiClient);
         rootLayout.getChildren().setAll(dashboardView.getView());
     }
 
     public void showExamTaking(StudentExamDto exam, StudentAttemptDto attempt, List<StudentQuestionDto> questions, Map<Integer, List<Integer>> initialAnswers) {
+        if (primaryStage != null) {
+            primaryStage.setFullScreenExitHint("");
+            primaryStage.setFullScreen(true);
+        }
         ExamTakingView examView =
                 new ExamTakingView(this, apiClient, primaryStage, exam, attempt, questions, initialAnswers);
         rootLayout.getChildren().setAll(examView.getView());
     }
 
     public void showHistory() {
+        if (primaryStage != null && primaryStage.isFullScreen()) {
+            primaryStage.setFullScreen(false);
+        }
         StudentHistoryView historyView = new StudentHistoryView(this, apiClient);
         rootLayout.getChildren().setAll(historyView.getView());
     }

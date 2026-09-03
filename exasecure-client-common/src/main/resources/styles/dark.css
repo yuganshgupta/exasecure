@@ -1,0 +1,129 @@
+/* ExaSecure Dark Theme */
+
+.root {
+    -fx-base: #0f172a;
+    -fx-background: #0f172a;
+    -fx-control-inner-background: #1e293b;
+    -fx-accent: #3b82f6;
+    -fx-focus-color: #60a5fa;
+    -fx-faint-focus-color: rgba(96, 165, 250, 0.2);
+    -fx-font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    -fx-text-base-color: #f8fafc;
+}
+
+.theme-card {
+    -fx-background-color: #1e293b;
+    -fx-border-color: #334155;
+    -fx-border-width: 1px;
+    -fx-border-radius: 8px;
+    -fx-background-radius: 8px;
+}
+
+.theme-card-selected {
+    -fx-background-color: #1e3a5f;
+    -fx-border-color: #60a5fa;
+    -fx-border-width: 1.5px;
+    -fx-border-radius: 8px;
+    -fx-background-radius: 8px;
+}
+
+.theme-label-bold {
+    -fx-text-fill: #f8fafc;
+    -fx-font-weight: bold;
+}
+
+.theme-label-muted {
+    -fx-text-fill: #94a3b8;
+}
+
+.label {
+    -fx-text-fill: #f8fafc;
+}
+
+.button {
+    -fx-font-family: "Segoe UI", -apple-system, sans-serif;
+}
+
+.text-field, .password-field, .text-area {
+    -fx-background-color: #1e293b;
+    -fx-border-color: #475569;
+    -fx-border-radius: 6px;
+    -fx-background-radius: 6px;
+    -fx-text-fill: #f8fafc;
+    -fx-prompt-text-fill: #64748b;
+    -fx-padding: 8 12;
+}
+
+.text-field:focused, .password-field:focused, .text-area:focused {
+    -fx-border-color: #3b82f6;
+    -fx-border-width: 1.5px;
+}
+
+.table-view {
+    -fx-background-color: #1e293b;
+    -fx-border-color: #334155;
+    -fx-border-radius: 6px;
+    -fx-background-radius: 6px;
+}
+
+.table-view .column-header-background {
+    -fx-background-color: #0f172a;
+}
+
+.table-view .column-header {
+    -fx-background-color: transparent;
+    -fx-border-color: transparent #334155 transparent transparent;
+}
+
+.table-view .column-header .label {
+    -fx-text-fill: #cbd5e1;
+    -fx-font-weight: bold;
+}
+
+.table-row-cell {
+    -fx-background-color: #1e293b;
+    -fx-border-color: transparent transparent #0f172a transparent;
+}
+
+.table-row-cell:odd {
+    -fx-background-color: #182234;
+}
+
+.table-row-cell:selected {
+    -fx-background-color: #1e40af;
+    -fx-text-fill: #ffffff;
+}
+
+.combo-box {
+    -fx-background-color: #1e293b;
+    -fx-border-color: #475569;
+    -fx-border-radius: 6px;
+    -fx-background-radius: 6px;
+}
+
+.combo-box .list-cell {
+    -fx-text-fill: #f8fafc;
+}
+
+.tab-pane .tab-header-area .tab-header-background {
+    -fx-background-color: #0f172a;
+}
+
+.tab-pane .tab {
+    -fx-background-color: #334155;
+    -fx-background-radius: 6 6 0 0;
+    -fx-padding: 6 14;
+}
+
+.tab-pane .tab:selected {
+    -fx-background-color: #1e293b;
+}
+
+.tab-pane .tab .tab-label {
+    -fx-text-fill: #94a3b8;
+}
+
+.tab-pane .tab:selected .tab-label {
+    -fx-text-fill: #f8fafc;
+    -fx-font-weight: bold;
+}

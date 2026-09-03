@@ -20,6 +20,7 @@ public class AdminApp extends Application {
         this.rootLayout = new StackPane();
 
         Scene scene = new Scene(rootLayout, 1180, 760);
+        com.examsystem.client.theme.ThemeManager.getInstance().applyTheme(scene);
         stage.setTitle("ExaSecure — Administrative Console");
         stage.setScene(scene);
         stage.setMinWidth(960);

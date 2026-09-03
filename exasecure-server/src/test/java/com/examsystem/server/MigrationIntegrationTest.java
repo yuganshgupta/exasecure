@@ -50,7 +50,7 @@ class MigrationIntegrationTest {
             // Check schema version
             try (ResultSet rs = stmt.executeQuery("SELECT MAX(version) FROM schema_versions")) {
                 assertThat(rs.next()).isTrue();
-                assertThat(rs.getInt(1)).isEqualTo(8);
+                assertThat(rs.getInt(1)).isEqualTo(9);
             }
 
             try (ResultSet rs = stmt.executeQuery(
@@ -58,6 +58,14 @@ class MigrationIntegrationTest {
                 assertThat(rs.next()).isTrue();
                 assertThat(rs.getInt("version_number")).isEqualTo(1);
                 assertThat(rs.getObject("supersedes_exam_id")).isNull();
+            }
+
+            // Check exam_attempts v9 proctoring columns
+            try (ResultSet rs = stmt.executeQuery(
+                    "SELECT is_flagged, proctoring_status FROM exam_attempts WHERE id = 1")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getBoolean("is_flagged")).isFalse();
+                assertThat(rs.getString("proctoring_status")).isEqualTo("CLEAN");
             }
             
             // Check user remained

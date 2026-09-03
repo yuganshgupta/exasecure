@@ -83,6 +83,18 @@ public class JdbcAdminExamDefinitionMutationPort implements AdminExamDefinitionM
         }
     }
 
+    @Override
+    public boolean reactivateDefinition(int examId) {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                     "UPDATE exams SET is_active = 1 WHERE id = ? AND is_active = 0")) {
+            statement.setInt(1, examId);
+            return statement.executeUpdate() > 0;
+        } catch (SQLException exception) {
+            throw translate(exception);
+        }
+    }
+
     private static AdminExamMutationResult insertDefinition(
             Connection connection,
             AdminExamDefinitionCommand definition,

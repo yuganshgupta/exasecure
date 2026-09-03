@@ -362,26 +362,63 @@ public class ExamTakingView {
         proctorNoticeBanner.setVisible(true);
         proctorNoticeBanner.setManaged(true);
 
+        String clientEventId = UUID.randomUUID().toString();
+
         AsyncRunner.runAsync(
                 () -> {
-                    int eventId = apiClient.recordProctorEvent(attempt.id(), "FOCUS_LOST");
+                    var response = apiClient.recordProctorEvent(attempt.id(), "FOCUS_LOST", clientEventId);
                     byte[] screenshot = ScreenCaptureService.captureScreenAsJpeg();
                     boolean uploaded = false;
                     if (screenshot != null && screenshot.length > 0) {
                         try {
-                            apiClient.uploadProctorEvidence(attempt.id(), eventId, screenshot, "image/jpeg");
+                            apiClient.uploadProctorEvidence(attempt.id(), response.eventId(), screenshot, "image/jpeg");
                             uploaded = true;
                         } catch (Exception ignored) {
                             uploaded = false;
                         }
                     }
-                    return new ProctorOutcome(eventId, uploaded);
+                    return new ProctorOutcome(response, uploaded);
                 },
                 (ProctorOutcome outcome) -> {
-                    if (outcome.uploaded()) {
-                        proctorNoticeBanner.setText("⚠️ Warning: Window focus lost. Incident recorded and screenshot evidence uploaded.");
+                    int count = outcome.response().violationCount();
+                    boolean flagged = outcome.response().flagged();
+
+                    if (flagged || count >= 3) {
+                        isSubmitted = true;
+                        isSubmissionPending = false;
+                        cleanupListeners();
+                        setControlsDisabled(true);
+                        if (stage != null) stage.setFullScreen(false);
+
+                        proctorNoticeBanner.setText("🚨 EXAM TERMINATED: 3 proctoring violations reached. Exam has been auto-submitted and flagged for review.");
+                        proctorNoticeBanner.setStyle("-fx-background-color: #fee2e2; -fx-text-fill: #991b1b; -fx-font-weight: bold; -fx-padding: 10 16; -fx-background-radius: 6px;");
+
+                        isDialogActive = true;
+                        UiFeedback.showError("Exam Terminated",
+                                "You have accumulated 3 proctoring violations (window focus lost).\n\n"
+                                        + "Your exam has been automatically submitted and flagged for academic review.\n"
+                                        + "Your truthful raw score has been preserved for administrative evaluation.");
+                        isDialogActive = false;
+                        app.showHistory();
+                    } else if (count == 2) {
+                        proctorNoticeBanner.setText("⚠️ FINAL WARNING (2/3 Violations): Another focus loss will automatically terminate and flag your exam!");
+                        proctorNoticeBanner.setStyle("-fx-background-color: #fef3c7; -fx-text-fill: #92400e; -fx-font-weight: bold; -fx-padding: 10 16; -fx-background-radius: 6px;");
+
+                        isDialogActive = true;
+                        UiFeedback.showWarning("Proctoring Final Warning",
+                                "You have lost window focus a second time (2/3 violations).\n\n"
+                                        + "WARNING: A 3rd violation will result in immediate termination and flagging of your exam.");
+                        isDialogActive = false;
                     } else {
-                        proctorNoticeBanner.setText("⚠️ Warning: Window focus lost. Incident recorded (Event #" + outcome.eventId() + "), but screenshot upload failed.");
+                        proctorNoticeBanner.setText("⚠️ Warning (1/3 Violations): Window focus lost. Incident recorded"
+                                + (outcome.uploaded() ? " with screenshot evidence." : "."));
+                        proctorNoticeBanner.setStyle("-fx-background-color: #fef3c7; -fx-text-fill: #92400e; -fx-font-weight: bold; -fx-padding: 10 16; -fx-background-radius: 6px;");
+
+                        isDialogActive = true;
+                        UiFeedback.showWarning("Proctoring Warning",
+                                "Window focus lost (1/3 violations).\n\n"
+                                        + "Please remain focused on the exam window. Accumulating 3 violations will automatically terminate your attempt.");
+                        isDialogActive = false;
                     }
                 },
                 (Throwable err) -> {
@@ -390,7 +427,7 @@ public class ExamTakingView {
         );
     }
 
-    private record ProctorOutcome(int eventId, boolean uploaded) {}
+    private record ProctorOutcome(com.examsystem.contracts.StudentProctorEventResponseDto response, boolean uploaded) {}
 
     private void renderCurrentQuestion() {
         if (questions.isEmpty()) return;
@@ -687,6 +724,7 @@ public class ExamTakingView {
         isSubmissionPending = false;
         cleanupListeners();
         setControlsDisabled(true);
+        if (stage != null) stage.setFullScreen(false);
         submitBtn.setText("Finalizing...");
 
         AsyncRunner.runAsync(

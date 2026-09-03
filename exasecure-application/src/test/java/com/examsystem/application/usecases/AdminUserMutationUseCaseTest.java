@@ -99,6 +99,12 @@ class AdminUserMutationUseCaseTest {
             return id == 41;
         }
 
+        @Override
+        public boolean reactivateUser(int id) {
+            calls++;
+            return id == 41;
+        }
+
         private void record(
                 String username,
                 String encodedPassword,

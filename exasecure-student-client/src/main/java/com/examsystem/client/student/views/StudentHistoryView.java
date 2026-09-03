@@ -64,7 +64,8 @@ public class StudentHistoryView {
         backBtn.setStyle("-fx-background-color: #334155; -fx-text-fill: white; -fx-background-radius: 6px; -fx-cursor: hand;");
         backBtn.setOnAction(e -> app.showDashboard());
 
-        topBar.getChildren().addAll(brand, spacer, backBtn);
+        var themeSelector = com.examsystem.client.theme.ThemeManager.getInstance().createThemeSelector();
+        topBar.getChildren().addAll(brand, spacer, themeSelector, backBtn);
         view.setTop(topBar);
 
         // Center Content
@@ -131,7 +132,29 @@ public class StudentHistoryView {
                 data.getValue().score() != null ? data.getValue().score() + " pts" : "Pending"));
         scoreCol.setPrefWidth(100);
 
-        table.getColumns().addAll(examCol, attemptCol, startCol, endCol, statusCol, scoreCol);
+        TableColumn<StudentAttemptHistoryDto, String> integrityCol = new TableColumn<>("Integrity Status");
+        integrityCol.setCellValueFactory(data -> new SimpleStringProperty(
+                data.getValue().flagged() ? "⚠️ FLAGGED FOR REVIEW" : "CLEAN"));
+        integrityCol.setPrefWidth(170);
+        integrityCol.setCellFactory(col -> new TableCell<>() {
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                if (empty || item == null) {
+                    setText(null);
+                    setStyle("");
+                } else {
+                    setText(item);
+                    if (item.contains("FLAGGED")) {
+                        setStyle("-fx-text-fill: #dc2626; -fx-font-weight: bold;");
+                    } else {
+                        setStyle("-fx-text-fill: #16a34a; -fx-font-weight: bold;");
+                    }
+                }
+            }
+        });
+
+        table.getColumns().addAll(examCol, attemptCol, startCol, endCol, statusCol, scoreCol, integrityCol);
     }
 
     private void loadHistory() {

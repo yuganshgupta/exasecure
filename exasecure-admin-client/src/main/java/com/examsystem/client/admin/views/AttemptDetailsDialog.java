@@ -54,8 +54,22 @@ public class AttemptDetailsDialog extends Dialog<Void> {
         Label statusBadge = new Label(attempt.status());
         statusBadge.setStyle("-fx-background-color: #dbeafe; -fx-text-fill: #1e40af; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;");
 
-        scoreBox.getChildren().addAll(scoreLabel, statusBadge);
+        Label violationsBadge = new Label("Violations: " + attempt.focusLostCount());
+        violationsBadge.setStyle("-fx-background-color: #f1f5f9; -fx-text-fill: #475569; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;");
+
+        Label integrityBadge = new Label(attempt.flagged() ? "⚠️ FLAGGED FOR REVIEW" : "CLEAN");
+        integrityBadge.setStyle(attempt.flagged()
+                ? "-fx-background-color: #fee2e2; -fx-text-fill: #991b1b; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;"
+                : "-fx-background-color: #dcfce7; -fx-text-fill: #15803d; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;");
+
+        scoreBox.getChildren().addAll(scoreLabel, statusBadge, violationsBadge, integrityBadge);
         summaryCard.getChildren().addAll(stuInfo, spacer, scoreBox);
+
+        setOnShowing(e -> {
+            if (pane.getScene() != null) {
+                com.examsystem.client.theme.ThemeManager.getInstance().applyTheme(pane.getScene());
+            }
+        });
 
         // Details Table
         TableView<AdminAttemptDetailDto> table = new TableView<>();

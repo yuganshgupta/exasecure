@@ -16,4 +16,11 @@ public interface ExamAttemptRepository {
         calculateAndSetScore(attemptId, focusLostCount, score, submittedAt);
         return score;
     }
+
+    default int incrementFocusLostCount(int attemptId) {
+        return 0;
+    }
+
+    default void flagAttempt(int attemptId) {
+    }
 }

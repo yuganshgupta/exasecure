@@ -808,6 +808,132 @@ class ServerIntegrationTest {
         assertAttemptSubmittedWithScore(lateAttemptId, 1);
     }
 
+    @Test
+    void adminCanReactivateDeactivatedUser() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // User 104 is seeded as inactive
+        assertDatabaseCount("SELECT COUNT(*) FROM users WHERE id = 104 AND is_active = 1", 0);
+
+        // Reactivate user 104
+        HttpResponse<String> reactivateRes = sendJson(
+                client, "POST", "/api/v1/admin/users/104/reactivate", "token-admin1", null);
+        assertThat(reactivateRes.statusCode()).isEqualTo(204);
+
+        // Verify active in DB
+        assertDatabaseCount("SELECT COUNT(*) FROM users WHERE id = 104 AND is_active = 1", 1);
+
+        // Deactivate user 104 again
+        HttpResponse<String> deactivateRes = sendJson(
+                client, "DELETE", "/api/v1/admin/users/104", "token-admin1", null);
+        assertThat(deactivateRes.statusCode()).isEqualTo(204);
+        assertDatabaseCount("SELECT COUNT(*) FROM users WHERE id = 104 AND is_active = 1", 0);
+    }
+
+    @Test
+    void adminCanReactivateDeactivatedExamDefinitionWithoutNewRevision() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // 1. Deactivate exam 2
+        HttpResponse<String> deactivateRes = sendJson(
+                client, "DELETE", "/api/v1/admin/exams/2", "token-admin1", null);
+        assertThat(deactivateRes.statusCode()).isEqualTo(204);
+
+        assertDatabaseCount("SELECT COUNT(*) FROM exams WHERE id = 2 AND is_active = 1", 0);
+
+        // Student available exams does not include exam 2
+        HttpResponse<String> listBefore = sendJson(
+                client, "GET", "/api/v1/student/exams", "token-stu1", null);
+        assertThat(listBefore.statusCode()).isEqualTo(200);
+        assertThat(listBefore.body()).doesNotContain("\"id\":2");
+
+        // 2. Reactivate exam 2
+        HttpResponse<String> reactivateRes = sendJson(
+                client, "POST", "/api/v1/admin/exams/2/reactivate", "token-admin1", null);
+        assertThat(reactivateRes.statusCode()).isEqualTo(204);
+
+        assertDatabaseCount("SELECT COUNT(*) FROM exams WHERE id = 2 AND is_active = 1", 1);
+        // Ensure no new revision was created (version remains unchanged and id remains 2)
+        assertDatabaseCount("SELECT COUNT(*) FROM exams WHERE id = 2 AND version_number = 1", 1);
+
+        // Student available exams now includes exam 2
+        HttpResponse<String> listAfter = sendJson(
+                client, "GET", "/api/v1/student/exams", "token-stu1", null);
+        assertThat(listAfter.statusCode()).isEqualTo(200);
+        assertThat(listAfter.body()).contains("\"id\":2");
+    }
+
+    @Test
+    void proctoringThreeViolationsAutoSubmitsAndFlagsAttemptWithRawScoreAndDeduplicatesRetries() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // Setup a dedicated active attempt
+        int attemptId = 295;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status, focus_lost_count, is_flagged, proctoring_status) "
+                             + "VALUES (?, 1, 101, NOW(), 'ACTIVE', 0, 0, 'CLEAN')")) {
+            ps.setInt(1, attemptId);
+            ps.executeUpdate();
+        }
+
+        // Save one correct answer for question 401 (option 1 is correct)
+        sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/answers", "token-stu1",
+                "{\"questionId\":401,\"selectedOptions\":[1]}");
+
+        // 1st violation
+        String clientEventId1 = java.util.UUID.randomUUID().toString();
+        HttpResponse<String> v1 = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events", "token-stu1",
+                "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + clientEventId1 + "\"}");
+        assertThat(v1.statusCode()).isEqualTo(200);
+        var json1 = new ObjectMapper().readTree(v1.body());
+        assertThat(json1.get("violationCount").asInt()).isEqualTo(1);
+        assertThat(json1.get("flagged").asBoolean()).isFalse();
+        assertThat(json1.get("attemptStatus").asText()).isEqualTo("ACTIVE");
+
+        // Retry of 1st violation with SAME clientEventId should be idempotent
+        HttpResponse<String> v1Retry = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events", "token-stu1",
+                "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + clientEventId1 + "\"}");
+        assertThat(v1Retry.statusCode()).isEqualTo(200);
+        var json1Retry = new ObjectMapper().readTree(v1Retry.body());
+        assertThat(json1Retry.get("violationCount").asInt()).isEqualTo(1); // Not incremented
+
+        // 2nd violation
+        String clientEventId2 = java.util.UUID.randomUUID().toString();
+        HttpResponse<String> v2 = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events", "token-stu1",
+                "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + clientEventId2 + "\"}");
+        assertThat(v2.statusCode()).isEqualTo(200);
+        var json2 = new ObjectMapper().readTree(v2.body());
+        assertThat(json2.get("violationCount").asInt()).isEqualTo(2);
+        assertThat(json2.get("flagged").asBoolean()).isFalse();
+        assertThat(json2.get("attemptStatus").asText()).isEqualTo("ACTIVE");
+
+        // 3rd violation -> AUTO SUBMISSION & FLAGGED
+        String clientEventId3 = java.util.UUID.randomUUID().toString();
+        HttpResponse<String> v3 = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events", "token-stu1",
+                "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + clientEventId3 + "\"}");
+        assertThat(v3.statusCode()).isEqualTo(200);
+        var json3 = new ObjectMapper().readTree(v3.body());
+        assertThat(json3.get("violationCount").asInt()).isEqualTo(3);
+        assertThat(json3.get("flagged").asBoolean()).isTrue();
+        assertThat(json3.get("attemptStatus").asText()).isEqualTo("SUBMITTED");
+
+        // Verify database state: status=SUBMITTED, is_flagged=1, proctoring_status=FLAGGED, raw score=1
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT status, score, focus_lost_count, is_flagged, proctoring_status FROM exam_attempts WHERE id = ?")) {
+            ps.setInt(1, attemptId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString("status")).isEqualTo("SUBMITTED");
+                assertThat(rs.getInt("score")).isEqualTo(1); // Truthful raw score preserved
+                assertThat(rs.getInt("focus_lost_count")).isEqualTo(3);
+                assertThat(rs.getBoolean("is_flagged")).isTrue();
+                assertThat(rs.getString("proctoring_status")).isEqualTo("FLAGGED");
+            }
+        }
+    }
+
     private static void assertDatabaseCount(String sql, int expected) throws Exception {
         try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              var statement = conn.createStatement();

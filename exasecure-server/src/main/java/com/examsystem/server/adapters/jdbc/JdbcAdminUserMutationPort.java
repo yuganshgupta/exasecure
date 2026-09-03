@@ -111,6 +111,18 @@ public class JdbcAdminUserMutationPort implements AdminUserMutationPort {
         }
     }
 
+    @Override
+    public boolean reactivateUser(int id) {
+        String sql = "UPDATE users SET is_active = 1 WHERE id = ? AND is_active = 0";
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, id);
+            return statement.executeUpdate() > 0;
+        } catch (SQLException exception) {
+            throw translate(exception);
+        }
+    }
+
     private static void bindUser(
             PreparedStatement statement,
             String username,

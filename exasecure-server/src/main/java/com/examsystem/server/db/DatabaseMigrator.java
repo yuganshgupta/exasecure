@@ -73,6 +73,12 @@ public class DatabaseMigrator {
                 log.info("Successfully migrated to v8");
                 currentVersion = 8;
             }
+            if (currentVersion < 9) {
+                log.info("Migrating schema to v9...");
+                executeScript(conn, "db/migration/schema-v9.sql");
+                log.info("Successfully migrated to v9");
+                currentVersion = 9;
+            }
         } catch (Exception e) {
             throw new RuntimeException("Database migration failed", e);
         }

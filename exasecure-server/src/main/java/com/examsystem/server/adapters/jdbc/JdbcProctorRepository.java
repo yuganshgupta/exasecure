@@ -18,19 +18,74 @@ public class JdbcProctorRepository implements ProctorRepository {
 
     @Override
     public int saveEvent(int attemptId, String eventType, Instant timestamp) {
+        return saveEvent(attemptId, eventType, timestamp, null);
+    }
+
+    @Override
+    public int saveEvent(int attemptId, String eventType, Instant timestamp, String clientEventId) {
+        if (clientEventId != null && !clientEventId.isBlank()) {
+            var existing = findEventByClientEventId(attemptId, clientEventId);
+            if (existing.isPresent()) {
+                return existing.get();
+            }
+        }
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("INSERT INTO proctor_events (attempt_id, event_type, recorded_at) VALUES (?, ?, ?)", java.sql.Statement.RETURN_GENERATED_KEYS)) {
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO proctor_events (attempt_id, event_type, recorded_at, client_event_id) VALUES (?, ?, ?, ?)",
+                     java.sql.Statement.RETURN_GENERATED_KEYS)) {
             ps.setInt(1, attemptId);
             ps.setString(2, eventType);
             ps.setTimestamp(3, Timestamp.from(timestamp));
+            ps.setString(4, clientEventId);
             ps.executeUpdate();
             try (ResultSet rs = ps.getGeneratedKeys()) {
                 if (rs.next()) return rs.getInt(1);
             }
             throw new RuntimeException("No ID generated for proctor_events");
         } catch (Exception e) {
+            if (clientEventId != null && !clientEventId.isBlank()) {
+                var existing = findEventByClientEventId(attemptId, clientEventId);
+                if (existing.isPresent()) {
+                    return existing.get();
+                }
+            }
+            // Fallback for older schemas where client_event_id column might not exist
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "INSERT INTO proctor_events (attempt_id, event_type, recorded_at) VALUES (?, ?, ?)",
+                         java.sql.Statement.RETURN_GENERATED_KEYS)) {
+                ps.setInt(1, attemptId);
+                ps.setString(2, eventType);
+                ps.setTimestamp(3, Timestamp.from(timestamp));
+                ps.executeUpdate();
+                try (ResultSet rs = ps.getGeneratedKeys()) {
+                    if (rs.next()) return rs.getInt(1);
+                }
+            } catch (Exception ex) {
+                throw new RuntimeException("DB error", ex);
+            }
             throw new RuntimeException("DB error", e);
         }
+    }
+
+    @Override
+    public java.util.Optional<Integer> findEventByClientEventId(int attemptId, String clientEventId) {
+        if (clientEventId == null || clientEventId.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT id FROM proctor_events WHERE attempt_id = ? AND client_event_id = ?")) {
+            ps.setInt(1, attemptId);
+            ps.setString(2, clientEventId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return java.util.Optional.of(rs.getInt("id"));
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return java.util.Optional.empty();
     }
 
     @Override

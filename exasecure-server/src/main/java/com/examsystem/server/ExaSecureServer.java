@@ -108,6 +108,7 @@ public class ExaSecureServer {
                         io.javalin.apibuilder.ApiBuilder.post("/users", adminController::createUser);
                         io.javalin.apibuilder.ApiBuilder.put("/users/{userId}", adminController::updateUser);
                         io.javalin.apibuilder.ApiBuilder.delete("/users/{userId}", adminController::deactivateUser);
+                        io.javalin.apibuilder.ApiBuilder.post("/users/{userId}/reactivate", adminController::reactivateUser);
                         io.javalin.apibuilder.ApiBuilder.get("/exams", adminController::listExams);
                         io.javalin.apibuilder.ApiBuilder.get("/exams/{examId}/questions", adminController::getExamQuestions);
                         io.javalin.apibuilder.ApiBuilder.post("/exams", adminController::createExamDefinition);
@@ -115,6 +116,8 @@ public class ExaSecureServer {
                                 "/exams/{examId}/revisions", adminController::reviseExamDefinition);
                         io.javalin.apibuilder.ApiBuilder.delete(
                                 "/exams/{examId}", adminController::deactivateExamDefinition);
+                        io.javalin.apibuilder.ApiBuilder.post(
+                                "/exams/{examId}/reactivate", adminController::reactivateExamDefinition);
                         io.javalin.apibuilder.ApiBuilder.get("/exams/{examId}/attempts", adminController::getAttemptHistory);
                         io.javalin.apibuilder.ApiBuilder.get("/exams/{examId}/statistics", adminController::getExamStatistics);
                         io.javalin.apibuilder.ApiBuilder.get("/attempts/{attemptId}/details", adminController::getAttemptDetails);

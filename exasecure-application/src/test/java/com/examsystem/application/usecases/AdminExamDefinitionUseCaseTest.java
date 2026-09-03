@@ -81,5 +81,11 @@ class AdminExamDefinitionUseCaseTest {
             calls++;
             return true;
         }
+
+        @Override
+        public boolean reactivateDefinition(int examId) {
+            calls++;
+            return true;
+        }
     }
 }

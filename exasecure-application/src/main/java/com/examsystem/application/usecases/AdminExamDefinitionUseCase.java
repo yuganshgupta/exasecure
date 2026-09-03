@@ -34,6 +34,11 @@ public class AdminExamDefinitionUseCase {
         return mutationPort.deactivateDefinition(examId);
     }
 
+    public boolean reactivateDefinition(int examId) {
+        requirePositive(examId, "Exam ID");
+        return mutationPort.reactivateDefinition(examId);
+    }
+
     private static AdminExamDefinitionCommand validate(AdminExamDefinitionCommand command) {
         if (command == null) {
             throw new IllegalArgumentException("Exam definition is required");

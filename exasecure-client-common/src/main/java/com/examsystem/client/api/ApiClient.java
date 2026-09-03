@@ -10,6 +10,7 @@ import com.examsystem.contracts.StudentAttemptHistoryDto;
 import com.examsystem.contracts.StudentExamDto;
 import com.examsystem.contracts.StudentQuestionDto;
 import com.examsystem.contracts.StudentSaveAnswerRequestDto;
+import com.examsystem.contracts.StudentProctorEventResponseDto;
 import com.examsystem.contracts.AdminAttemptDetailDto;
 import com.examsystem.contracts.AdminExamStatisticsDto;
 import com.examsystem.contracts.admin.*;
@@ -129,23 +130,29 @@ public class ApiClient {
         return get("/student/history", new TypeReference<List<StudentAttemptHistoryDto>>() {});
     }
 
-    public int recordProctorEvent(int attemptId, String eventType) {
-        String body = "eventType=" + URLEncoder.encode(eventType, StandardCharsets.UTF_8);
+    public StudentProctorEventResponseDto recordProctorEvent(int attemptId, String eventType, String clientEventId) {
+        StringBuilder body = new StringBuilder("eventType=").append(URLEncoder.encode(eventType, StandardCharsets.UTF_8));
+        if (clientEventId != null && !clientEventId.isBlank()) {
+            body.append("&clientEventId=").append(URLEncoder.encode(clientEventId, StandardCharsets.UTF_8));
+        }
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(config.apiV1Url() + "/student/attempts/" + attemptId + "/events"))
                 .timeout(Duration.ofSeconds(10))
                 .header("Content-Type", "application/x-www-form-urlencoded");
         attachAuth(builder);
-        builder.POST(HttpRequest.BodyPublishers.ofString(body));
+        builder.POST(HttpRequest.BodyPublishers.ofString(body.toString()));
 
         HttpResponse<String> response = send(builder.build());
         handleErrorStatus(response);
         try {
-            JsonNode tree = mapper.readTree(response.body());
-            return tree.path("eventId").asInt();
+            return mapper.readValue(response.body(), StudentProctorEventResponseDto.class);
         } catch (IOException e) {
-            throw new ApiException("Failed to parse eventId response", e);
+            throw new ApiException("Failed to parse event response", e);
         }
+    }
+
+    public StudentProctorEventResponseDto recordProctorEvent(int attemptId, String eventType) {
+        return recordProctorEvent(attemptId, eventType, null);
     }
 
     public void uploadProctorEvidence(int attemptId, int eventId, byte[] screenshotBytes, String contentType) {
@@ -184,6 +191,10 @@ public class ApiClient {
         deleteVoid("/admin/users/" + userId);
     }
 
+    public void adminReactivateUser(int userId) {
+        postEmpty("/admin/users/" + userId + "/reactivate", true);
+    }
+
     public List<AdminExamDto> adminListExams() {
         return get("/admin/exams", new TypeReference<List<AdminExamDto>>() {});
     }
@@ -202,6 +213,10 @@ public class ApiClient {
 
     public void adminDeactivateExam(int examId) {
         deleteVoid("/admin/exams/" + examId);
+    }
+
+    public void adminReactivateExam(int examId) {
+        postEmpty("/admin/exams/" + examId + "/reactivate", true);
     }
 
     public List<AdminAttemptDto> adminGetAttemptHistory(int examId) {

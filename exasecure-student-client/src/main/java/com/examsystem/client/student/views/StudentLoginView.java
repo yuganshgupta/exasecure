@@ -34,10 +34,11 @@ public class StudentLoginView {
         view.setStyle("-fx-background-color: #f1f5f9;");
 
         VBox card = new VBox(16);
+        card.getStyleClass().add("theme-card");
         card.setMaxWidth(420);
         card.setPadding(new Insets(36));
         card.setAlignment(Pos.CENTER);
-        card.setStyle("-fx-background-color: white; -fx-background-radius: 12px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.08), 16, 0, 0, 4);");
+        card.setStyle("-fx-background-radius: 12px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.08), 16, 0, 0, 4);");
 
         Label badge = new Label("STUDENT PORTAL");
         badge.setStyle("-fx-background-color: #e0e7ff; -fx-text-fill: #3730a3; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 4 10 4 10; -fx-background-radius: 12px;");
@@ -142,6 +143,11 @@ public class StudentLoginView {
 
         form.getChildren().addAll(userLabel, usernameField, passLabel, passwordField, errorLabel, loginBtn);
         card.getChildren().addAll(badge, title, subtitle, serverInfoBox, form, spinner);
-        view.getChildren().add(card);
+
+        var themeSelector = com.examsystem.client.theme.ThemeManager.getInstance().createThemeSelector();
+        StackPane.setAlignment(themeSelector, Pos.TOP_RIGHT);
+        StackPane.setMargin(themeSelector, new Insets(16));
+
+        view.getChildren().addAll(card, themeSelector);
     }
 }

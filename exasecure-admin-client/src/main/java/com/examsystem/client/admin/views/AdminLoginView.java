@@ -35,10 +35,11 @@ public class AdminLoginView {
         view.setStyle("-fx-background-color: #0f172a;");
 
         VBox card = new VBox(16);
+        card.getStyleClass().add("theme-card");
         card.setMaxWidth(420);
         card.setPadding(new Insets(36));
         card.setAlignment(Pos.CENTER);
-        card.setStyle("-fx-background-color: #1e293b; -fx-background-radius: 12px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.3), 20, 0, 0, 6);");
+        card.setStyle("-fx-background-radius: 12px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.3), 20, 0, 0, 6);");
 
         Label badge = new Label("ADMINISTRATIVE CONSOLE");
         badge.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 4 10 4 10; -fx-background-radius: 12px;");
@@ -140,6 +141,11 @@ public class AdminLoginView {
 
         form.getChildren().addAll(userLabel, usernameField, passLabel, passwordField, errorLabel, loginBtn);
         card.getChildren().addAll(badge, title, subtitle, serverLabel, form, spinner);
-        view.getChildren().add(card);
+
+        var themeSelector = com.examsystem.client.theme.ThemeManager.getInstance().createThemeSelector();
+        StackPane.setAlignment(themeSelector, Pos.TOP_RIGHT);
+        StackPane.setMargin(themeSelector, new Insets(16));
+
+        view.getChildren().addAll(card, themeSelector);
     }
 }

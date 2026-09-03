@@ -10,6 +10,7 @@ import com.examsystem.application.usecases.StartExamUseCase;
 import com.examsystem.application.usecases.SubmitExamUseCase;
 import com.examsystem.contracts.StudentExamDto;
 import com.examsystem.contracts.StudentOptionDto;
+import com.examsystem.contracts.StudentProctorEventResponseDto;
 import com.examsystem.contracts.StudentQuestionDto;
 import com.examsystem.contracts.StudentSaveAnswerRequestDto;
 import com.examsystem.domain.models.Exam;
@@ -154,10 +155,71 @@ public class StudentExamController {
     public void recordEvent(Context ctx) {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
         enforceOwnership(ctx, attemptId);
-        String eventType = ctx.formParam("eventType");
-        if (eventType == null) throw new BadRequestResponse("Missing eventType");
-        int eventId = proctorRepository.saveEvent(attemptId, eventType, java.time.Instant.now());
-        ctx.json(java.util.Map.of("eventId", eventId));
+
+        String eventType = null;
+        String clientEventId = null;
+
+        String ct = ctx.contentType();
+        if (ct != null && ct.toLowerCase(java.util.Locale.ROOT).contains("application/json")) {
+            try {
+                com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(ctx.body());
+                if (node.has("eventType")) eventType = node.get("eventType").asText();
+                if (node.has("clientEventId")) clientEventId = node.get("clientEventId").asText();
+            } catch (Exception ignored) {}
+        }
+        if (eventType == null) {
+            eventType = ctx.formParam("eventType");
+        }
+        if (clientEventId == null) {
+            clientEventId = ctx.formParam("clientEventId");
+        }
+
+        if (eventType == null || eventType.isBlank()) {
+            throw new BadRequestResponse("Missing eventType");
+        }
+
+        ExamAttempt attempt = attemptRepository.findById(attemptId)
+                .orElseThrow(() -> new NotFoundResponse("Attempt not found"));
+
+        // Idempotency check: if clientEventId was provided and already exists, return existing status
+        if (clientEventId != null && !clientEventId.isBlank()) {
+            var existing = proctorRepository.findEventByClientEventId(attemptId, clientEventId);
+            if (existing.isPresent()) {
+                ctx.json(new StudentProctorEventResponseDto(
+                        existing.get(),
+                        attempt.focusLostCount(),
+                        attempt.flagged(),
+                        attempt.finalized() ? "SUBMITTED" : "ACTIVE"
+                ));
+                return;
+            }
+        }
+
+        // Save event
+        int eventId = proctorRepository.saveEvent(attemptId, eventType, java.time.Instant.now(), clientEventId);
+
+        // Increment violation count on attempt
+        int newCount = attemptRepository.incrementFocusLostCount(attemptId);
+        ExamAttempt updated = attemptRepository.findById(attemptId).orElse(attempt);
+        if (newCount == 0) {
+            newCount = updated.focusLostCount();
+        }
+
+        boolean flagged = updated.flagged() || newCount >= 3;
+        String status = updated.finalized() ? "SUBMITTED" : "ACTIVE";
+
+        if (newCount >= 3 && !updated.finalized()) {
+            // Auto submit attempt and flag
+            try {
+                submitUseCase.submitExam(attemptId, java.time.Instant.now());
+                status = "SUBMITTED";
+            } catch (Exception ignored) {
+            }
+            attemptRepository.flagAttempt(attemptId);
+            flagged = true;
+        }
+
+        ctx.json(new StudentProctorEventResponseDto(eventId, newCount, flagged, status));
     }
 
     public void uploadEvidence(Context ctx) {

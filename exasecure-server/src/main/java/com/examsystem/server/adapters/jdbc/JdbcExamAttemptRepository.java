@@ -22,13 +22,16 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
     public Optional<ExamAttempt> findById(int attemptId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "SELECT id, exam_id, student_id, start_time, end_time, score, status FROM exam_attempts WHERE id = ?")) {
+                     "SELECT id, exam_id, student_id, start_time, end_time, score, status, focus_lost_count, is_flagged, proctoring_status FROM exam_attempts WHERE id = ?")) {
             ps.setInt(1, attemptId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
                     boolean finalized = "SUBMITTED".equals(rs.getString("status")) || "EXPIRED".equals(rs.getString("status"));
                     Timestamp endTs = rs.getTimestamp("end_time");
                     Integer score = rs.getObject("score") != null ? rs.getInt("score") : null;
+                    int focusLostCount = rs.getInt("focus_lost_count");
+                    boolean flagged = rs.getBoolean("is_flagged");
+                    String proctoringStatus = rs.getString("proctoring_status");
                     return Optional.of(new ExamAttempt(
                             rs.getInt("id"),
                             rs.getInt("exam_id"),
@@ -36,14 +39,70 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
                             rs.getTimestamp("start_time").toInstant(),
                             endTs != null ? endTs.toInstant() : null,
                             score,
-                            finalized
+                            finalized,
+                            focusLostCount,
+                            flagged,
+                            proctoringStatus
                     ));
                 }
             }
         } catch (Exception e) {
+            // Fallback for earlier schema if is_flagged column not yet created
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "SELECT id, exam_id, student_id, start_time, end_time, score, status, focus_lost_count FROM exam_attempts WHERE id = ?")) {
+                ps.setInt(1, attemptId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        boolean finalized = "SUBMITTED".equals(rs.getString("status")) || "EXPIRED".equals(rs.getString("status"));
+                        Timestamp endTs = rs.getTimestamp("end_time");
+                        Integer score = rs.getObject("score") != null ? rs.getInt("score") : null;
+                        int focusLostCount = rs.getInt("focus_lost_count");
+                        return Optional.of(new ExamAttempt(
+                                rs.getInt("id"),
+                                rs.getInt("exam_id"),
+                                rs.getInt("student_id"),
+                                rs.getTimestamp("start_time").toInstant(),
+                                endTs != null ? endTs.toInstant() : null,
+                                score,
+                                finalized,
+                                focusLostCount,
+                                false,
+                                "CLEAN"
+                        ));
+                    }
+                }
+            } catch (Exception ex) {
+                throw new RuntimeException("DB error", ex);
+            }
             throw new RuntimeException("DB error", e);
         }
         return Optional.empty();
+    }
+
+    @Override
+    public int incrementFocusLostCount(int attemptId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE exam_attempts SET focus_lost_count = focus_lost_count + 1 WHERE id = ?")) {
+            ps.setInt(1, attemptId);
+            ps.executeUpdate();
+        } catch (Exception e) {
+            throw new RuntimeException("DB error", e);
+        }
+        return findById(attemptId).map(ExamAttempt::focusLostCount).orElse(0);
+    }
+
+    @Override
+    public void flagAttempt(int attemptId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE exam_attempts SET is_flagged = 1, proctoring_status = 'FLAGGED' WHERE id = ?")) {
+            ps.setInt(1, attemptId);
+            ps.executeUpdate();
+        } catch (Exception e) {
+            throw new RuntimeException("DB error", e);
+        }
     }
 
     @Override

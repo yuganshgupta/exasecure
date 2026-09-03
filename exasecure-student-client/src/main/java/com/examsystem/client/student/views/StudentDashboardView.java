@@ -79,7 +79,8 @@ public class StudentDashboardView {
             app.showLogin();
         });
 
-        topBar.getChildren().addAll(brand, portalBadge, spacer, userLabel, historyBtn, logoutBtn);
+        var themeSelector = com.examsystem.client.theme.ThemeManager.getInstance().createThemeSelector();
+        topBar.getChildren().addAll(brand, portalBadge, spacer, themeSelector, userLabel, historyBtn, logoutBtn);
         view.setTop(topBar);
 
         // Center Content Area
@@ -153,14 +154,15 @@ public class StudentDashboardView {
 
     private HBox createExamCard(StudentExamDto exam) {
         HBox card = new HBox(20);
+        card.getStyleClass().add("theme-card");
         card.setPadding(new Insets(18, 24, 18, 24));
         card.setAlignment(Pos.CENTER_LEFT);
-        card.setStyle("-fx-background-color: white; -fx-background-radius: 8px; -fx-border-color: #e2e8f0; -fx-border-radius: 8px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.03), 8, 0, 0, 2);");
+        card.setStyle("-fx-background-radius: 8px; -fx-border-radius: 8px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.03), 8, 0, 0, 2);");
 
         VBox info = new VBox(6);
         Label title = new Label(exam.title());
+        title.getStyleClass().add("theme-label-bold");
         title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 16));
-        title.setStyle("-fx-text-fill: #1e293b;");
 
         HBox meta = new HBox(12);
         Label durationBadge = new Label("Duration: " + exam.durationMinutes() + " mins");

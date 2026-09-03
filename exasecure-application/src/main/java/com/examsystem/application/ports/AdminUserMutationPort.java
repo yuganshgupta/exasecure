@@ -21,4 +21,6 @@ public interface AdminUserMutationPort {
             User.Role role);
 
     boolean deactivateUser(int id);
+
+    boolean reactivateUser(int id);
 }
