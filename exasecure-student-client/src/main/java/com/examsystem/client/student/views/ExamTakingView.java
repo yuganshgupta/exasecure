@@ -20,9 +20,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
@@ -164,7 +161,7 @@ public class ExamTakingView {
     }
 
     private void buildUI() {
-        view.setStyle("-fx-background-color: #f8fafc;");
+        view.getStyleClass().add("app-root");
 
         // Top Header
         VBox topContainer = new VBox();
@@ -172,15 +169,14 @@ public class ExamTakingView {
         HBox topBar = new HBox(16);
         topBar.setPadding(new Insets(12, 24, 12, 24));
         topBar.setAlignment(Pos.CENTER_LEFT);
-        topBar.setStyle("-fx-background-color: #1e293b;");
+        topBar.getStyleClass().add("app-header");
 
         VBox titleBox = new VBox(2);
         Label examTitle = new Label(exam.title());
-        examTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 17));
-        examTitle.setStyle("-fx-text-fill: white;");
+        examTitle.getStyleClass().add("header-title");
 
-        Label attemptBadge = new Label("Attempt #" + attempt.id() + " • Monitored Session");
-        attemptBadge.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 11px;");
+        Label attemptBadge = new Label("Monitored examination session");
+        attemptBadge.getStyleClass().addAll("header-meta", "small-text");
         titleBox.getChildren().addAll(examTitle, attemptBadge);
 
         Region spacer = new Region();
@@ -189,17 +185,15 @@ public class ExamTakingView {
         // Authoritative Timer Display
         HBox timerBox = new HBox(8);
         timerBox.setAlignment(Pos.CENTER);
-        timerBox.setStyle("-fx-background-color: #0f172a; -fx-padding: 6 14; -fx-background-radius: 6px; -fx-border-color: #334155; -fx-border-radius: 6px;");
+        timerBox.getStyleClass().add("timer-panel");
 
         Label timerIcon = new Label("⏱");
-        timerIcon.setStyle("-fx-text-fill: #38bdf8; -fx-font-size: 16px;");
+        timerIcon.getStyleClass().add("timer-normal");
 
-        timerLabel.setFont(Font.font("Monospaced", FontWeight.BOLD, 16));
-        timerLabel.setStyle("-fx-text-fill: #38bdf8;");
+        timerLabel.getStyleClass().addAll("timer-value", "timer-normal");
         timerBox.getChildren().addAll(timerIcon, timerLabel);
 
-        submitBtn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
-        submitBtn.setStyle("-fx-background-color: #16a34a; -fx-text-fill: white; -fx-background-radius: 6px; -fx-padding: 8 16; -fx-cursor: hand;");
+        submitBtn.getStyleClass().add("btn-success");
         submitBtn.setOnAction(e -> confirmAndSubmitExam());
 
         topBar.getChildren().addAll(titleBox, spacer, timerBox, submitBtn);
@@ -210,33 +204,32 @@ public class ExamTakingView {
         proctorNoticeBanner.setMaxWidth(Double.MAX_VALUE);
         proctorNoticeBanner.setAlignment(Pos.CENTER);
         proctorNoticeBanner.setPadding(new Insets(8));
-        proctorNoticeBanner.setStyle("-fx-background-color: #fef2f2; -fx-text-fill: #b91c1c; -fx-font-weight: bold; -fx-font-size: 12px; -fx-border-color: #fecaca;");
+        proctorNoticeBanner.getStyleClass().addAll("violation-banner", "violation-warning");
 
         topContainer.getChildren().addAll(topBar, proctorNoticeBanner);
         view.setTop(topContainer);
 
         // Center: Question Content Card
         VBox card = new VBox(20);
-        card.setPadding(new Insets(28));
-        card.setMaxWidth(760);
-        card.getStyleClass().add("theme-card");
+        card.setMaxWidth(900);
+        card.getStyleClass().addAll("theme-card", "question-card");
 
         HBox questionHeader = new HBox(12);
         questionHeader.setAlignment(Pos.CENTER_LEFT);
 
-        questionNumberLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 16));
-        questionNumberLabel.setStyle("-fx-text-fill: #0f172a;");
+        questionNumberLabel.getStyleClass().add("question-number");
 
-        questionTypeBadge.setStyle("-fx-background-color: #e0f2fe; -fx-text-fill: #0369a1; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 3 8; -fx-background-radius: 4px;");
+        questionTypeBadge.getStyleClass().add("question-type");
 
         Region qSpacer = new Region();
         HBox.setHgrow(qSpacer, Priority.ALWAYS);
 
-        autosaveStatusLabel.setStyle("-fx-font-size: 12px; -fx-text-fill: #64748b;");
+        autosaveStatusLabel.getStyleClass().addAll("secondary-text", "small-text");
 
         retryAutosaveBtn.setVisible(false);
         retryAutosaveBtn.setManaged(false);
-        retryAutosaveBtn.setStyle("-fx-background-color: #fee2e2; -fx-text-fill: #b91c1c; -fx-font-size: 11px; -fx-padding: 2 8; -fx-background-radius: 4px; -fx-cursor: hand;");
+        retryAutosaveBtn.setText("Retry Save");
+        retryAutosaveBtn.getStyleClass().add("btn-danger");
         retryAutosaveBtn.setOnAction(e -> {
             if (questions.isEmpty()) return;
             StudentQuestionDto q = questions.get(currentIndex);
@@ -245,8 +238,7 @@ public class ExamTakingView {
 
         questionHeader.getChildren().addAll(questionNumberLabel, questionTypeBadge, qSpacer, autosaveStatusLabel, retryAutosaveBtn);
 
-        questionTextLabel.setFont(Font.font("Segoe UI", FontWeight.NORMAL, 16));
-        questionTextLabel.setStyle("-fx-text-fill: #1e293b; -fx-line-spacing: 4px;");
+        questionTextLabel.getStyleClass().add("question-text");
         questionTextLabel.setWrapText(true);
 
         optionsBox.setPadding(new Insets(10, 0, 10, 0));
@@ -255,7 +247,7 @@ public class ExamTakingView {
         HBox navBar = new HBox(12);
         navBar.setAlignment(Pos.CENTER_LEFT);
 
-        prevBtn.setStyle("-fx-background-color: #f1f5f9; -fx-text-fill: #334155; -fx-background-radius: 6px; -fx-padding: 8 16; -fx-cursor: hand;");
+        prevBtn.getStyleClass().add("btn-secondary");
         prevBtn.setOnAction(e -> {
             if (currentIndex > 0) {
                 currentIndex--;
@@ -264,16 +256,17 @@ public class ExamTakingView {
             }
         });
 
-        clearBtn.setStyle("-fx-background-color: white; -fx-border-color: #cbd5e1; -fx-text-fill: #64748b; -fx-background-radius: 6px; -fx-border-radius: 6px; -fx-padding: 8 12; -fx-cursor: hand;");
+        clearBtn.getStyleClass().add("btn-secondary");
         clearBtn.setOnAction(e -> clearCurrentAnswer());
 
-        flagBtn.setStyle("-fx-background-color: white; -fx-border-color: #8b5cf6; -fx-text-fill: #7c3aed; -fx-background-radius: 6px; -fx-border-radius: 6px; -fx-padding: 8 12; -fx-cursor: hand; -fx-font-weight: bold;");
+        flagBtn.setText("Flag for Review");
+        flagBtn.getStyleClass().add("btn-flag");
         flagBtn.setOnAction(e -> toggleCurrentFlag());
 
         Region navSpacer = new Region();
         HBox.setHgrow(navSpacer, Priority.ALWAYS);
 
-        nextBtn.setStyle("-fx-background-color: #2563eb; -fx-text-fill: white; -fx-background-radius: 6px; -fx-padding: 8 18; -fx-cursor: hand; -fx-font-weight: bold;");
+        nextBtn.getStyleClass().add("btn-primary");
         nextBtn.setOnAction(e -> {
             if (currentIndex < questions.size() - 1) {
                 currentIndex++;
@@ -288,7 +281,7 @@ public class ExamTakingView {
 
         ScrollPane centerScroll = new ScrollPane(card);
         centerScroll.setFitToWidth(true);
-        centerScroll.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-border-color: transparent; -fx-padding: 24;");
+        centerScroll.setPadding(new Insets(24));
         view.setCenter(centerScroll);
 
         // Right Sidebar: Question Palette
@@ -298,24 +291,23 @@ public class ExamTakingView {
         rightSidebar.getStyleClass().add("theme-card");
 
         Label paletteTitle = new Label("Question Navigator");
-        paletteTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 15));
-        paletteTitle.setStyle("-fx-text-fill: #0f172a;");
+        paletteTitle.getStyleClass().add("section-title");
 
-        answeredSummaryLabel.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
+        answeredSummaryLabel.getStyleClass().addAll("secondary-text", "small-text");
 
         palettePane.setHgap(8);
         palettePane.setVgap(8);
 
         VBox legend = new VBox(6);
-        Label greenDot = new Label("● Answered");
-        greenDot.setStyle("-fx-text-fill: #16a34a; -fx-font-size: 11px;");
-        Label purpleDot = new Label("● Flagged for Review");
-        purpleDot.setStyle("-fx-text-fill: #8b5cf6; -fx-font-size: 11px;");
-        Label redDot = new Label("● Save Failed (Click to retry)");
-        redDot.setStyle("-fx-text-fill: #dc2626; -fx-font-size: 11px;");
-        Label grayDot = new Label("○ Unanswered");
-        grayDot.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
-        legend.getChildren().addAll(greenDot, purpleDot, redDot, grayDot);
+        Label currentKey = new Label("▣ Current");
+        Label answeredKey = new Label("✓ Answered");
+        Label flaggedKey = new Label("⚑ Flagged for review");
+        Label failedKey = new Label("! Save failed");
+        Label unansweredKey = new Label("○ Unanswered");
+        for (Label key : List.of(currentKey, answeredKey, flaggedKey, failedKey, unansweredKey)) {
+            key.getStyleClass().addAll("secondary-text", "small-text");
+        }
+        legend.getChildren().addAll(currentKey, answeredKey, flaggedKey, failedKey, unansweredKey);
 
         rightSidebar.getChildren().addAll(paletteTitle, answeredSummaryLabel, palettePane, legend);
         view.setRight(rightSidebar);
@@ -337,12 +329,13 @@ public class ExamTakingView {
     private void updateTimerDisplay() {
         long remaining = examTimer.getRemainingSeconds();
         timerLabel.setText(ExamTimer.formatRemainingTime(remaining));
+        timerLabel.getStyleClass().removeAll("timer-normal", "timer-warning", "timer-danger");
         if (remaining <= 60) {
-            timerLabel.setStyle("-fx-text-fill: #ef4444;");
+            timerLabel.getStyleClass().add("timer-danger");
         } else if (remaining <= 300) {
-            timerLabel.setStyle("-fx-text-fill: #f59e0b;");
+            timerLabel.getStyleClass().add("timer-warning");
         } else {
-            timerLabel.setStyle("-fx-text-fill: #38bdf8;");
+            timerLabel.getStyleClass().add("timer-normal");
         }
     }
 
@@ -385,7 +378,7 @@ public class ExamTakingView {
         if (now - lastProctorEventTime < 3000) return; // Debounce
         lastProctorEventTime = now;
 
-        proctorNoticeBanner.setText("⚠️ Warning: Window focus lost. Recording proctoring incident...");
+        setViolationBanner("violation-warning", "Window focus lost. Recording proctoring incident...");
         proctorNoticeBanner.setVisible(true);
         proctorNoticeBanner.setManaged(true);
 
@@ -417,48 +410,48 @@ public class ExamTakingView {
                         setControlsDisabled(true);
                         if (stage != null) stage.setFullScreen(false);
 
-                        proctorNoticeBanner.setText("🚨 EXAM TERMINATED: 3 proctoring violations reached. Exam has been auto-submitted and flagged for review.");
-                        proctorNoticeBanner.setStyle("-fx-background-color: #fee2e2; -fx-text-fill: #991b1b; -fx-font-weight: bold; -fx-padding: 10 16; -fx-background-radius: 6px;");
+                        setViolationBanner("violation-danger",
+                                "Violation 3 of 3 — Examination terminated. Attempt flagged for administrative review.");
 
                         isDialogActive = true;
                         try {
                             UiFeedback.showModalError(stage, "Exam Terminated",
-                                    "You have accumulated 3 proctoring violations (window focus lost).\n\n"
-                                            + "Your exam has been automatically submitted and flagged for academic review.\n"
-                                            + "Your truthful raw score has been preserved for administrative evaluation.");
+                                    "The examination was terminated after three focus-loss incidents.\n\n"
+                                            + "Your attempt was submitted and flagged for administrative review.");
                         } finally {
                             isDialogActive = false;
                         }
                         app.showHistory();
                     } else if (count == 2) {
-                        proctorNoticeBanner.setText("⚠️ FINAL WARNING (2/3 Violations): Another focus loss will automatically terminate and flag your exam!");
-                        proctorNoticeBanner.setStyle("-fx-background-color: #fef3c7; -fx-text-fill: #92400e; -fx-font-weight: bold; -fx-padding: 10 16; -fx-background-radius: 6px;");
+                        setViolationBanner("violation-warning",
+                                "Violation 2 of 3 — Repeated focus loss. One more violation will terminate the examination.");
 
                         isDialogActive = true;
                         try {
                             UiFeedback.showModalWarning(stage, "Proctoring Final Warning",
-                                    "You have lost window focus a second time (2/3 violations).\n\n"
-                                            + "WARNING: A 3rd violation will result in immediate termination and flagging of your exam.");
+                                    "Repeated focus loss was recorded.\n\n"
+                                            + "One more violation will terminate the examination.");
                         } finally {
                             isDialogActive = false;
                         }
                     } else {
-                        proctorNoticeBanner.setText("⚠️ Warning (1/3 Violations): Window focus lost. Incident recorded"
-                                + (outcome.uploaded() ? " with screenshot evidence." : "."));
-                        proctorNoticeBanner.setStyle("-fx-background-color: #fef3c7; -fx-text-fill: #92400e; -fx-font-weight: bold; -fx-padding: 10 16; -fx-background-radius: 6px;");
+                        setViolationBanner("violation-warning",
+                                "Violation 1 of 3 — Window focus lost. Incident recorded."
+                                        + (outcome.uploaded() ? " Evidence attached." : ""));
 
                         isDialogActive = true;
                         try {
                             UiFeedback.showModalWarning(stage, "Proctoring Warning",
-                                    "Window focus lost (1/3 violations).\n\n"
-                                            + "Please remain focused on the exam window. Accumulating 3 violations will automatically terminate your attempt.");
+                                    "Window focus was lost and the incident was recorded.\n\n"
+                                            + "Please remain in the examination window.");
                         } finally {
                             isDialogActive = false;
                         }
                     }
                 },
                 (Throwable err) -> {
-                    proctorNoticeBanner.setText("⚠️ Warning: Window focus lost. Failed to report incident to server: " + err.getMessage());
+                    setViolationBanner("violation-danger",
+                            "Window focus lost. The incident could not be sent; verify the server connection.");
                 }
         );
     }
@@ -473,20 +466,20 @@ public class ExamTakingView {
 
         boolean isMulti = "MULTI".equalsIgnoreCase(q.type());
         questionTypeBadge.setText(isMulti ? "MULTIPLE CHOICE (Select all that apply)" : "SINGLE CHOICE (Select one)");
-        questionTypeBadge.setStyle(isMulti
-                ? "-fx-background-color: #fdf4ff; -fx-text-fill: #a21caf; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 3 8; -fx-background-radius: 4px;"
-                : "-fx-background-color: #e0f2fe; -fx-text-fill: #0369a1; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 3 8; -fx-background-radius: 4px;");
+        questionTypeBadge.getStyleClass().remove("question-type-multi");
+        if (isMulti) questionTypeBadge.getStyleClass().add("question-type-multi");
 
         questionTextLabel.setText(q.text());
 
         // Update Flag button state
         boolean isFlagged = flaggedQuestions.contains(q.id());
+        flagBtn.getStyleClass().removeAll("btn-flag", "btn-flag-selected");
         if (isFlagged) {
-            flagBtn.setText("🏳️ Unflag");
-            flagBtn.setStyle("-fx-background-color: #8b5cf6; -fx-text-fill: white; -fx-background-radius: 6px; -fx-padding: 8 12; -fx-cursor: hand; -fx-font-weight: bold;");
+            flagBtn.setText("Remove Review Flag");
+            flagBtn.getStyleClass().add("btn-flag-selected");
         } else {
-            flagBtn.setText("🚩 Flag for Review");
-            flagBtn.setStyle("-fx-background-color: white; -fx-border-color: #8b5cf6; -fx-text-fill: #7c3aed; -fx-background-radius: 6px; -fx-border-radius: 6px; -fx-padding: 8 12; -fx-cursor: hand; -fx-font-weight: bold;");
+            flagBtn.setText("Flag for Review");
+            flagBtn.getStyleClass().add("btn-flag");
         }
 
         prevBtn.setDisable(currentIndex == 0 || isSubmitted || isSubmissionPending);
@@ -501,12 +494,15 @@ public class ExamTakingView {
         for (StudentOptionDto opt : q.options()) {
             HBox optRow = new HBox(10);
             optRow.setAlignment(Pos.CENTER_LEFT);
-            optRow.setPadding(new Insets(10, 14, 10, 14));
-            optRow.setStyle("-fx-background-color: #f8fafc; -fx-background-radius: 6px; -fx-border-color: #e2e8f0; -fx-border-radius: 6px;");
+            optRow.getStyleClass().add("option-row");
+            optRow.setMaxWidth(Double.MAX_VALUE);
 
             if (isMulti) {
                 CheckBox cb = new CheckBox(opt.optionNumber() + ". " + opt.text());
-                cb.setFont(Font.font("Segoe UI", 14));
+                cb.getStyleClass().add("option-control");
+                cb.setWrapText(true);
+                cb.setMaxWidth(Double.MAX_VALUE);
+                HBox.setHgrow(cb, Priority.ALWAYS);
                 cb.setSelected(selectedOptions.contains(opt.optionNumber()));
                 cb.setDisable(isSubmitted || isSubmissionPending);
                 cb.selectedProperty().addListener((obs, oldVal, newVal) -> {
@@ -521,7 +517,10 @@ public class ExamTakingView {
                 optRow.getChildren().add(cb);
             } else {
                 RadioButton rb = new RadioButton(opt.optionNumber() + ". " + opt.text());
-                rb.setFont(Font.font("Segoe UI", 14));
+                rb.getStyleClass().add("option-control");
+                rb.setWrapText(true);
+                rb.setMaxWidth(Double.MAX_VALUE);
+                HBox.setHgrow(rb, Priority.ALWAYS);
                 rb.setToggleGroup(singleGroup);
                 rb.setSelected(selectedOptions.contains(opt.optionNumber()));
                 rb.setDisable(isSubmitted || isSubmissionPending);
@@ -583,21 +582,22 @@ public class ExamTakingView {
             return;
         }
 
+        autosaveStatusLabel.getStyleClass().removeAll("secondary-text", "status-error", "status-warning", "status-success");
         if (state.failed()) {
             autosaveStatusLabel.setText("✗ Autosave failed: " + (state.lastError() != null ? state.lastError() : "unknown error"));
-            autosaveStatusLabel.setTextFill(Color.web("#dc2626"));
+            autosaveStatusLabel.getStyleClass().add("status-error");
             retryAutosaveBtn.setVisible(true);
             retryAutosaveBtn.setManaged(true);
             retryAutosaveBtn.setDisable(isSubmitted || isSubmissionPending);
         } else if (state.inFlight()) {
             autosaveStatusLabel.setText("Saving answer...");
-            autosaveStatusLabel.setTextFill(Color.web("#d97706"));
+            autosaveStatusLabel.getStyleClass().add("status-warning");
             retryAutosaveBtn.setVisible(false);
             retryAutosaveBtn.setManaged(false);
         } else if (state.acknowledged() != null) {
             String time = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm:ss"));
             autosaveStatusLabel.setText("✓ Saved (" + time + ")");
-            autosaveStatusLabel.setTextFill(Color.web("#16a34a"));
+            autosaveStatusLabel.getStyleClass().add("status-success");
             retryAutosaveBtn.setVisible(false);
             retryAutosaveBtn.setManaged(false);
         } else {
@@ -623,10 +623,13 @@ public class ExamTakingView {
             if (answered) answeredCount++;
             if (flagged) flaggedCount++;
 
-            Button pBtn = new Button(String.valueOf(i + 1));
-            pBtn.setPrefSize(38, 38);
-            pBtn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
+            String marker = failed ? "!" : flagged ? "F" : answered ? "✓" : "";
+            Button pBtn = new Button((i + 1) + marker);
+            pBtn.getStyleClass().add("navigator-button");
             pBtn.setDisable(isSubmitted || isSubmissionPending);
+            pBtn.setAccessibleText("Question " + (i + 1)
+                    + (failed ? ", save failed" : flagged ? ", flagged" : answered ? ", answered" : ", unanswered")
+                    + (i == currentIndex ? ", current" : ""));
 
             final int index = i;
             pBtn.setOnAction(e -> {
@@ -635,23 +638,13 @@ public class ExamTakingView {
                 updatePalette();
             });
 
-            boolean isCurrent = (i == currentIndex);
-            String border;
-            if (failed) {
-                border = "-fx-border-color: #dc2626; -fx-border-width: 2.5px; -fx-border-radius: 4px;";
-            } else if (isCurrent) {
-                border = "-fx-border-color: #2563eb; -fx-border-width: 2.5px; -fx-border-radius: 4px;";
-            } else {
-                border = "-fx-border-width: 0;";
-            }
-
             if (flagged) {
-                pBtn.setStyle("-fx-background-color: #8b5cf6; -fx-text-fill: white; -fx-background-radius: 4px; " + border + " -fx-cursor: hand;");
+                pBtn.getStyleClass().add("navigator-flagged");
             } else if (answered) {
-                pBtn.setStyle("-fx-background-color: #16a34a; -fx-text-fill: white; -fx-background-radius: 4px; " + border + " -fx-cursor: hand;");
-            } else {
-                pBtn.setStyle("-fx-background-color: #f1f5f9; -fx-text-fill: #475569; -fx-background-radius: 4px; " + border + " -fx-cursor: hand;");
+                pBtn.getStyleClass().add("navigator-answered");
             }
+            if (failed) pBtn.getStyleClass().add("navigator-failed");
+            if (i == currentIndex) pBtn.getStyleClass().add("navigator-current");
 
             palettePane.getChildren().add(pBtn);
         }
@@ -728,7 +721,10 @@ public class ExamTakingView {
             isSubmissionPending = true;
             submitBtn.setText("Saving answers...");
             autosaveStatusLabel.setText("Synchronizing answers with server before final submit...");
-            autosaveStatusLabel.setTextFill(Color.web("#d97706"));
+            autosaveStatusLabel.getStyleClass().removeAll("secondary-text", "status-error", "status-success");
+            if (!autosaveStatusLabel.getStyleClass().contains("status-warning")) {
+                autosaveStatusLabel.getStyleClass().add("status-warning");
+            }
         }
     }
 
@@ -798,6 +794,12 @@ public class ExamTakingView {
         palettePane.setDisable(disabled);
         prevBtn.setDisable(disabled || currentIndex == 0);
         nextBtn.setDisable(disabled || currentIndex == questions.size() - 1);
+    }
+
+    private void setViolationBanner(String severityClass, String message) {
+        proctorNoticeBanner.getStyleClass().removeAll("violation-warning", "violation-danger");
+        proctorNoticeBanner.getStyleClass().add(severityClass);
+        proctorNoticeBanner.setText(message);
     }
 
     private void cleanupListeners() {

@@ -11,8 +11,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -45,23 +43,23 @@ public class StudentHistoryView {
     }
 
     private void buildUI() {
-        view.setStyle("-fx-background-color: #f8fafc;");
+        view.getStyleClass().add("app-root");
 
         // Top Bar
         HBox topBar = new HBox(16);
         topBar.setPadding(new Insets(16, 24, 16, 24));
         topBar.setAlignment(Pos.CENTER_LEFT);
-        topBar.setStyle("-fx-background-color: #1e293b;");
+        topBar.getStyleClass().add("app-header");
 
         Label brand = new Label("ExaSecure");
-        brand.setFont(Font.font("Segoe UI", FontWeight.BOLD, 20));
-        brand.setStyle("-fx-text-fill: white;");
+        brand.getStyleClass().add("header-title");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
         Button backBtn = new Button("← Back to Dashboard");
-        backBtn.setStyle("-fx-background-color: #334155; -fx-text-fill: white; -fx-background-radius: 6px; -fx-cursor: hand;");
+        backBtn.setText("Back to Dashboard");
+        backBtn.getStyleClass().add("btn-header");
         backBtn.setOnAction(e -> app.showDashboard());
 
         var themeSelector = com.examsystem.client.theme.ThemeManager.getInstance().createThemeSelector();
@@ -79,17 +77,17 @@ public class StudentHistoryView {
 
         VBox titleBox = new VBox(4);
         Label sectionTitle = new Label("My Examination History");
-        sectionTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 22));
-        sectionTitle.setStyle("-fx-text-fill: #0f172a;");
+        sectionTitle.getStyleClass().add("page-title");
 
         Label sectionSubtitle = new Label("Review your past exam attempts, authoritative completion statuses, and final scores.");
-        sectionSubtitle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 13px;");
+        sectionSubtitle.getStyleClass().add("secondary-text");
+        sectionSubtitle.setWrapText(true);
         titleBox.getChildren().addAll(sectionTitle, sectionSubtitle);
 
         Region headerSpacer = new Region();
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
 
-        refreshBtn.setStyle("-fx-background-color: white; -fx-border-color: #cbd5e1; -fx-border-radius: 6px; -fx-padding: 6 12; -fx-cursor: hand;");
+        refreshBtn.getStyleClass().add("btn-secondary");
         refreshBtn.setOnAction(e -> loadHistory());
 
         sectionHeader.getChildren().addAll(titleBox, headerSpacer, refreshBtn);
@@ -106,14 +104,10 @@ public class StudentHistoryView {
     private void setupTable() {
         table.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         table.setPlaceholder(new Label("No previous exam attempts found."));
-        table.setPrefHeight(450);
+        table.setMinHeight(240);
 
         TableColumn<StudentAttemptHistoryDto, String> examCol = new TableColumn<>("Exam Title");
         examCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().examTitle()));
-
-        TableColumn<StudentAttemptHistoryDto, String> attemptCol = new TableColumn<>("Attempt ID");
-        attemptCol.setCellValueFactory(data -> new SimpleStringProperty("#" + data.getValue().attemptId()));
-        attemptCol.setPrefWidth(90);
 
         TableColumn<StudentAttemptHistoryDto, String> startCol = new TableColumn<>("Start Time");
         startCol.setCellValueFactory(data -> new SimpleStringProperty(
@@ -126,35 +120,20 @@ public class StudentHistoryView {
         TableColumn<StudentAttemptHistoryDto, String> statusCol = new TableColumn<>("Status");
         statusCol.setCellValueFactory(data -> new SimpleStringProperty(data.getValue().status()));
         statusCol.setPrefWidth(110);
+        statusCol.setCellFactory(col -> createBadgeCell());
 
         TableColumn<StudentAttemptHistoryDto, String> scoreCol = new TableColumn<>("Final Score");
         scoreCol.setCellValueFactory(data -> new SimpleStringProperty(
-                data.getValue().score() != null ? data.getValue().score() + " pts" : "Pending"));
+                data.getValue().score() != null ? String.valueOf(data.getValue().score()) : "Pending"));
         scoreCol.setPrefWidth(100);
 
         TableColumn<StudentAttemptHistoryDto, String> integrityCol = new TableColumn<>("Integrity Status");
         integrityCol.setCellValueFactory(data -> new SimpleStringProperty(
                 data.getValue().flagged() ? "⚠️ FLAGGED FOR REVIEW" : "CLEAN"));
         integrityCol.setPrefWidth(170);
-        integrityCol.setCellFactory(col -> new TableCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    setStyle("");
-                } else {
-                    setText(item);
-                    if (item.contains("FLAGGED")) {
-                        setStyle("-fx-text-fill: #dc2626; -fx-font-weight: bold;");
-                    } else {
-                        setStyle("-fx-text-fill: #16a34a; -fx-font-weight: bold;");
-                    }
-                }
-            }
-        });
+        integrityCol.setCellFactory(col -> createBadgeCell());
 
-        table.getColumns().addAll(examCol, attemptCol, startCol, endCol, statusCol, scoreCol, integrityCol);
+        table.getColumns().addAll(examCol, startCol, endCol, statusCol, scoreCol, integrityCol);
     }
 
     private void loadHistory() {
@@ -173,9 +152,41 @@ public class StudentHistoryView {
                 },
                 (Throwable err) -> {
                     refreshBtn.setDisable(false);
-                    statusLabel.setText("Failed to load history: " + err.getMessage());
-                    UiFeedback.showError("History Error", "Could not load examination history: " + err.getMessage());
+                    statusLabel.setText("Unable to load examination history.");
+                    UiFeedback.showError(app.getPrimaryStage(), "History Error",
+                            "Unable to load examination history. Please verify that the ExaSecure server is running.");
                 }
         );
+    }
+
+    private TableCell<StudentAttemptHistoryDto, String> createBadgeCell() {
+        return new TableCell<>() {
+            private final Label badge = new Label();
+
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(null);
+                if (empty || item == null) {
+                    setGraphic(null);
+                    return;
+                }
+                badge.setText(item.contains("FLAGGED") ? "FLAGGED" : item);
+                badge.getStyleClass().setAll(badgeClass(item));
+                setGraphic(badge);
+            }
+        };
+    }
+
+    private String badgeClass(String value) {
+        String normalized = value.toUpperCase();
+        if (normalized.contains("FLAGGED")) return "badge-flagged";
+        return switch (normalized) {
+            case "ACTIVE" -> "badge-active";
+            case "SUBMITTED" -> "badge-submitted";
+            case "EXPIRED" -> "badge-expired";
+            case "CLEAN" -> "badge-clean";
+            default -> "badge-neutral";
+        };
     }
 }

@@ -14,8 +14,6 @@ import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
 import java.util.List;
 import java.util.Map;
@@ -44,20 +42,19 @@ public class StudentDashboardView {
     }
 
     private void buildUI() {
-        view.setStyle("-fx-background-color: #f8fafc;");
+        view.getStyleClass().add("app-root");
 
         // Top Navigation Bar
         HBox topBar = new HBox(16);
         topBar.setPadding(new Insets(16, 24, 16, 24));
         topBar.setAlignment(Pos.CENTER_LEFT);
-        topBar.setStyle("-fx-background-color: #1e293b;");
+        topBar.getStyleClass().add("app-header");
 
         Label brand = new Label("ExaSecure");
-        brand.setFont(Font.font("Segoe UI", FontWeight.BOLD, 20));
-        brand.setStyle("-fx-text-fill: white;");
+        brand.getStyleClass().add("header-title");
 
         Label portalBadge = new Label("STUDENT");
-        portalBadge.setStyle("-fx-background-color: #3b82f6; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 3 8; -fx-background-radius: 4px;");
+        portalBadge.getStyleClass().add("portal-badge");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -66,14 +63,14 @@ public class StudentDashboardView {
                 ? apiClient.getSessionState().fullName()
                 : apiClient.getSessionState().username();
         Label userLabel = new Label("Welcome, " + displayName);
-        userLabel.setStyle("-fx-text-fill: #e2e8f0; -fx-font-size: 13px;");
+        userLabel.getStyleClass().add("header-meta");
 
         Button historyBtn = new Button("Exam History");
-        historyBtn.setStyle("-fx-background-color: #334155; -fx-text-fill: white; -fx-background-radius: 6px; -fx-cursor: hand;");
+        historyBtn.getStyleClass().add("btn-header");
         historyBtn.setOnAction(e -> app.showHistory());
 
         Button logoutBtn = new Button("Sign Out");
-        logoutBtn.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-background-radius: 6px; -fx-cursor: hand;");
+        logoutBtn.getStyleClass().add("btn-danger");
         logoutBtn.setOnAction(e -> {
             apiClient.logout();
             app.showLogin();
@@ -94,26 +91,27 @@ public class StudentDashboardView {
 
         VBox titleBox = new VBox(4);
         Label sectionTitle = new Label("Available Examinations");
-        sectionTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 22));
-        sectionTitle.setStyle("-fx-text-fill: #0f172a;");
+        sectionTitle.getStyleClass().add("page-title");
 
         Label sectionSubtitle = new Label("Click 'Start / Resume Examination' to enter the secure testing interface.");
-        sectionSubtitle.setStyle("-fx-text-fill: #64748b; -fx-font-size: 13px;");
+        sectionSubtitle.getStyleClass().add("secondary-text");
+        sectionSubtitle.setWrapText(true);
         titleBox.getChildren().addAll(sectionTitle, sectionSubtitle);
 
         Region headerSpacer = new Region();
         HBox.setHgrow(headerSpacer, Priority.ALWAYS);
 
-        refreshBtn.setStyle("-fx-background-color: white; -fx-border-color: #cbd5e1; -fx-border-radius: 6px; -fx-padding: 6 12; -fx-cursor: hand;");
+        refreshBtn.getStyleClass().add("btn-secondary");
         refreshBtn.setOnAction(e -> loadAvailableExams());
 
         sectionHeader.getChildren().addAll(titleBox, headerSpacer, refreshBtn);
 
-        statusLabel.setStyle("-fx-text-fill: #64748b; -fx-font-size: 14px;");
+        statusLabel.getStyleClass().add("status-text");
 
         ScrollPane scrollPane = new ScrollPane(examListContainer);
         scrollPane.setFitToWidth(true);
-        scrollPane.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-border-color: transparent;");
+        VBox.setVgrow(scrollPane, Priority.ALWAYS);
+        examListContainer.setFillWidth(true);
 
         center.getChildren().addAll(sectionHeader, statusLabel, scrollPane);
 
@@ -124,7 +122,7 @@ public class StudentDashboardView {
 
     private void loadAvailableExams() {
         examListContainer.getChildren().clear();
-        statusLabel.setText("Loading available examinations from server...");
+        setStatus("Loading available examinations from server...", null);
         refreshBtn.setDisable(true);
 
         AsyncRunner.runAsync(
@@ -132,10 +130,10 @@ public class StudentDashboardView {
                 (List<StudentExamDto> exams) -> {
                     refreshBtn.setDisable(false);
                     if (exams == null || exams.isEmpty()) {
-                        statusLabel.setText("No examinations are currently active or available.");
+                        setStatus("No examinations are currently active or available.", null);
                         return;
                     }
-                    statusLabel.setText("");
+                    setStatus("", null);
                     for (StudentExamDto exam : exams) {
                         examListContainer.getChildren().add(createExamCard(exam));
                     }
@@ -147,29 +145,38 @@ public class StudentDashboardView {
                         app.showLogin();
                         return;
                     }
-                    statusLabel.setText("Failed to load examinations: " + err.getMessage());
+                    setStatus("Unable to load examinations. Please verify that the ExaSecure server is running.", "status-error");
                 }
         );
     }
 
+    private void setStatus(String message, String stateClass) {
+        statusLabel.setText(message);
+        statusLabel.getStyleClass().removeAll("status-error", "status-warning", "status-success");
+        if (!statusLabel.getStyleClass().contains("status-text")) {
+            statusLabel.getStyleClass().add("status-text");
+        }
+        if (stateClass != null) {
+            statusLabel.getStyleClass().add(stateClass);
+        }
+    }
+
     private HBox createExamCard(StudentExamDto exam) {
         HBox card = new HBox(20);
-        card.getStyleClass().add("theme-card");
-        card.setPadding(new Insets(18, 24, 18, 24));
+        card.getStyleClass().addAll("theme-card", "exam-card");
         card.setAlignment(Pos.CENTER_LEFT);
-        card.setStyle("-fx-background-radius: 8px; -fx-border-radius: 8px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.03), 8, 0, 0, 2);");
+        card.setMaxWidth(Double.MAX_VALUE);
 
         VBox info = new VBox(6);
         Label title = new Label(exam.title());
-        title.getStyleClass().add("theme-label-bold");
-        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 16));
+        title.getStyleClass().add("exam-title");
 
         HBox meta = new HBox(12);
         Label durationBadge = new Label("Duration: " + exam.durationMinutes() + " mins");
-        durationBadge.setStyle("-fx-background-color: #f1f5f9; -fx-text-fill: #475569; -fx-font-size: 12px; -fx-padding: 3 8; -fx-background-radius: 4px;");
+        durationBadge.getStyleClass().add("badge-neutral");
 
         Label secureBadge = new Label("Proctored & Monitored");
-        secureBadge.setStyle("-fx-background-color: #fef3c7; -fx-text-fill: #92400e; -fx-font-size: 12px; -fx-padding: 3 8; -fx-background-radius: 4px;");
+        secureBadge.getStyleClass().add("badge-warning");
 
         meta.getChildren().addAll(durationBadge, secureBadge);
         info.getChildren().addAll(title, meta);
@@ -179,8 +186,7 @@ public class StudentDashboardView {
 
         Button startBtn = new Button("Start / Resume Exam");
         startBtn.setPrefHeight(38);
-        startBtn.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
-        startBtn.setStyle("-fx-background-color: #2563eb; -fx-text-fill: white; -fx-background-radius: 6px; -fx-cursor: hand; -fx-padding: 0 16;");
+        startBtn.getStyleClass().add("btn-primary");
 
         startBtn.setOnAction(e -> promptAndLaunchExam(exam, startBtn));
 
