@@ -17,6 +17,8 @@ import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.time.Instant;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -959,6 +961,189 @@ class ServerIntegrationTest {
                 assertThat(rs.getString("proctoring_status")).isEqualTo("FLAGGED");
             }
         }
+    }
+
+    @Test
+    void singleFocusLossIncident_allowsMultipleSupportingScreenshots_withoutIncreasingStrikes() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        int attemptId = 9801;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM exam_attempts WHERE id = " + attemptId);
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status, focus_lost_count, is_flagged, proctoring_status) "
+                            + "VALUES (?, 1, 101, NOW(), 'ACTIVE', 0, 0, 'CLEAN')")) {
+                ps.setInt(1, attemptId);
+                ps.executeUpdate();
+            }
+        }
+
+        // 1. One focus loss incident = 1 strike
+        String clientEventId = UUID.randomUUID().toString();
+        HttpResponse<String> eventRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events", "token-stu1",
+                "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + clientEventId + "\"}");
+        assertThat(eventRes.statusCode()).isEqualTo(200);
+        var eventJson = new ObjectMapper().readTree(eventRes.body());
+        int eventId = eventJson.get("eventId").asInt();
+        assertThat(eventJson.get("violationCount").asInt()).isEqualTo(1);
+        assertThat(eventJson.get("flagged").asBoolean()).isFalse();
+        assertThat(eventJson.get("attemptStatus").asText()).isEqualTo("ACTIVE");
+
+        // 2. Upload INITIAL screenshot evidence (~800ms)
+        byte[] initialBytes = new byte[]{11, 22, 33, 44};
+        HttpResponse<String> initUploadRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", initialBytes, "INITIAL");
+        assertThat(initUploadRes.statusCode()).isEqualTo(200);
+
+        // 3. Mark long absence state (~5000ms)
+        HttpResponse<String> longAbsenceRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", "token-stu1", null);
+        assertThat(longAbsenceRes.statusCode()).isEqualTo(200);
+
+        // 4. Upload LONG_ABSENCE screenshot evidence (~5000ms)
+        byte[] longAbsenceBytes = new byte[]{55, 66, 77, 88};
+        HttpResponse<String> longUploadRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", longAbsenceBytes, "LONG_ABSENCE");
+        assertThat(longUploadRes.statusCode()).isEqualTo(200);
+
+        // 5. Record return (e.g. 8500ms away)
+        HttpResponse<String> returnRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/return", "token-stu1",
+                "{\"returnedAt\":\"" + Instant.now().toString() + "\",\"awayDurationMs\":8500}");
+        assertThat(returnRes.statusCode()).isEqualTo(200);
+
+        // Invariant: still strictly 1 strike!
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT status, focus_lost_count, is_flagged, proctoring_status FROM exam_attempts WHERE id = ?")) {
+            ps.setInt(1, attemptId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString("status")).isEqualTo("ACTIVE");
+                assertThat(rs.getInt("focus_lost_count")).isEqualTo(1);
+                assertThat(rs.getBoolean("is_flagged")).isFalse();
+                assertThat(rs.getString("proctoring_status")).isEqualTo("CLEAN");
+            }
+        }
+
+        // Check proctor_events table
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT returned_at, away_duration_ms, is_long_absence FROM proctor_events WHERE id = ?")) {
+            ps.setInt(1, eventId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getTimestamp("returned_at")).isNotNull();
+                assertThat(rs.getLong("away_duration_ms")).isGreaterThanOrEqualTo(0);
+                assertThat(rs.getBoolean("is_long_absence")).isTrue();
+            }
+        }
+
+        // 6. Admin query for proctor events
+        HttpResponse<String> adminEventsRes = sendJson(client, "GET", "/api/v1/admin/attempts/" + attemptId + "/events", "token-admin1", null);
+        assertThat(adminEventsRes.statusCode()).isEqualTo(200);
+        var adminEvents = new ObjectMapper().readTree(adminEventsRes.body());
+        assertThat(adminEvents.size()).isEqualTo(1);
+        var ev = adminEvents.get(0);
+        assertThat(ev.get("id").asInt()).isEqualTo(eventId);
+        assertThat(ev.get("isLongAbsence").asBoolean()).isTrue();
+        assertThat(ev.get("hasEvidence").asBoolean()).isTrue();
+        assertThat(ev.get("evidenceTypes").toString()).contains("INITIAL");
+        assertThat(ev.get("evidenceTypes").toString()).contains("LONG_ABSENCE");
+
+        // 7. Verify round-trip bytes for each evidence type
+        HttpResponse<byte[]> adminInitEv = fetchEvidence(client, eventId, "token-admin1", "INITIAL");
+        assertThat(adminInitEv.statusCode()).isEqualTo(200);
+        assertThat(adminInitEv.body()).containsExactly(initialBytes);
+
+        HttpResponse<byte[]> adminLongEv = fetchEvidence(client, eventId, "token-admin1", "LONG_ABSENCE");
+        assertThat(adminLongEv.statusCode()).isEqualTo(200);
+        assertThat(adminLongEv.body()).containsExactly(longAbsenceBytes);
+
+        // 8. Evidence Immutability: duplicate retry MUST NOT replace original bytes!
+        byte[] duplicateRetryBytes = new byte[]{99, 99, 99};
+        HttpResponse<String> duplicateUploadRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", duplicateRetryBytes, "INITIAL");
+        assertThat(duplicateUploadRes.statusCode()).isEqualTo(200);
+
+        HttpResponse<byte[]> adminInitEvAfterDuplicate = fetchEvidence(client, eventId, "token-admin1", "INITIAL");
+        assertThat(adminInitEvAfterDuplicate.statusCode()).isEqualTo(200);
+        assertThat(adminInitEvAfterDuplicate.body()).containsExactly(initialBytes); // Original preserved!
+    }
+
+    @Test
+    void studentTelemetryValidation_treatsClientDurationAsUntrusted() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        int attemptId = 9802;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM exam_attempts WHERE id = " + attemptId);
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status, focus_lost_count, is_flagged, proctoring_status) "
+                            + "VALUES (?, 1, 101, NOW(), 'ACTIVE', 0, 0, 'CLEAN')")) {
+                ps.setInt(1, attemptId);
+                ps.executeUpdate();
+            }
+        }
+
+        String clientEventId = UUID.randomUUID().toString();
+        HttpResponse<String> eventRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events", "token-stu1",
+                "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + clientEventId + "\"}");
+        int eventId = new ObjectMapper().readTree(eventRes.body()).get("eventId").asInt();
+
+        // Send negative client duration: -99999
+        HttpResponse<String> ret1 = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/return", "token-stu1",
+                "{\"returnedAt\":\"" + Instant.now().toString() + "\",\"awayDurationMs\":-99999}");
+        assertThat(ret1.statusCode()).isEqualTo(200);
+
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT away_duration_ms FROM proctor_events WHERE id = ?")) {
+            ps.setInt(1, eventId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getLong("away_duration_ms")).isGreaterThanOrEqualTo(0); // Validated to non-negative
+            }
+        }
+    }
+
+    private static HttpResponse<String> sendMultipartEvidence(
+            HttpClient client, int attemptId, int eventId, String token, byte[] screenshotBytes, String evidenceType) throws Exception {
+        String boundary = "----TestBoundary" + UUID.randomUUID().toString().replace("-", "");
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+
+        if (evidenceType != null) {
+            baos.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+            baos.write("Content-Disposition: form-data; name=\"evidenceType\"\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+            baos.write(evidenceType.getBytes(StandardCharsets.UTF_8));
+            baos.write("\r\n".getBytes(StandardCharsets.UTF_8));
+        }
+
+        baos.write(("--" + boundary + "\r\n").getBytes(StandardCharsets.UTF_8));
+        baos.write("Content-Disposition: form-data; name=\"screenshot\"; filename=\"screen.jpg\"\r\n".getBytes(StandardCharsets.UTF_8));
+        baos.write("Content-Type: image/jpeg\r\n\r\n".getBytes(StandardCharsets.UTF_8));
+        baos.write(screenshotBytes);
+        baos.write("\r\n".getBytes(StandardCharsets.UTF_8));
+
+        baos.write(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/proctor-evidence"))
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(baos.toByteArray()))
+                .build();
+        return client.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static HttpResponse<byte[]> fetchEvidence(
+            HttpClient client, int eventId, String token, String evidenceType) throws Exception {
+        String query = evidenceType != null ? "?type=" + evidenceType : "";
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + PORT + "/api/v1/admin/events/" + eventId + "/evidence" + query))
+                .header("Authorization", "Bearer " + token)
+                .GET()
+                .build();
+        return client.send(request, HttpResponse.BodyHandlers.ofByteArray());
     }
 
     private static void assertDatabaseCount(String sql, int expected) throws Exception {

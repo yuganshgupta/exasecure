@@ -8,7 +8,12 @@ import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import javax.imageio.ImageIO;
 
-public class ScreenCaptureService {
+public class ScreenCaptureService implements ScreenCapturer {
+
+    @Override
+    public byte[] capture() {
+        return captureScreenAsJpeg();
+    }
 
     public static byte[] captureScreenAsJpeg() {
         try {

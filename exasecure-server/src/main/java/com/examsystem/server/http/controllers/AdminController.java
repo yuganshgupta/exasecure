@@ -243,7 +243,8 @@ public class AdminController {
 
     public void getAttemptEvidence(Context ctx) {
         int eventId = Integer.parseInt(ctx.pathParam("eventId"));
-        AdminEvidenceDto evidence = adminQueryPort.getEvidenceByEventId(eventId)
+        String type = ctx.queryParam("type");
+        AdminEvidenceDto evidence = adminQueryPort.getEvidenceByEventId(eventId, type)
                 .map(AdminContractMapper::toEvidenceDto)
                 .orElseThrow(() -> new NotFoundResponse("No evidence found"));
         ctx.contentType(evidence.contentType()).result(evidence.data());

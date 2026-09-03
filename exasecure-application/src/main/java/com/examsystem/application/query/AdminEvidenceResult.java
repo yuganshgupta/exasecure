@@ -4,14 +4,21 @@ public record AdminEvidenceResult(
         int id,
         int eventId,
         String contentType,
-        byte[] data
+        byte[] data,
+        String evidenceType
 ) {
+    public AdminEvidenceResult(int id, int eventId, String contentType, byte[] data) {
+        this(id, eventId, contentType, data, "INITIAL");
+    }
+
     public AdminEvidenceResult {
-        data = data.clone();
+        if (data != null) {
+            data = data.clone();
+        }
     }
 
     @Override
     public byte[] data() {
-        return data.clone();
+        return data != null ? data.clone() : null;
     }
 }

@@ -73,8 +73,8 @@ class MySqlMigrationIntegrationTest {
         migrator.migrate();
 
         try (Connection conn = dataSource.getConnection()) {
-            assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 9);
-            assertSingleInt(conn, "SELECT COUNT(*) FROM schema_versions", 9);
+            assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 10);
+            assertSingleInt(conn, "SELECT COUNT(*) FROM schema_versions", 10);
             assertSingleInt(conn, "SELECT COUNT(*) FROM exam_attempts WHERE is_flagged = 0 AND proctoring_status = 'CLEAN'", 1);
             assertSingleInt(conn, "SELECT COUNT(*) FROM users", 2);
             assertSingleInt(conn, "SELECT COUNT(*) FROM exams", 1);

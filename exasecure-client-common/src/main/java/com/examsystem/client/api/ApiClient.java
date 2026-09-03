@@ -29,6 +29,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -156,8 +157,12 @@ public class ApiClient {
     }
 
     public void uploadProctorEvidence(int attemptId, int eventId, byte[] screenshotBytes, String contentType) {
+        uploadProctorEvidence(attemptId, eventId, screenshotBytes, contentType, "INITIAL");
+    }
+
+    public void uploadProctorEvidence(int attemptId, int eventId, byte[] screenshotBytes, String contentType, String evidenceType) {
         String boundary = "----ExaSecureEvidenceBoundary" + UUID.randomUUID().toString().replace("-", "");
-        byte[] multipart = buildMultipart(boundary, "screenshot", "screenshot." + (contentType.contains("png") ? "png" : "jpg"), contentType, screenshotBytes);
+        byte[] multipart = buildMultipart(boundary, "screenshot", "screenshot." + (contentType.contains("png") ? "png" : "jpg"), contentType, screenshotBytes, evidenceType);
 
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(config.apiV1Url() + "/student/attempts/" + attemptId + "/events/" + eventId + "/proctor-evidence"))
@@ -168,6 +173,18 @@ public class ApiClient {
 
         HttpResponse<String> response = send(builder.build());
         handleErrorStatus(response);
+    }
+
+    public void recordProctorReturn(int attemptId, int eventId, Instant returnedAt, long awayDurationMs) {
+        Map<String, Object> body = Map.of(
+                "returnedAt", returnedAt != null ? returnedAt.toString() : Instant.now().toString(),
+                "awayDurationMs", Math.max(0, awayDurationMs)
+        );
+        postJsonVoid("/student/attempts/" + attemptId + "/events/" + eventId + "/return", body);
+    }
+
+    public void recordProctorLongAbsence(int attemptId, int eventId) {
+        postEmpty("/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", true);
     }
 
     // ==========================================
@@ -244,8 +261,13 @@ public class ApiClient {
     }
 
     public byte[] adminGetEvidence(int eventId) {
+        return adminGetEvidence(eventId, null);
+    }
+
+    public byte[] adminGetEvidence(int eventId, String evidenceType) {
+        String query = (evidenceType != null && !evidenceType.isBlank()) ? "?type=" + evidenceType : "";
         HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(config.apiV1Url() + "/admin/events/" + eventId + "/evidence"))
+                .uri(URI.create(config.apiV1Url() + "/admin/events/" + eventId + "/evidence" + query))
                 .timeout(Duration.ofSeconds(15))
                 .GET();
         attachAuth(builder);
@@ -470,8 +492,14 @@ public class ApiClient {
         }
     }
 
-    private static byte[] buildMultipart(String boundary, String partName, String filename, String contentType, byte[] data) {
+    private static byte[] buildMultipart(String boundary, String partName, String filename, String contentType, byte[] data, String evidenceType) {
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            if (evidenceType != null && !evidenceType.isBlank()) {
+                String fieldHeader = "--" + boundary + "\r\n"
+                        + "Content-Disposition: form-data; name=\"evidenceType\"\r\n\r\n"
+                        + evidenceType + "\r\n";
+                out.write(fieldHeader.getBytes(StandardCharsets.UTF_8));
+            }
             String header = "--" + boundary + "\r\n"
                     + "Content-Disposition: form-data; name=\"" + partName + "\"; filename=\"" + filename + "\"\r\n"
                     + "Content-Type: " + contentType + "\r\n\r\n";

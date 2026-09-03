@@ -102,6 +102,8 @@ public class ExaSecureServer {
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/submit", studentController::submitExam);
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/events", studentController::recordEvent);
                     io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/events/{eventId}/proctor-evidence", studentController::uploadEvidence);
+                    io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/events/{eventId}/return", studentController::recordReturn);
+                    io.javalin.apibuilder.ApiBuilder.post("/student/attempts/{attemptId}/events/{eventId}/long-absence", studentController::recordLongAbsence);
                     
                     io.javalin.apibuilder.ApiBuilder.path("/admin", () -> {
                         io.javalin.apibuilder.ApiBuilder.get("/users", adminController::listUsers);

@@ -78,7 +78,9 @@ public class AdminDashboardView {
     private final Label evidenceZoomLabel = new Label("100%");
     private double evidenceZoom = 1.0;
     private boolean evidenceFitMode = true;
-    private final Map<Integer, byte[]> evidenceCache = new HashMap<>();
+    private final Map<String, byte[]> evidenceCache = new HashMap<>();
+    private final ComboBox<String> evidenceTypeCombo = new ComboBox<>();
+    private String currentEvidenceType = "INITIAL";
     private byte[] currentEvidenceBytes = null;
     private int currentEvidenceEventId = -1;
     private long currentQbReqId = 0;
@@ -1465,6 +1467,18 @@ public class AdminDashboardView {
         HBox viewerBar = new HBox(8);
         viewerBar.setAlignment(Pos.CENTER_LEFT);
 
+        Label evTypeLabel = new Label("Evidence:");
+        evTypeLabel.getStyleClass().add("theme-label-bold");
+
+        evidenceTypeCombo.getItems().setAll("INITIAL (~0.8s)", "LONG_ABSENCE (~5.0s)");
+        evidenceTypeCombo.setValue("INITIAL (~0.8s)");
+        evidenceTypeCombo.setOnAction(e -> {
+            AdminProctorEventDto sel = proctorEventsTable.getSelectionModel().getSelectedItem();
+            if (sel != null) {
+                loadEvidenceImage(sel);
+            }
+        });
+
         Button zoomInBtn = new Button("+ Zoom In");
         zoomInBtn.getStyleClass().add("btn-secondary");
         zoomInBtn.setOnAction(e -> zoomEvidence(1.25));
@@ -1502,7 +1516,7 @@ public class AdminDashboardView {
         enlargeBtn.getStyleClass().add("btn-primary");
         enlargeBtn.setOnAction(e -> showEnlargedEvidence());
 
-        viewerBar.getChildren().addAll(zoomInBtn, zoomOutBtn, resetZoomBtn, fitBtn, evidenceZoomLabel, vSpacer, prevEvBtn, nextEvBtn, enlargeBtn);
+        viewerBar.getChildren().addAll(evTypeLabel, evidenceTypeCombo, zoomInBtn, zoomOutBtn, resetZoomBtn, fitBtn, evidenceZoomLabel, vSpacer, prevEvBtn, nextEvBtn, enlargeBtn);
 
         evidenceImageView.setPreserveRatio(true);
 
@@ -1586,13 +1600,53 @@ public class AdminDashboardView {
 
         TableColumn<AdminProctorEventDto, String> typeCol = new TableColumn<>("Incident Type");
         typeCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().eventType()));
+        typeCol.setPrefWidth(110);
 
         TableColumn<AdminProctorEventDto, String> timeCol = new TableColumn<>("Recorded Time");
         timeCol.setCellValueFactory(d -> new SimpleStringProperty(
                 d.getValue().recordedAt() != null ? d.getValue().recordedAt() : "-"));
+        timeCol.setPrefWidth(140);
+
+        TableColumn<AdminProctorEventDto, String> durationCol = new TableColumn<>("Away Duration");
+        durationCol.setCellValueFactory(d -> {
+            Long dur = d.getValue().awayDurationMs();
+            if (dur == null) {
+                return new SimpleStringProperty(d.getValue().returnedAt() != null ? "<1s" : "-");
+            }
+            if (dur < 1000) {
+                return new SimpleStringProperty(dur + "ms");
+            }
+            return new SimpleStringProperty(String.format(java.util.Locale.ROOT, "%.1fs", dur / 1000.0));
+        });
+        durationCol.setPrefWidth(100);
+
+        TableColumn<AdminProctorEventDto, String> longAbsenceCol = new TableColumn<>("Absence");
+        longAbsenceCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().isLongAbsence() ? "LONG (≥5s)" : "NORMAL"));
+        longAbsenceCol.setCellFactory(col -> new TableCell<>() {
+            private final Label badge = new Label();
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(null);
+                if (empty || item == null) {
+                    setGraphic(null);
+                } else {
+                    badge.setText(item);
+                    badge.getStyleClass().setAll(item.contains("LONG") ? "badge-warning" : "badge-neutral");
+                    setGraphic(badge);
+                }
+            }
+        });
+        longAbsenceCol.setPrefWidth(100);
 
         TableColumn<AdminProctorEventDto, String> evCol = new TableColumn<>("Evidence");
-        evCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().hasEvidence() ? "✓ Screenshot" : "None"));
+        evCol.setCellValueFactory(d -> {
+            List<String> types = d.getValue().evidenceTypes();
+            if (types == null || types.isEmpty()) {
+                return new SimpleStringProperty(d.getValue().hasEvidence() ? "INITIAL" : "NONE");
+            }
+            return new SimpleStringProperty(String.join(" + ", types));
+        });
         evCol.setCellFactory(col -> new TableCell<>() {
             private final Label badge = new Label();
 
@@ -1603,15 +1657,16 @@ public class AdminDashboardView {
                 if (empty || item == null) {
                     setGraphic(null);
                 } else {
-                    boolean available = item.contains("Screenshot");
-                    badge.setText(available ? "AVAILABLE" : "NONE");
-                    badge.getStyleClass().setAll(available ? "badge-info" : "badge-neutral");
+                    boolean hasAny = !item.equals("NONE");
+                    badge.setText(item);
+                    badge.getStyleClass().setAll(hasAny ? "badge-info" : "badge-neutral");
                     setGraphic(badge);
                 }
             }
         });
+        evCol.setPrefWidth(140);
 
-        proctorEventsTable.getColumns().addAll(typeCol, timeCol, evCol);
+        proctorEventsTable.getColumns().addAll(typeCol, timeCol, durationCol, longAbsenceCol, evCol);
 
         proctorEventsTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, sel) -> {
             if (sel != null) {
@@ -1750,21 +1805,45 @@ public class AdminDashboardView {
         long reqId = ++currentEvidenceReqId;
         updateEvidenceContext(event);
 
-        if (!event.hasEvidence()) {
+        String comboVal = evidenceTypeCombo.getValue();
+        String selectedType = (comboVal != null && comboVal.contains("LONG")) ? "LONG_ABSENCE" : "INITIAL";
+        currentEvidenceType = selectedType;
+
+        List<String> availableTypes = event.evidenceTypes() != null ? event.evidenceTypes() : List.of();
+
+        if (!event.hasEvidence() && availableTypes.isEmpty()) {
             clearEvidenceViewer();
-            evidenceStatusLabel.setText("No evidence attached to this incident.");
+            Long dur = event.awayDurationMs();
+            if (dur != null && dur < 800) {
+                evidenceStatusLabel.setText("No screenshot captured — student returned before evidence delay (" + dur + "ms).");
+            } else {
+                evidenceStatusLabel.setText("No screenshot evidence attached to this incident.");
+            }
             return;
         }
 
-        byte[] cached = evidenceCache.get(eventId);
+        if (!availableTypes.isEmpty() && !availableTypes.contains(selectedType)) {
+            clearEvidenceViewer();
+            if ("LONG_ABSENCE".equals(selectedType)) {
+                Long dur = event.awayDurationMs();
+                String durStr = dur != null ? String.format(java.util.Locale.ROOT, "%.1fs", dur / 1000.0) : "under threshold";
+                evidenceStatusLabel.setText("Long-absence screenshot not captured (student was away " + durStr + ", threshold is 5.0s).");
+            } else {
+                evidenceStatusLabel.setText("Initial screenshot not available for this incident.");
+            }
+            return;
+        }
+
+        String cacheKey = eventId + ":" + selectedType;
+        byte[] cached = evidenceCache.get(cacheKey);
         if (cached != null) {
-            displayEvidenceBytes(eventId, cached);
+            displayEvidenceBytes(eventId, cached, selectedType);
             return;
         }
 
-        evidenceStatusLabel.setText("Loading screenshot evidence...");
+        evidenceStatusLabel.setText("Loading " + selectedType + " screenshot evidence...");
         AsyncRunner.runAsync(
-                () -> apiClient.adminGetEvidence(eventId),
+                () -> apiClient.adminGetEvidence(eventId, selectedType),
                 (byte[] imageBytes) -> {
                     if (reqId != currentEvidenceReqId) return;
                     AdminProctorEventDto currentSel = proctorEventsTable.getSelectionModel().getSelectedItem();
@@ -1772,29 +1851,34 @@ public class AdminDashboardView {
 
                     if (imageBytes == null || imageBytes.length == 0) {
                         clearEvidenceViewer();
-                        evidenceStatusLabel.setText("The attached evidence file is empty.");
+                        evidenceStatusLabel.setText("The attached " + selectedType + " evidence file is empty.");
                         return;
                     }
 
-                    evidenceCache.put(eventId, imageBytes);
-                    displayEvidenceBytes(eventId, imageBytes);
+                    evidenceCache.put(cacheKey, imageBytes);
+                    displayEvidenceBytes(eventId, imageBytes, selectedType);
                 },
                 (Throwable err) -> {
                     if (reqId != currentEvidenceReqId) return;
-                    evidenceStatusLabel.setText("Failed to retrieve screenshot: " + err.getMessage());
+                    evidenceStatusLabel.setText("Failed to retrieve " + selectedType + " screenshot: " + err.getMessage());
                 }
         );
     }
 
     private void displayEvidenceBytes(int eventId, byte[] imageBytes) {
+        displayEvidenceBytes(eventId, imageBytes, currentEvidenceType);
+    }
+
+    private void displayEvidenceBytes(int eventId, byte[] imageBytes, String evidenceType) {
         try {
             currentEvidenceBytes = imageBytes;
             currentEvidenceEventId = eventId;
+            currentEvidenceType = evidenceType;
             Image img = new Image(new ByteArrayInputStream(imageBytes));
             evidenceImageView.setImage(img);
             evidenceFitMode = true;
             Platform.runLater(this::fitEvidenceToWindow);
-            evidenceStatusLabel.setText("Screenshot evidence loaded.");
+            evidenceStatusLabel.setText("Screenshot evidence loaded (" + evidenceType + ").");
         } catch (Exception e) {
             evidenceStatusLabel.setText("Failed to decode screenshot image: " + e.getMessage());
         }
@@ -1820,7 +1904,7 @@ public class AdminDashboardView {
         bar.setAlignment(Pos.CENTER_LEFT);
         bar.getStyleClass().addAll("app-header", "app-header-admin");
 
-        Label title = new Label(sel.eventType() + " evidence inspection");
+        Label title = new Label(sel.eventType() + " (" + currentEvidenceType + ") evidence inspection");
         title.getStyleClass().add("header-title");
 
         Region barSpacer = new Region();
@@ -1838,7 +1922,7 @@ public class AdminDashboardView {
         Runnable applyModalZoom = () -> {
             modalImageView.setFitWidth(img.getWidth() * modalZoom[0]);
             modalImageView.setFitHeight(img.getHeight() * modalZoom[0]);
-            modalZoomLbl.setText(String.format("%.0f%%", modalZoom[0] * 100));
+            modalZoomLbl.setText(String.format(java.util.Locale.ROOT, "%.0f%%", modalZoom[0] * 100));
         };
 
         Button zIn = new Button("+ Zoom In");
@@ -1906,8 +1990,18 @@ public class AdminDashboardView {
                 .append("  •  Violations: ").append(attempt.focusLostCount())
                 .append("  •  ").append(attempt.flagged() ? "FLAGGED" : "CLEAN");
         if (event != null) {
-            context.append("\nIncident: ").append(event.eventType())
-                    .append("  •  ").append(event.recordedAt() != null ? event.recordedAt() : "Time unavailable");
+            context.append("\nIncident #").append(event.id())
+                    .append(" (").append(event.eventType()).append(")")
+                    .append("  •  Left: ").append(event.recordedAt() != null ? event.recordedAt() : "-")
+                    .append("  •  Returned: ").append(event.returnedAt() != null ? event.returnedAt() : "Ongoing / Not recorded");
+            if (event.awayDurationMs() != null) {
+                if (event.awayDurationMs() < 1000) {
+                    context.append("  •  Duration: ").append(event.awayDurationMs()).append("ms");
+                } else {
+                    context.append("  •  Duration: ").append(String.format(java.util.Locale.ROOT, "%.1fs", event.awayDurationMs() / 1000.0));
+                }
+            }
+            context.append("  •  Long Absence: ").append(event.isLongAbsence() ? "YES (≥5s)" : "NO");
         }
         evidenceContextLabel.setText(context.toString());
     }

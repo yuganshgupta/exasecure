@@ -8,6 +8,8 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Locale;
+import java.util.Optional;
 
 public class JdbcProctorRepository implements ProctorRepository {
     private final DataSource dataSource;
@@ -69,9 +71,9 @@ public class JdbcProctorRepository implements ProctorRepository {
     }
 
     @Override
-    public java.util.Optional<Integer> findEventByClientEventId(int attemptId, String clientEventId) {
+    public Optional<Integer> findEventByClientEventId(int attemptId, String clientEventId) {
         if (clientEventId == null || clientEventId.isBlank()) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
@@ -80,27 +82,153 @@ public class JdbcProctorRepository implements ProctorRepository {
             ps.setString(2, clientEventId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return java.util.Optional.of(rs.getInt("id"));
+                    return Optional.of(rs.getInt("id"));
                 }
             }
         } catch (Exception ignored) {
         }
-        return java.util.Optional.empty();
+        return Optional.empty();
     }
 
     @Override
     public void saveEvidence(int eventId, byte[] screenshot, String contentType, Instant timestamp) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement("INSERT INTO proctor_evidence_v2 (event_id, content_type, byte_size, screenshot_data, recorded_at) VALUES (?, ?, ?, ?, ?)")) {
-            ps.setInt(1, eventId);
-            ps.setString(2, contentType);
-            ps.setInt(3, screenshot.length);
-            ps.setBytes(4, screenshot);
-            ps.setTimestamp(5, Timestamp.from(timestamp));
-            ps.executeUpdate();
+        saveEvidence(eventId, screenshot, contentType, timestamp, "INITIAL");
+    }
+
+    @Override
+    public void saveEvidence(int eventId, byte[] screenshot, String contentType, Instant timestamp, String evidenceType) {
+        String effectiveType = (evidenceType == null || evidenceType.isBlank())
+                ? "INITIAL"
+                : evidenceType.trim().toUpperCase(Locale.ROOT);
+
+        try (Connection conn = dataSource.getConnection()) {
+            // Immutable: check if evidence of this type already exists for this event
+            try (PreparedStatement check = conn.prepareStatement(
+                    "SELECT id FROM proctor_evidence_v2 WHERE event_id = ? AND evidence_type = ?")) {
+                check.setInt(1, eventId);
+                check.setString(2, effectiveType);
+                try (ResultSet rs = check.executeQuery()) {
+                    if (rs.next()) {
+                        return; // Preserve first accepted artifact permanently
+                    }
+                }
+            } catch (Exception ignored) {
+                // Column evidence_type might not exist in old fallback schema
+            }
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO proctor_evidence_v2 (event_id, content_type, byte_size, screenshot_data, recorded_at, evidence_type) VALUES (?, ?, ?, ?, ?, ?)")) {
+                ps.setInt(1, eventId);
+                ps.setString(2, contentType);
+                ps.setInt(3, screenshot.length);
+                ps.setBytes(4, screenshot);
+                ps.setTimestamp(5, Timestamp.from(timestamp));
+                ps.setString(6, effectiveType);
+                ps.executeUpdate();
+            } catch (Exception e) {
+                // Check if failed due to unique index race
+                try (PreparedStatement check = conn.prepareStatement(
+                        "SELECT id FROM proctor_evidence_v2 WHERE event_id = ? AND evidence_type = ?")) {
+                    check.setInt(1, eventId);
+                    check.setString(2, effectiveType);
+                    try (ResultSet rs = check.executeQuery()) {
+                        if (rs.next()) {
+                            return; // Race: already inserted, preserve original
+                        }
+                    }
+                } catch (Exception ignored) {}
+
+                // Fallback for older schemas where evidence_type column might not exist
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "INSERT INTO proctor_evidence_v2 (event_id, content_type, byte_size, screenshot_data, recorded_at) VALUES (?, ?, ?, ?, ?)")) {
+                    ps.setInt(1, eventId);
+                    ps.setString(2, contentType);
+                    ps.setInt(3, screenshot.length);
+                    ps.setBytes(4, screenshot);
+                    ps.setTimestamp(5, Timestamp.from(timestamp));
+                    ps.executeUpdate();
+                } catch (Exception ex) {
+                    throw new RuntimeException("DB error saving evidence", ex);
+                }
+            }
         } catch (Exception e) {
             throw new RuntimeException("DB error", e);
         }
+    }
+
+    @Override
+    public void recordReturn(int eventId, Instant returnedAt, long awayDurationMs) {
+        boolean isLong = awayDurationMs >= 5000;
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE proctor_events SET returned_at = ?, away_duration_ms = ?, "
+                             + "is_long_absence = CASE WHEN is_long_absence = 1 THEN 1 ELSE ? END WHERE id = ?")) {
+            ps.setTimestamp(1, Timestamp.from(returnedAt));
+            ps.setLong(2, awayDurationMs);
+            ps.setInt(3, isLong ? 1 : 0);
+            ps.setInt(4, eventId);
+            ps.executeUpdate();
+        } catch (Exception e) {
+            // Fallback for older schemas
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "UPDATE proctor_events SET returned_at = ? WHERE id = ?")) {
+                ps.setTimestamp(1, Timestamp.from(returnedAt));
+                ps.setInt(2, eventId);
+                ps.executeUpdate();
+            } catch (Exception ignored) {}
+        }
+    }
+
+    @Override
+    public void markLongAbsence(int eventId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE proctor_events SET is_long_absence = 1 WHERE id = ?")) {
+            ps.setInt(1, eventId);
+            ps.executeUpdate();
+        } catch (Exception ignored) {}
+    }
+
+    @Override
+    public Optional<ProctorEventRecord> findEventById(int eventId) {
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT id, attempt_id, event_type, recorded_at, returned_at, away_duration_ms, is_long_absence FROM proctor_events WHERE id = ?")) {
+            ps.setInt(1, eventId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    Timestamp ret = rs.getTimestamp("returned_at");
+                    long dur = rs.getLong("away_duration_ms");
+                    Long awayDuration = rs.wasNull() ? null : dur;
+                    return Optional.of(new ProctorEventRecord(
+                            rs.getInt("id"),
+                            rs.getInt("attempt_id"),
+                            rs.getString("event_type"),
+                            rs.getTimestamp("recorded_at").toInstant(),
+                            ret != null ? ret.toInstant() : null,
+                            awayDuration,
+                            rs.getBoolean("is_long_absence")));
+                }
+            }
+        } catch (Exception e) {
+            try (Connection conn = dataSource.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(
+                         "SELECT id, attempt_id, event_type, recorded_at FROM proctor_events WHERE id = ?")) {
+                ps.setInt(1, eventId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        return Optional.of(new ProctorEventRecord(
+                                rs.getInt("id"),
+                                rs.getInt("attempt_id"),
+                                rs.getString("event_type"),
+                                rs.getTimestamp("recorded_at").toInstant(),
+                                null, null, false));
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        return Optional.empty();
     }
 
     @Override

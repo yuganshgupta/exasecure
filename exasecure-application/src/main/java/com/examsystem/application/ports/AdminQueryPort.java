@@ -18,4 +18,7 @@ public interface AdminQueryPort {
     Optional<AdminExamStatisticsResult> getExamStatistics(int examId);
     List<AdminProctorEventResult> getProctorEvents(int attemptId);
     Optional<AdminEvidenceResult> getEvidenceByEventId(int eventId);
+    default Optional<AdminEvidenceResult> getEvidenceByEventId(int eventId, String evidenceType) {
+        return getEvidenceByEventId(eventId);
+    }
 }

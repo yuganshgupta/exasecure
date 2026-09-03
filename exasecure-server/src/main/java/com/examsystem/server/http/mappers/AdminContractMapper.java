@@ -88,7 +88,11 @@ public final class AdminContractMapper {
                 result.id(),
                 result.eventType(),
                 result.recordedAt().toString(),
-                result.hasEvidence());
+                result.returnedAt() != null ? result.returnedAt().toString() : null,
+                result.awayDurationMs(),
+                result.isLongAbsence(),
+                result.hasEvidence(),
+                result.evidenceTypes() != null ? result.evidenceTypes() : java.util.List.of());
     }
 
     public static AdminEvidenceDto toEvidenceDto(AdminEvidenceResult result) {
@@ -96,6 +100,7 @@ public final class AdminContractMapper {
                 result.id(),
                 result.eventId(),
                 result.contentType(),
-                result.data());
+                result.data(),
+                result.evidenceType() != null ? result.evidenceType() : "INITIAL");
     }
 }

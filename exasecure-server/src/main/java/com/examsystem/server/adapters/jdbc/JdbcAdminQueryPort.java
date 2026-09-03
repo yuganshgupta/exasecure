@@ -12,6 +12,8 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.*;
 
 public class JdbcAdminQueryPort implements AdminQueryPort {
@@ -337,20 +339,80 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
     @Override
     public List<AdminProctorEventResult> getProctorEvents(int attemptId) {
         List<AdminProctorEventResult> events = new ArrayList<>();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT e.id, e.event_type, e.recorded_at, (v.id IS NOT NULL) as has_evidence "
-                             + "FROM proctor_events e LEFT JOIN proctor_evidence_v2 v ON e.id = v.event_id "
-                             + "WHERE e.attempt_id = ? ORDER BY e.recorded_at ASC")) {
-            ps.setInt(1, attemptId);
-            try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
-                    events.add(new AdminProctorEventResult(
-                            rs.getInt("id"),
-                            rs.getString("event_type"),
-                            rs.getTimestamp("recorded_at").toInstant(),
-                            rs.getBoolean("has_evidence")));
+        try (Connection conn = dataSource.getConnection()) {
+            record EventRow(int id, String eventType, Instant recordedAt, Instant returnedAt, Long awayDurationMs, boolean isLongAbsence) {}
+            List<EventRow> eventRows = new ArrayList<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id, event_type, recorded_at, returned_at, away_duration_ms, is_long_absence "
+                            + "FROM proctor_events WHERE attempt_id = ? ORDER BY recorded_at ASC")) {
+                ps.setInt(1, attemptId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        Timestamp ret = rs.getTimestamp("returned_at");
+                        long dur = rs.getLong("away_duration_ms");
+                        Long awayDuration = rs.wasNull() ? null : dur;
+                        eventRows.add(new EventRow(
+                                rs.getInt("id"),
+                                rs.getString("event_type"),
+                                rs.getTimestamp("recorded_at").toInstant(),
+                                ret != null ? ret.toInstant() : null,
+                                awayDuration,
+                                rs.getBoolean("is_long_absence")));
+                    }
                 }
+            } catch (Exception e) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT id, event_type, recorded_at FROM proctor_events WHERE attempt_id = ? ORDER BY recorded_at ASC")) {
+                    ps.setInt(1, attemptId);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            eventRows.add(new EventRow(
+                                    rs.getInt("id"),
+                                    rs.getString("event_type"),
+                                    rs.getTimestamp("recorded_at").toInstant(),
+                                    null, null, false));
+                        }
+                    }
+                }
+            }
+
+            Map<Integer, List<String>> evidenceTypesMap = new LinkedHashMap<>();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT event_id, evidence_type FROM proctor_evidence_v2 WHERE event_id IN "
+                            + "(SELECT id FROM proctor_events WHERE attempt_id = ?) ORDER BY id ASC")) {
+                ps.setInt(1, attemptId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        int evId = rs.getInt("event_id");
+                        String evType = rs.getString("evidence_type");
+                        if (evType == null || evType.isBlank()) evType = "INITIAL";
+                        evidenceTypesMap.computeIfAbsent(evId, k -> new ArrayList<>()).add(evType);
+                    }
+                }
+            } catch (Exception e) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT event_id FROM proctor_evidence_v2 WHERE event_id IN "
+                                + "(SELECT id FROM proctor_events WHERE attempt_id = ?)")) {
+                    ps.setInt(1, attemptId);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            evidenceTypesMap.computeIfAbsent(rs.getInt("event_id"), k -> new ArrayList<>()).add("INITIAL");
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            for (EventRow row : eventRows) {
+                List<String> types = evidenceTypesMap.getOrDefault(row.id(), List.of());
+                events.add(new AdminProctorEventResult(
+                        row.id(),
+                        row.eventType(),
+                        row.recordedAt(),
+                        row.returnedAt(),
+                        row.awayDurationMs(),
+                        row.isLongAbsence(),
+                        !types.isEmpty(),
+                        types));
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -360,17 +422,45 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
 
     @Override
     public Optional<AdminEvidenceResult> getEvidenceByEventId(int eventId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT id, content_type, screenshot_data FROM proctor_evidence_v2 WHERE event_id = ?")) {
-            ps.setInt(1, eventId);
-            try (ResultSet rs = ps.executeQuery()) {
-                if (rs.next()) {
-                    return Optional.of(new AdminEvidenceResult(
-                            rs.getInt("id"),
-                            eventId,
-                            rs.getString("content_type"),
-                            rs.getBytes("screenshot_data")));
+        return getEvidenceByEventId(eventId, null);
+    }
+
+    @Override
+    public Optional<AdminEvidenceResult> getEvidenceByEventId(int eventId, String evidenceType) {
+        try (Connection conn = dataSource.getConnection()) {
+            if (evidenceType != null && !evidenceType.isBlank()) {
+                String targetType = evidenceType.trim().toUpperCase(Locale.ROOT);
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "SELECT id, content_type, screenshot_data, evidence_type FROM proctor_evidence_v2 "
+                                + "WHERE event_id = ? AND evidence_type = ? ORDER BY id ASC LIMIT 1")) {
+                    ps.setInt(1, eventId);
+                    ps.setString(2, targetType);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            String type = rs.getString("evidence_type");
+                            return Optional.of(new AdminEvidenceResult(
+                                    rs.getInt("id"),
+                                    eventId,
+                                    rs.getString("content_type"),
+                                    rs.getBytes("screenshot_data"),
+                                    type != null ? type : "INITIAL"));
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT id, content_type, screenshot_data FROM proctor_evidence_v2 WHERE event_id = ? ORDER BY id ASC LIMIT 1")) {
+                ps.setInt(1, eventId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (rs.next()) {
+                        return Optional.of(new AdminEvidenceResult(
+                                rs.getInt("id"),
+                                eventId,
+                                rs.getString("content_type"),
+                                rs.getBytes("screenshot_data"),
+                                "INITIAL"));
+                    }
                 }
             }
         } catch (Exception e) {

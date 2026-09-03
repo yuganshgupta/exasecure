@@ -30,6 +30,8 @@ import java.util.*;
 
 import com.examsystem.client.student.autosave.QuestionAutosaveCoordinator;
 import com.examsystem.client.student.autosave.QuestionAutosaveCoordinator.QuestionSaveState;
+import com.examsystem.client.student.proctor.ProctorIncidentCoordinator;
+import com.examsystem.contracts.StudentProctorEventResponseDto;
 
 public class ExamTakingView {
 
@@ -79,7 +81,7 @@ public class ExamTakingView {
     private boolean isDialogActive = false;
     private boolean isSubmitted = false;
     private boolean isSubmissionPending = false;
-    private long lastProctorEventTime = 0;
+    private ProctorIncidentCoordinator proctorCoordinator;
 
     public ExamTakingView(StudentApp app, ApiClient apiClient, Stage stage,
                           StudentExamDto exam, StudentAttemptDto attempt,
@@ -393,9 +395,24 @@ public class ExamTakingView {
 
     private void setupProctoring() {
         if (stage == null) return;
+
+        proctorCoordinator = new ProctorIncidentCoordinator(
+                attempt.id(),
+                apiClient,
+                this::handleProctorResponseOnFxThread,
+                this::handleProctorTerminationOnFxThread
+        );
+
         focusListener = (obs, oldVal, newVal) -> {
             if (!newVal && !isDialogActive && !isSubmitted && !isSubmissionPending) {
-                handleFocusLost();
+                proctorCoordinator.onFocusLost();
+                Platform.runLater(() -> {
+                    setViolationBanner("violation-warning", "Window focus lost. Recording proctoring incident...");
+                    proctorNoticeBanner.setVisible(true);
+                    proctorNoticeBanner.setManaged(true);
+                });
+            } else if (newVal && !isSubmitted && !isSubmissionPending) {
+                proctorCoordinator.onFocusGained();
             }
         };
         stage.focusedProperty().addListener(focusListener);
@@ -425,90 +442,69 @@ public class ExamTakingView {
         stage.fullScreenProperty().addListener(fullScreenListener);
     }
 
-    private void handleFocusLost() {
-        long now = System.currentTimeMillis();
-        if (now - lastProctorEventTime < 3000) return; // Debounce
-        lastProctorEventTime = now;
+    private void handleProctorResponseOnFxThread(StudentProctorEventResponseDto response) {
+        Platform.runLater(() -> {
+            int count = response.violationCount();
+            boolean flagged = response.flagged();
 
-        setViolationBanner("violation-warning", "Window focus lost. Recording proctoring incident...");
-        proctorNoticeBanner.setVisible(true);
-        proctorNoticeBanner.setManaged(true);
+            if (flagged || count >= 3) {
+                isSubmitted = true;
+                isSubmissionPending = false;
+                cleanupListeners();
+                setControlsDisabled(true);
+                if (stage != null) stage.setFullScreen(false);
 
-        String clientEventId = UUID.randomUUID().toString();
+                setViolationBanner("violation-danger",
+                        "Violation 3 of 3 — Examination terminated. Attempt flagged for administrative review.");
 
-        AsyncRunner.runAsync(
-                () -> {
-                    var response = apiClient.recordProctorEvent(attempt.id(), "FOCUS_LOST", clientEventId);
-                    byte[] screenshot = ScreenCaptureService.captureScreenAsJpeg();
-                    boolean uploaded = false;
-                    if (screenshot != null && screenshot.length > 0) {
-                        try {
-                            apiClient.uploadProctorEvidence(attempt.id(), response.eventId(), screenshot, "image/jpeg");
-                            uploaded = true;
-                        } catch (Exception ignored) {
-                            uploaded = false;
-                        }
-                    }
-                    return new ProctorOutcome(response, uploaded);
-                },
-                (ProctorOutcome outcome) -> {
-                    int count = outcome.response().violationCount();
-                    boolean flagged = outcome.response().flagged();
-
-                    if (flagged || count >= 3) {
-                        isSubmitted = true;
-                        isSubmissionPending = false;
-                        cleanupListeners();
-                        setControlsDisabled(true);
-                        if (stage != null) stage.setFullScreen(false);
-
-                        setViolationBanner("violation-danger",
-                                "Violation 3 of 3 — Examination terminated. Attempt flagged for administrative review.");
-
-                        isDialogActive = true;
-                        try {
-                            UiFeedback.showModalError(stage, "Exam Terminated",
-                                    "The examination was terminated after three focus-loss incidents.\n\n"
-                                            + "Your attempt was submitted and flagged for administrative review.");
-                        } finally {
-                            isDialogActive = false;
-                        }
-                        app.showHistory();
-                    } else if (count == 2) {
-                        setViolationBanner("violation-warning",
-                                "Violation 2 of 3 — Repeated focus loss. One more violation will terminate the examination.");
-
-                        isDialogActive = true;
-                        try {
-                            UiFeedback.showModalWarning(stage, "Proctoring Final Warning",
-                                    "Repeated focus loss was recorded.\n\n"
-                                            + "One more violation will terminate the examination.");
-                        } finally {
-                            isDialogActive = false;
-                        }
-                    } else {
-                        setViolationBanner("violation-warning",
-                                "Violation 1 of 3 — Window focus lost. Incident recorded."
-                                        + (outcome.uploaded() ? " Evidence attached." : ""));
-
-                        isDialogActive = true;
-                        try {
-                            UiFeedback.showModalWarning(stage, "Proctoring Warning",
-                                    "Window focus was lost and the incident was recorded.\n\n"
-                                            + "Please remain in the examination window.");
-                        } finally {
-                            isDialogActive = false;
-                        }
-                    }
-                },
-                (Throwable err) -> {
-                    setViolationBanner("violation-danger",
-                            "Window focus lost. The incident could not be sent; verify the server connection.");
+                isDialogActive = true;
+                try {
+                    UiFeedback.showModalError(stage, "Exam Terminated",
+                            "The examination was terminated after three focus-loss incidents.\n\n"
+                                    + "Your attempt was submitted and flagged for administrative review.");
+                } finally {
+                    isDialogActive = false;
                 }
-        );
+                app.showHistory();
+            } else if (count == 2) {
+                setViolationBanner("violation-warning",
+                        "Violation 2 of 3 — Repeated focus loss. One more violation will terminate the examination.");
+
+                isDialogActive = true;
+                try {
+                    UiFeedback.showModalWarning(stage, "Proctoring Final Warning",
+                            "Repeated focus loss was recorded.\n\n"
+                                    + "One more violation will terminate the examination.");
+                } finally {
+                    isDialogActive = false;
+                }
+            } else {
+                setViolationBanner("violation-warning",
+                        "Violation 1 of 3 — Window focus lost. Incident recorded.");
+
+                isDialogActive = true;
+                try {
+                    UiFeedback.showModalWarning(stage, "Proctoring Warning",
+                            "Window focus was lost and the incident was recorded.\n\n"
+                                    + "Please remain in the examination window.");
+                } finally {
+                    isDialogActive = false;
+                }
+            }
+        });
     }
 
-    private record ProctorOutcome(com.examsystem.contracts.StudentProctorEventResponseDto response, boolean uploaded) {}
+    private void handleProctorTerminationOnFxThread() {
+        Platform.runLater(() -> {
+            if (!isSubmitted) {
+                isSubmitted = true;
+                isSubmissionPending = false;
+                cleanupListeners();
+                setControlsDisabled(true);
+                if (stage != null) stage.setFullScreen(false);
+            }
+        });
+    }
 
     private void renderCurrentQuestion() {
         if (questions.isEmpty()) return;
@@ -857,6 +853,9 @@ public class ExamTakingView {
     private void cleanupListeners() {
         if (countdownTimeline != null) {
             countdownTimeline.stop();
+        }
+        if (proctorCoordinator != null) {
+            proctorCoordinator.shutdown();
         }
         if (stage != null) {
             if (focusListener != null) {

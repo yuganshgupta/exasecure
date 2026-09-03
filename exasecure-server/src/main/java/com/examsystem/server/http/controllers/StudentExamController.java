@@ -232,6 +232,14 @@ public class StudentExamController {
             throw new NotFoundResponse("Event not found for this attempt");
         }
 
+        String evidenceType = ctx.formParam("evidenceType");
+        String effectiveType = (evidenceType == null || evidenceType.isBlank())
+                ? "INITIAL"
+                : evidenceType.trim().toUpperCase(java.util.Locale.ROOT);
+        if (!effectiveType.equals("INITIAL") && !effectiveType.equals("LONG_ABSENCE")) {
+            throw new BadRequestResponse("Invalid evidenceType: must be INITIAL or LONG_ABSENCE");
+        }
+
         var uploadedFile = ctx.uploadedFile("screenshot");
         if (uploadedFile == null) throw new BadRequestResponse("Missing screenshot");
 
@@ -243,10 +251,65 @@ public class StudentExamController {
 
         try {
             byte[] data = uploadedFile.content().readAllBytes();
-            proctorRepository.saveEvidence(eventId, data, contentType, java.time.Instant.now());
+            proctorRepository.saveEvidence(eventId, data, contentType, java.time.Instant.now(), effectiveType);
             ctx.status(200);
         } catch (Exception e) {
             throw new RuntimeException("Failed to save evidence", e);
         }
+    }
+
+    public void recordReturn(Context ctx) {
+        int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
+        enforceOwnership(ctx, attemptId);
+        int eventId = Integer.parseInt(ctx.pathParam("eventId"));
+        if (!proctorRepository.eventBelongsToAttempt(eventId, attemptId)) {
+            throw new NotFoundResponse("Event not found for this attempt");
+        }
+
+        var eventOpt = proctorRepository.findEventById(eventId);
+        if (eventOpt.isEmpty()) {
+            throw new NotFoundResponse("Event not found");
+        }
+        var event = eventOpt.get();
+
+        java.time.Instant serverNow = java.time.Instant.now();
+        long serverDurationMs = Math.max(0, java.time.Duration.between(event.recordedAt(), serverNow).toMillis());
+
+        Long clientDurationMs = null;
+        String ct = ctx.contentType();
+        if (ct != null && ct.toLowerCase(java.util.Locale.ROOT).contains("application/json") && !ctx.body().isBlank()) {
+            try {
+                com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(ctx.body());
+                if (node.has("awayDurationMs") && !node.get("awayDurationMs").isNull()) {
+                    clientDurationMs = node.get("awayDurationMs").asLong();
+                }
+            } catch (Exception ignored) {}
+        } else {
+            String p = ctx.formParam("awayDurationMs");
+            if (p != null && !p.isBlank()) {
+                try { clientDurationMs = Long.parseLong(p); } catch (Exception ignored) {}
+            }
+        }
+
+        // Authoritative duration: use client telemetry only if valid and within tolerance, otherwise server duration
+        long effectiveDurationMs = serverDurationMs;
+        if (clientDurationMs != null && clientDurationMs >= 0 && clientDurationMs <= serverDurationMs + 3000) {
+            effectiveDurationMs = clientDurationMs;
+        }
+
+        proctorRepository.recordReturn(eventId, serverNow, effectiveDurationMs);
+        ctx.status(200);
+    }
+
+    public void recordLongAbsence(Context ctx) {
+        int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
+        enforceOwnership(ctx, attemptId);
+        int eventId = Integer.parseInt(ctx.pathParam("eventId"));
+        if (!proctorRepository.eventBelongsToAttempt(eventId, attemptId)) {
+            throw new NotFoundResponse("Event not found for this attempt");
+        }
+
+        proctorRepository.markLongAbsence(eventId);
+        ctx.status(200);
     }
 }
