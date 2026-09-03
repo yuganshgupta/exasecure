@@ -47,6 +47,13 @@ class AdminUserMutationUseCaseTest {
         assertThat(port.calls).isZero();
     }
 
+    @Test
+    void deletesUserWhenIdValid() {
+        assertThat(useCase.deleteUser(41)).isTrue();
+        assertThat(port.calls).isEqualTo(1);
+        assertThatIllegalArgumentException().isThrownBy(() -> useCase.deleteUser(0));
+    }
+
     private static final class StubEncoder implements PasswordEncoder {
         @Override
         public String encode(String rawPassword) {
@@ -101,6 +108,12 @@ class AdminUserMutationUseCaseTest {
 
         @Override
         public boolean reactivateUser(int id) {
+            calls++;
+            return id == 41;
+        }
+
+        @Override
+        public boolean deleteUser(int id) {
             calls++;
             return id == 41;
         }

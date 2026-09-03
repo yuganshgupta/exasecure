@@ -13,6 +13,7 @@ public final class StudentContractMapper {
                 result.startTime().toString(),
                 result.endTime() == null ? null : result.endTime().toString(),
                 result.score(),
-                result.status());
+                result.status(),
+                result.flagged());
     }
 }

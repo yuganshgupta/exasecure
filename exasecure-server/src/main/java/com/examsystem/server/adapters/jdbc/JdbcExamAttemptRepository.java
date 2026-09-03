@@ -7,6 +7,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
@@ -84,7 +85,10 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
     public int incrementFocusLostCount(int attemptId) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "UPDATE exam_attempts SET focus_lost_count = focus_lost_count + 1 WHERE id = ?")) {
+                     "UPDATE exam_attempts SET focus_lost_count = focus_lost_count + 1, "
+                             + "is_flagged = CASE WHEN focus_lost_count >= 3 THEN 1 ELSE is_flagged END, "
+                             + "proctoring_status = CASE WHEN focus_lost_count >= 3 THEN 'FLAGGED' ELSE proctoring_status END "
+                             + "WHERE id = ?")) {
             ps.setInt(1, attemptId);
             ps.executeUpdate();
         } catch (Exception e) {
@@ -109,11 +113,16 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
     public void calculateAndSetScore(int attemptId, int focusLostCount, int score, Instant submittedAt) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "UPDATE exam_attempts SET score = ?, end_time = ?, status = 'SUBMITTED', focus_lost_count = ? WHERE id = ? AND status = 'ACTIVE'")) {
+                     "UPDATE exam_attempts SET score = ?, end_time = ?, status = 'SUBMITTED', focus_lost_count = ?, "
+                             + "is_flagged = CASE WHEN ? >= 3 THEN 1 ELSE is_flagged END, "
+                             + "proctoring_status = CASE WHEN ? >= 3 THEN 'FLAGGED' ELSE proctoring_status END "
+                             + "WHERE id = ? AND status = 'ACTIVE'")) {
             ps.setInt(1, score);
             ps.setTimestamp(2, Timestamp.from(submittedAt));
             ps.setInt(3, focusLostCount);
-            ps.setInt(4, attemptId);
+            ps.setInt(4, focusLostCount);
+            ps.setInt(5, focusLostCount);
+            ps.setInt(6, attemptId);
             int updated = ps.executeUpdate();
             if (updated == 0) {
                 throw new IllegalStateException("Attempt is not ACTIVE or does not exist");
@@ -249,11 +258,16 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
 
                 // Update attempt to SUBMITTED with score
                 try (PreparedStatement psUpdate = conn.prepareStatement(
-                        "UPDATE exam_attempts SET score = ?, end_time = ?, status = 'SUBMITTED', focus_lost_count = ? WHERE id = ? AND status = 'ACTIVE'")) {
+                        "UPDATE exam_attempts SET score = ?, end_time = ?, status = 'SUBMITTED', focus_lost_count = ?, "
+                                + "is_flagged = CASE WHEN ? >= 3 THEN 1 ELSE is_flagged END, "
+                                + "proctoring_status = CASE WHEN ? >= 3 THEN 'FLAGGED' ELSE proctoring_status END "
+                                + "WHERE id = ? AND status = 'ACTIVE'")) {
                     psUpdate.setInt(1, score);
                     psUpdate.setTimestamp(2, Timestamp.from(submittedAt));
                     psUpdate.setInt(3, focusLostCount);
-                    psUpdate.setInt(4, attemptId);
+                    psUpdate.setInt(4, focusLostCount);
+                    psUpdate.setInt(5, focusLostCount);
+                    psUpdate.setInt(6, attemptId);
                     int updated = psUpdate.executeUpdate();
                     if (updated == 0) {
                         throw new IllegalStateException("Attempt was not updated to SUBMITTED");
@@ -272,6 +286,84 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("DB error", e);
+        }
+    }
+
+    @Override
+    public boolean deleteAttempt(int attemptId) {
+        try (Connection conn = dataSource.getConnection()) {
+            conn.setAutoCommit(false);
+            try {
+                // Verify attempt exists
+                try (PreparedStatement check = conn.prepareStatement("SELECT id FROM exam_attempts WHERE id = ? FOR UPDATE")) {
+                    check.setInt(1, attemptId);
+                    try (ResultSet rs = check.executeQuery()) {
+                        if (!rs.next()) {
+                            conn.rollback();
+                            return false;
+                        }
+                    }
+                }
+
+                // 1. Delete proctor evidence blobs owned by this attempt's events
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE pe FROM proctor_evidence_v2 pe "
+                                + "JOIN proctor_events ev ON pe.event_id = ev.id "
+                                + "WHERE ev.attempt_id = ?")) {
+                    ps.setInt(1, attemptId);
+                    ps.executeUpdate();
+                }
+
+                // 2. Delete proctor events owned by this attempt
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM proctor_events WHERE attempt_id = ?")) {
+                    ps.setInt(1, attemptId);
+                    ps.executeUpdate();
+                }
+
+                // 3. Delete from legacy_proctor_logs if present
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM legacy_proctor_logs WHERE attempt_id = ?")) {
+                    ps.setInt(1, attemptId);
+                    ps.executeUpdate();
+                } catch (Exception ignored) {
+                    // Legacy table may not exist in all environments
+                }
+
+                // 4. Delete student answer options owned by this attempt's answers
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE sao FROM student_answer_options sao "
+                                + "JOIN student_answers sa ON sao.answer_id = sa.id "
+                                + "WHERE sa.attempt_id = ?")) {
+                    ps.setInt(1, attemptId);
+                    ps.executeUpdate();
+                }
+
+                // 5. Delete student answers owned by this attempt
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM student_answers WHERE attempt_id = ?")) {
+                    ps.setInt(1, attemptId);
+                    ps.executeUpdate();
+                }
+
+                // 6. Delete the exam attempt row itself
+                int deleted;
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM exam_attempts WHERE id = ?")) {
+                    ps.setInt(1, attemptId);
+                    deleted = ps.executeUpdate();
+                }
+
+                conn.commit();
+                return deleted > 0;
+            } catch (Exception e) {
+                conn.rollback();
+                throw new RuntimeException("Failed to delete attempt " + attemptId, e);
+            } finally {
+                conn.setAutoCommit(true);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Database error deleting attempt " + attemptId, e);
         }
     }
 }

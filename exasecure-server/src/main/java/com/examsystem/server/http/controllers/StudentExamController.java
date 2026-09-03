@@ -208,15 +208,17 @@ public class StudentExamController {
         boolean flagged = updated.flagged() || newCount >= 3;
         String status = updated.finalized() ? "SUBMITTED" : "ACTIVE";
 
-        if (newCount >= 3 && !updated.finalized()) {
-            // Auto submit attempt and flag
-            try {
-                submitUseCase.submitExam(attemptId, java.time.Instant.now());
-                status = "SUBMITTED";
-            } catch (Exception ignored) {
-            }
-            attemptRepository.flagAttempt(attemptId);
+        if (newCount >= 3) {
             flagged = true;
+            attemptRepository.flagAttempt(attemptId);
+            if (!updated.finalized()) {
+                // Auto submit attempt
+                try {
+                    submitUseCase.submitExam(attemptId, java.time.Instant.now());
+                    status = "SUBMITTED";
+                } catch (Exception ignored) {
+                }
+            }
         }
 
         ctx.json(new StudentProctorEventResponseDto(eventId, newCount, flagged, status));

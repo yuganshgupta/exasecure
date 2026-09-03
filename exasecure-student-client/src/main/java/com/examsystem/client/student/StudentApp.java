@@ -56,6 +56,7 @@ public class StudentApp extends Application {
 
     public void showExamTaking(StudentExamDto exam, StudentAttemptDto attempt, List<StudentQuestionDto> questions, Map<Integer, List<Integer>> initialAnswers) {
         if (primaryStage != null) {
+            primaryStage.setFullScreenExitKeyCombination(javafx.scene.input.KeyCombination.NO_MATCH);
             primaryStage.setFullScreenExitHint("");
             primaryStage.setFullScreen(true);
         }

@@ -23,4 +23,6 @@ public interface AdminUserMutationPort {
     boolean deactivateUser(int id);
 
     boolean reactivateUser(int id);
+
+    boolean deleteUser(int id);
 }

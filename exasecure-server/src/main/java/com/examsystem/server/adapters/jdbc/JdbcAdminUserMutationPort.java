@@ -123,6 +123,70 @@ public class JdbcAdminUserMutationPort implements AdminUserMutationPort {
         }
     }
 
+    @Override
+    public boolean deleteUser(int id) {
+        try (Connection connection = dataSource.getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                // 1. Verify user exists
+                try (PreparedStatement check = connection.prepareStatement("SELECT id FROM users WHERE id = ? FOR UPDATE")) {
+                    check.setInt(1, id);
+                    try (ResultSet rs = check.executeQuery()) {
+                        if (!rs.next()) {
+                            connection.rollback();
+                            return false;
+                        }
+                    }
+                }
+
+                // 2. Check for dependent exam attempts
+                try (PreparedStatement ps = connection.prepareStatement("SELECT COUNT(*) FROM exam_attempts WHERE student_id = ?")) {
+                    ps.setInt(1, id);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next() && rs.getInt(1) > 0) {
+                            connection.rollback();
+                            throw new IllegalStateException("Cannot delete user with " + rs.getInt(1)
+                                    + " existing exam attempt(s). Deactivate the user instead to preserve examination integrity.");
+                        }
+                    }
+                }
+
+                // 3. Check for dependent created exams
+                try (PreparedStatement ps = connection.prepareStatement("SELECT COUNT(*) FROM exams WHERE created_by = ?")) {
+                    ps.setInt(1, id);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next() && rs.getInt(1) > 0) {
+                            connection.rollback();
+                            throw new IllegalStateException("Cannot delete user who has created " + rs.getInt(1)
+                                    + " examination definition(s). Deactivate the user instead to preserve exam history.");
+                        }
+                    }
+                }
+
+                // 4. Safe to delete: remove active server sessions first
+                deleteSessions(connection, id);
+
+                // 5. Delete the user row
+                int deleted;
+                try (PreparedStatement ps = connection.prepareStatement("DELETE FROM users WHERE id = ?")) {
+                    ps.setInt(1, id);
+                    deleted = ps.executeUpdate();
+                }
+
+                connection.commit();
+                return deleted > 0;
+            } catch (IllegalStateException exception) {
+                connection.rollback();
+                throw exception;
+            } catch (SQLException exception) {
+                connection.rollback();
+                throw exception;
+            }
+        } catch (SQLException exception) {
+            throw translate(exception);
+        }
+    }
+
     private static void bindUser(
             PreparedStatement statement,
             String username,

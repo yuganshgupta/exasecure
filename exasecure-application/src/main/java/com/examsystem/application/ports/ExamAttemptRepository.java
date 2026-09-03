@@ -23,4 +23,8 @@ public interface ExamAttemptRepository {
 
     default void flagAttempt(int attemptId) {
     }
+
+    default boolean deleteAttempt(int attemptId) {
+        return false;
+    }
 }

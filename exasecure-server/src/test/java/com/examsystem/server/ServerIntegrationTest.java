@@ -230,11 +230,29 @@ class ServerIntegrationTest {
         assertUserPassword(userId, "api-student-updated", "replacement-password", true);
         assertSessionMissing("token-api-student-before-update");
 
+        insertSession("token-api-student-before-deactivate", userId);
+        HttpResponse<String> deactivateResponse = sendJson(
+                client, "POST", "/api/v1/admin/users/" + userId + "/deactivate", "token-admin1", null);
+        assertThat(deactivateResponse.statusCode()).isEqualTo(204);
+        assertUserPassword(userId, "api-student-updated", "replacement-password", false);
+        assertSessionMissing("token-api-student-before-deactivate");
+
+        HttpResponse<String> reactivateResponse = sendJson(
+                client, "POST", "/api/v1/admin/users/" + userId + "/reactivate", "token-admin1", null);
+        assertThat(reactivateResponse.statusCode()).isEqualTo(204);
+        assertUserPassword(userId, "api-student-updated", "replacement-password", true);
+
+        // Delete user with historical attempt (user 101 has attempt 201) -> 409 Conflict
+        HttpResponse<String> conflictDeleteResponse = sendJson(
+                client, "DELETE", "/api/v1/admin/users/101", "token-admin1", null);
+        assertThat(conflictDeleteResponse.statusCode()).isEqualTo(409);
+
+        // Safe delete unused user -> 204, row deleted from DB
         insertSession("token-api-student-before-delete", userId);
         HttpResponse<String> deleteResponse = sendJson(
                 client, "DELETE", "/api/v1/admin/users/" + userId, "token-admin1", null);
         assertThat(deleteResponse.statusCode()).isEqualTo(204);
-        assertUserPassword(userId, "api-student-updated", "replacement-password", false);
+        assertUserMissing(userId);
         assertSessionMissing("token-api-student-before-delete");
 
         HttpResponse<String> selfDeleteResponse = sendJson(
@@ -341,6 +359,11 @@ class ServerIntegrationTest {
                 client, "DELETE", "/api/v1/admin/exams/" + createdExamId, "token-admin1", null);
         assertThat(deactivate.statusCode()).isEqualTo(204);
         assertDefinition(createdExamId, "API Definition", 1, null, false, 2, 5);
+
+        HttpResponse<String> reactivate = sendJson(
+                client, "POST", "/api/v1/admin/exams/" + createdExamId + "/reactivate", "token-admin1", null);
+        assertThat(reactivate.statusCode()).isEqualTo(204);
+        assertDefinition(createdExamId, "API Definition", 1, null, true, 2, 5);
     }
 
     @Test
@@ -351,6 +374,10 @@ class ServerIntegrationTest {
                 .isEqualTo(401);
         assertThat(sendJson(client, "GET", "/api/v1/student/history", "token-expired", null).statusCode())
                 .isEqualTo(401);
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var stmt = conn.createStatement()) {
+            stmt.execute("UPDATE users SET is_active = 0 WHERE id = 104");
+        }
         assertThat(sendJson(client, "GET", "/api/v1/student/history", "token-inactive", null).statusCode())
                 .isEqualTo(401);
 
@@ -1136,5 +1163,233 @@ class ServerIntegrationTest {
                 assertThat(result.next()).isFalse();
             }
         }
+    }
+
+    private static void assertUserMissing(int userId) throws Exception {
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement statement = conn.prepareStatement(
+                     "SELECT COUNT(*) FROM users WHERE id = ?")) {
+            statement.setInt(1, userId);
+            try (ResultSet result = statement.executeQuery()) {
+                assertThat(result.next()).isTrue();
+                assertThat(result.getInt(1)).isZero();
+            }
+        }
+    }
+
+    @Test
+    void testMultiAttemptIsolationAndDeleteAttempt() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        // 1. Seed dedicated Exam 99 with Question 991, Options 9901, 9902
+        int dedicatedExamId = 99;
+        int attemptA = 991; // Student 101
+        int attemptB = 992; // Student 102
+
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO exams (id, title, duration_minutes, created_by, is_active) VALUES (" + dedicatedExamId + ", 'Isolation Exam', 60, 103, 1)");
+            stmt.execute("INSERT INTO questions (id, exam_id, question_text, correct_option_number, question_type, is_active) VALUES (991, " + dedicatedExamId + ", 'Iso Q', 1, 'SINGLE', 1)");
+            stmt.execute("INSERT INTO options (id, question_id, option_number, option_text, is_correct, is_active) VALUES (9901, 991, 1, 'Iso C', 1, 1), (9902, 991, 2, 'Iso W', 0, 1)");
+
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (" + attemptA + ", " + dedicatedExamId + ", 101, NOW(), 'ACTIVE')");
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (" + attemptB + ", " + dedicatedExamId + ", 102, NOW(), 'ACTIVE')");
+
+            // Add answers for Attempt A
+            stmt.execute("INSERT INTO student_answers (id, attempt_id, question_id, selected_options, is_correct, answer_timestamp) VALUES (1001, " + attemptA + ", 991, '1', 1, NOW())");
+            stmt.execute("INSERT INTO student_answer_options (answer_id, selected_option) VALUES (1001, 1)");
+
+            // Add answers for Attempt B
+            stmt.execute("INSERT INTO student_answers (id, attempt_id, question_id, selected_options, is_correct, answer_timestamp) VALUES (1002, " + attemptB + ", 991, '1', 1, NOW())");
+            stmt.execute("INSERT INTO student_answer_options (answer_id, selected_option) VALUES (1002, 1)");
+
+            // Add proctor events and evidence for Attempt A
+            stmt.execute("INSERT INTO proctor_events (id, attempt_id, event_type, recorded_at) VALUES (1101, " + attemptA + ", 'FOCUS_LOST', NOW())");
+            stmt.execute("INSERT INTO proctor_evidence_v2 (event_id, content_type, byte_size, screenshot_data, recorded_at) VALUES (1101, 'image/png', 4, 0x12345678, NOW())");
+
+            // Add proctor events and evidence for Attempt B
+            stmt.execute("INSERT INTO proctor_events (id, attempt_id, event_type, recorded_at) VALUES (1102, " + attemptB + ", 'FOCUS_LOST', NOW())");
+            stmt.execute("INSERT INTO proctor_evidence_v2 (event_id, content_type, byte_size, screenshot_data, recorded_at) VALUES (1102, 'image/png', 4, 0x9ABCDEF0, NOW())");
+        }
+
+        // 2. Call DELETE /api/v1/admin/attempts/991 (Delete Attempt A)
+        HttpResponse<String> deleteResponse = sendJson(
+                client, "DELETE", "/api/v1/admin/attempts/" + attemptA, "token-admin1", null);
+        assertThat(deleteResponse.statusCode()).isEqualTo(204);
+
+        // 3. Verify MySQL database state
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var stmt = conn.createStatement()) {
+
+            // Attempt A is GONE
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM exam_attempts WHERE id = " + attemptA)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isZero();
+            }
+            // Attempt A answers are GONE
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM student_answers WHERE attempt_id = " + attemptA)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isZero();
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM student_answer_options WHERE answer_id = 1001")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isZero();
+            }
+            // Attempt A proctor events and evidence are GONE
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM proctor_events WHERE attempt_id = " + attemptA)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isZero();
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM proctor_evidence_v2 WHERE event_id = 1101")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isZero();
+            }
+
+            // Attempt B (Student 102) remains completely INTACT
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM exam_attempts WHERE id = " + attemptB)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(1);
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM student_answers WHERE attempt_id = " + attemptB)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(1);
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM student_answer_options WHERE answer_id = 1002")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(1);
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM proctor_events WHERE attempt_id = " + attemptB)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(1);
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM proctor_evidence_v2 WHERE event_id = 1102")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(1);
+            }
+
+            // Exam questions, options, and definition remain completely INTACT
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM questions WHERE exam_id = " + dedicatedExamId)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(1);
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM options WHERE question_id = 991")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(2);
+            }
+            try (ResultSet rs = stmt.executeQuery("SELECT is_active FROM exams WHERE id = " + dedicatedExamId)) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(1);
+            }
+        }
+
+        // 4. Verify Exam definition remains usable via Student API
+        HttpResponse<String> startNewAttempt = sendJson(
+                client, "POST", "/api/v1/student/exams/" + dedicatedExamId + "/attempts", "token-stu1", null);
+        assertThat(startNewAttempt.statusCode()).isEqualTo(200);
+        int newAttemptId = new ObjectMapper().readTree(startNewAttempt.body()).required("id").asInt();
+        assertThat(newAttemptId).isGreaterThan(0);
+    }
+
+    @Test
+    void testThreeViolationsEnforceFlaggedInvariantAcrossAllLayers() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        int attemptId = 299;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status, focus_lost_count, is_flagged, proctoring_status) "
+                             + "VALUES (?, 5, 101, NOW(), 'ACTIVE', 0, 0, 'CLEAN') ON DUPLICATE KEY UPDATE status = 'ACTIVE', focus_lost_count = 0, is_flagged = 0, proctoring_status = 'CLEAN'")) {
+            ps.setInt(1, attemptId);
+            ps.executeUpdate();
+        }
+
+        // Send 1st violation
+        HttpRequest ev1 = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/attempts/" + attemptId + "/events"))
+                .header("Authorization", "Bearer token-stu1")
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST"))
+                .build();
+        HttpResponse<String> resp1 = client.send(ev1, HttpResponse.BodyHandlers.ofString());
+        assertThat(resp1.statusCode()).isEqualTo(200);
+        var json1 = new ObjectMapper().readTree(resp1.body());
+        assertThat(json1.required("violationCount").asInt()).isEqualTo(1);
+        assertThat(json1.required("flagged").asBoolean()).isFalse();
+
+        // Send 2nd violation
+        HttpRequest ev2 = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/attempts/" + attemptId + "/events"))
+                .header("Authorization", "Bearer token-stu1")
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST"))
+                .build();
+        HttpResponse<String> resp2 = client.send(ev2, HttpResponse.BodyHandlers.ofString());
+        assertThat(resp2.statusCode()).isEqualTo(200);
+        var json2 = new ObjectMapper().readTree(resp2.body());
+        assertThat(json2.required("violationCount").asInt()).isEqualTo(2);
+        assertThat(json2.required("flagged").asBoolean()).isFalse();
+
+        // Send 3rd violation -> MUST trigger termination and flagging!
+        HttpRequest ev3 = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/attempts/" + attemptId + "/events"))
+                .header("Authorization", "Bearer token-stu1")
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST"))
+                .build();
+        HttpResponse<String> resp3 = client.send(ev3, HttpResponse.BodyHandlers.ofString());
+        assertThat(resp3.statusCode()).isEqualTo(200);
+        var json3 = new ObjectMapper().readTree(resp3.body());
+        assertThat(json3.required("violationCount").asInt()).isGreaterThanOrEqualTo(3);
+        assertThat(json3.required("flagged").asBoolean()).isTrue();
+
+        // 2. Verify authoritative state in MySQL database
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT focus_lost_count, is_flagged, proctoring_status FROM exam_attempts WHERE id = ?")) {
+            ps.setInt(1, attemptId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt("focus_lost_count")).isGreaterThanOrEqualTo(3);
+                assertThat(rs.getBoolean("is_flagged")).isTrue();
+                assertThat(rs.getString("proctoring_status")).isEqualTo("FLAGGED");
+            }
+        }
+
+        // 3. Verify Student History API
+        HttpResponse<String> stuHistory = sendJson(
+                client, "GET", "/api/v1/student/history", "token-stu1", null);
+        assertThat(stuHistory.statusCode()).isEqualTo(200);
+        var historyArray = new ObjectMapper().readTree(stuHistory.body());
+        boolean foundInStuHistory = false;
+        for (var item : historyArray) {
+            if (item.required("attemptId").asInt() == attemptId) {
+                foundInStuHistory = true;
+                assertThat(item.required("flagged").asBoolean()).isTrue();
+                break;
+            }
+        }
+        assertThat(foundInStuHistory).isTrue();
+
+        // 4. Verify Admin Attempts API
+        HttpResponse<String> adminAttempts = sendJson(
+                client, "GET", "/api/v1/admin/exams/5/attempts", "token-admin1", null);
+        assertThat(adminAttempts.statusCode()).isEqualTo(200);
+        var adminArray = new ObjectMapper().readTree(adminAttempts.body());
+        boolean foundInAdminAttempts = false;
+        for (var item : adminArray) {
+            if (item.required("id").asInt() == attemptId) {
+                foundInAdminAttempts = true;
+                assertThat(item.required("flagged").asBoolean()).isTrue();
+                assertThat(item.required("proctoringStatus").asText()).isEqualTo("FLAGGED");
+                assertThat(item.required("focusLostCount").asInt()).isGreaterThanOrEqualTo(3);
+                break;
+            }
+        }
+        assertThat(foundInAdminAttempts).isTrue();
+
+        // 5. Verify Admin Attempt Details API
+        HttpResponse<String> adminDetails = sendJson(
+                client, "GET", "/api/v1/admin/attempts/" + attemptId + "/details", "token-admin1", null);
+        assertThat(adminDetails.statusCode()).isEqualTo(200);
     }
 }

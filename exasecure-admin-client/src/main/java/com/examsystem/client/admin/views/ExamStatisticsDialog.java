@@ -60,7 +60,7 @@ public class ExamStatisticsDialog extends Dialog<Void> {
         // Score Distribution Section
         VBox distBox = new VBox(10);
         distBox.setPadding(new Insets(14));
-        distBox.setStyle("-fx-background-color: white; -fx-border-color: #e2e8f0; -fx-border-radius: 8px; -fx-background-radius: 8px;");
+        distBox.getStyleClass().add("theme-card");
 
         Label distTitle = new Label("Score Distribution (Submitted Attempts)");
         distTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
@@ -101,7 +101,7 @@ public class ExamStatisticsDialog extends Dialog<Void> {
     private VBox createMetricCard(String label, String value, String colorHex) {
         VBox card = new VBox(4);
         card.setPadding(new Insets(12, 14, 12, 14));
-        card.setStyle("-fx-background-color: white; -fx-border-color: #e2e8f0; -fx-border-radius: 8px; -fx-background-radius: 8px;");
+        card.getStyleClass().add("theme-card");
 
         Label valLabel = new Label(value);
         valLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 17));

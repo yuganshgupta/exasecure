@@ -45,9 +45,13 @@ public final class AdminContractMapper {
                 result.id(),
                 result.studentId(),
                 result.studentName(),
+                result.enrollmentNumber(),
                 result.startTime().toString(),
                 result.status(),
-                result.score());
+                result.score(),
+                result.focusLostCount(),
+                result.flagged(),
+                result.proctoringStatus());
     }
 
     public static AdminAttemptDetailDto toAttemptDetailDto(AdminAttemptDetailResult result) {

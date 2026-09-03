@@ -13,6 +13,7 @@ import com.examsystem.contracts.StudentOptionDto;
 import com.examsystem.contracts.StudentQuestionDto;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
+import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -66,6 +67,8 @@ public class ExamTakingView {
     private final ExamTimer examTimer;
     private Timeline countdownTimeline;
     private ChangeListener<Boolean> focusListener;
+    private ChangeListener<Boolean> iconifiedListener;
+    private ChangeListener<Boolean> fullScreenListener;
     private boolean isDialogActive = false;
     private boolean isSubmitted = false;
     private boolean isSubmissionPending = false;
@@ -216,7 +219,7 @@ public class ExamTakingView {
         VBox card = new VBox(20);
         card.setPadding(new Insets(28));
         card.setMaxWidth(760);
-        card.setStyle("-fx-background-color: white; -fx-background-radius: 8px; -fx-border-color: #e2e8f0; -fx-border-radius: 8px; -fx-effect: dropshadow(gaussian, rgba(0,0,0,0.03), 8, 0, 0, 2);");
+        card.getStyleClass().add("theme-card");
 
         HBox questionHeader = new HBox(12);
         questionHeader.setAlignment(Pos.CENTER_LEFT);
@@ -292,7 +295,7 @@ public class ExamTakingView {
         VBox rightSidebar = new VBox(16);
         rightSidebar.setPadding(new Insets(24));
         rightSidebar.setPrefWidth(270);
-        rightSidebar.setStyle("-fx-background-color: white; -fx-border-color: #e2e8f0; -fx-border-width: 0 0 0 1;");
+        rightSidebar.getStyleClass().add("theme-card");
 
         Label paletteTitle = new Label("Question Navigator");
         paletteTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 15));
@@ -351,6 +354,30 @@ public class ExamTakingView {
             }
         };
         stage.focusedProperty().addListener(focusListener);
+
+        iconifiedListener = (obs, oldVal, newVal) -> {
+            if (newVal && !isSubmitted && !isSubmissionPending) {
+                Platform.runLater(() -> {
+                    if (stage != null && !isSubmitted) {
+                        stage.setIconified(false);
+                        stage.toFront();
+                    }
+                });
+            }
+        };
+        stage.iconifiedProperty().addListener(iconifiedListener);
+
+        fullScreenListener = (obs, oldVal, newVal) -> {
+            if (!newVal && !isSubmitted && !isSubmissionPending && !isDialogActive) {
+                Platform.runLater(() -> {
+                    if (stage != null && !isSubmitted && !stage.isFullScreen()) {
+                        stage.setFullScreen(true);
+                        stage.toFront();
+                    }
+                });
+            }
+        };
+        stage.fullScreenProperty().addListener(fullScreenListener);
     }
 
     private void handleFocusLost() {
@@ -394,31 +421,40 @@ public class ExamTakingView {
                         proctorNoticeBanner.setStyle("-fx-background-color: #fee2e2; -fx-text-fill: #991b1b; -fx-font-weight: bold; -fx-padding: 10 16; -fx-background-radius: 6px;");
 
                         isDialogActive = true;
-                        UiFeedback.showError("Exam Terminated",
-                                "You have accumulated 3 proctoring violations (window focus lost).\n\n"
-                                        + "Your exam has been automatically submitted and flagged for academic review.\n"
-                                        + "Your truthful raw score has been preserved for administrative evaluation.");
-                        isDialogActive = false;
+                        try {
+                            UiFeedback.showModalError(stage, "Exam Terminated",
+                                    "You have accumulated 3 proctoring violations (window focus lost).\n\n"
+                                            + "Your exam has been automatically submitted and flagged for academic review.\n"
+                                            + "Your truthful raw score has been preserved for administrative evaluation.");
+                        } finally {
+                            isDialogActive = false;
+                        }
                         app.showHistory();
                     } else if (count == 2) {
                         proctorNoticeBanner.setText("⚠️ FINAL WARNING (2/3 Violations): Another focus loss will automatically terminate and flag your exam!");
                         proctorNoticeBanner.setStyle("-fx-background-color: #fef3c7; -fx-text-fill: #92400e; -fx-font-weight: bold; -fx-padding: 10 16; -fx-background-radius: 6px;");
 
                         isDialogActive = true;
-                        UiFeedback.showWarning("Proctoring Final Warning",
-                                "You have lost window focus a second time (2/3 violations).\n\n"
-                                        + "WARNING: A 3rd violation will result in immediate termination and flagging of your exam.");
-                        isDialogActive = false;
+                        try {
+                            UiFeedback.showModalWarning(stage, "Proctoring Final Warning",
+                                    "You have lost window focus a second time (2/3 violations).\n\n"
+                                            + "WARNING: A 3rd violation will result in immediate termination and flagging of your exam.");
+                        } finally {
+                            isDialogActive = false;
+                        }
                     } else {
                         proctorNoticeBanner.setText("⚠️ Warning (1/3 Violations): Window focus lost. Incident recorded"
                                 + (outcome.uploaded() ? " with screenshot evidence." : "."));
                         proctorNoticeBanner.setStyle("-fx-background-color: #fef3c7; -fx-text-fill: #92400e; -fx-font-weight: bold; -fx-padding: 10 16; -fx-background-radius: 6px;");
 
                         isDialogActive = true;
-                        UiFeedback.showWarning("Proctoring Warning",
-                                "Window focus lost (1/3 violations).\n\n"
-                                        + "Please remain focused on the exam window. Accumulating 3 violations will automatically terminate your attempt.");
-                        isDialogActive = false;
+                        try {
+                            UiFeedback.showModalWarning(stage, "Proctoring Warning",
+                                    "Window focus lost (1/3 violations).\n\n"
+                                            + "Please remain focused on the exam window. Accumulating 3 violations will automatically terminate your attempt.");
+                        } finally {
+                            isDialogActive = false;
+                        }
                     }
                 },
                 (Throwable err) -> {
@@ -659,8 +695,13 @@ public class ExamTakingView {
         }
         content.append("\nOnce submitted, your answers cannot be modified and your exam attempt will be finalized and graded.");
 
-        boolean confirmed = UiFeedback.showConfirmation("Submit Examination", "Are you ready to submit your exam?", content.toString());
-        isDialogActive = false;
+        boolean confirmed;
+        isDialogActive = true;
+        try {
+            confirmed = UiFeedback.showConfirmation(stage, "Submit Examination", "Are you ready to submit your exam?", content.toString());
+        } finally {
+            isDialogActive = false;
+        }
 
         if (confirmed) {
             startSubmissionProcess();
@@ -763,8 +804,16 @@ public class ExamTakingView {
         if (countdownTimeline != null) {
             countdownTimeline.stop();
         }
-        if (stage != null && focusListener != null) {
-            stage.focusedProperty().removeListener(focusListener);
+        if (stage != null) {
+            if (focusListener != null) {
+                stage.focusedProperty().removeListener(focusListener);
+            }
+            if (iconifiedListener != null) {
+                stage.iconifiedProperty().removeListener(iconifiedListener);
+            }
+            if (fullScreenListener != null) {
+                stage.fullScreenProperty().removeListener(fullScreenListener);
+            }
         }
     }
 }

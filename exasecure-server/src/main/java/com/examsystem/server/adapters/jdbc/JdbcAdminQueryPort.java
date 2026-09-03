@@ -73,19 +73,31 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
         List<AdminAttemptResult> attempts = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "SELECT a.id, a.student_id, u.full_name, a.start_time, a.status, a.score "
+                     "SELECT a.id, a.student_id, u.full_name, u.enrollment_number, a.start_time, a.status, a.score, "
+                             + "a.focus_lost_count, a.is_flagged, a.proctoring_status "
                              + "FROM exam_attempts a JOIN users u ON a.student_id = u.id "
                              + "WHERE a.exam_id = ? ORDER BY a.start_time DESC")) {
             ps.setInt(1, examId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
+                    int focusLost = rs.getInt("focus_lost_count");
+                    boolean isFlagged = rs.getBoolean("is_flagged") || focusLost >= 3;
+                    String proctorStatus = isFlagged ? "FLAGGED" : rs.getString("proctoring_status");
+                    if (proctorStatus == null || proctorStatus.isBlank()) {
+                        proctorStatus = isFlagged ? "FLAGGED" : "CLEAN";
+                    }
+
                     attempts.add(new AdminAttemptResult(
                             rs.getInt("id"),
                             rs.getInt("student_id"),
                             rs.getString("full_name"),
+                            rs.getString("enrollment_number"),
                             rs.getTimestamp("start_time").toInstant(),
                             rs.getString("status"),
-                            (Integer) rs.getObject("score")));
+                            (Integer) rs.getObject("score"),
+                            focusLost,
+                            isFlagged,
+                            proctorStatus));
                 }
             }
         } catch (Exception e) {

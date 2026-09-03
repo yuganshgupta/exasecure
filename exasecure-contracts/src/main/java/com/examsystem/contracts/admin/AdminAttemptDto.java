@@ -4,6 +4,7 @@ public record AdminAttemptDto(
         int id,
         int studentId,
         String studentName,
+        String enrollmentNumber,
         String startTime,
         String status,
         Integer score,
@@ -11,7 +12,11 @@ public record AdminAttemptDto(
         boolean flagged,
         String proctoringStatus
 ) {
+    public AdminAttemptDto(int id, int studentId, String studentName, String startTime, String status, Integer score, int focusLostCount, boolean flagged, String proctoringStatus) {
+        this(id, studentId, studentName, null, startTime, status, score, focusLostCount, flagged, proctoringStatus);
+    }
+
     public AdminAttemptDto(int id, int studentId, String studentName, String startTime, String status, Integer score) {
-        this(id, studentId, studentName, startTime, status, score, 0, false, "CLEAN");
+        this(id, studentId, studentName, null, startTime, status, score, 0, false, "CLEAN");
     }
 }

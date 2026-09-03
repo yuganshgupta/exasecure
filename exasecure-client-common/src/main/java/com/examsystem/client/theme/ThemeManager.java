@@ -52,15 +52,40 @@ public class ThemeManager {
         applyThemeToScene(scene);
     }
 
+    public void applyTheme(javafx.scene.control.Dialog<?> dialog) {
+        if (dialog == null) return;
+        applyTheme(dialog.getDialogPane());
+    }
+
+    public void applyTheme(javafx.scene.control.DialogPane pane) {
+        if (pane == null) return;
+        pane.getStylesheets().clear();
+        String externalForm = getCssResourceExternalForm();
+        if (externalForm != null) {
+            pane.getStylesheets().add(externalForm);
+        }
+        if (pane.getScene() != null) {
+            applyTheme(pane.getScene());
+        }
+    }
+
     private void applyThemeToScene(Scene scene) {
         scene.getStylesheets().clear();
+        String externalForm = getCssResourceExternalForm();
+        if (externalForm != null) {
+            scene.getStylesheets().add(externalForm);
+        }
+    }
+
+    public String getCssResourceExternalForm() {
         String cssPath = getCssResourcePath();
         if (cssPath != null) {
             var resource = getClass().getResource(cssPath);
             if (resource != null) {
-                scene.getStylesheets().add(resource.toExternalForm());
+                return resource.toExternalForm();
             }
         }
+        return null;
     }
 
     private String getCssResourcePath() {

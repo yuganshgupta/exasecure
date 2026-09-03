@@ -188,11 +188,19 @@ public class ApiClient {
     }
 
     public void adminDeactivateUser(int userId) {
+        postEmpty("/admin/users/" + userId + "/deactivate", true);
+    }
+
+    public void adminDeleteUser(int userId) {
         deleteVoid("/admin/users/" + userId);
     }
 
     public void adminReactivateUser(int userId) {
         postEmpty("/admin/users/" + userId + "/reactivate", true);
+    }
+
+    public void adminDeleteAttempt(int attemptId) {
+        deleteVoid("/admin/attempts/" + attemptId);
     }
 
     public List<AdminExamDto> adminListExams() {

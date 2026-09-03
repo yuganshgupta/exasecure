@@ -166,7 +166,7 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
             this.parent = parent;
             setSpacing(10);
             setPadding(new Insets(12));
-            setStyle("-fx-background-color: white; -fx-background-radius: 6px; -fx-border-color: #e2e8f0; -fx-border-radius: 6px;");
+            getStyleClass().add("theme-card");
 
             HBox header = new HBox(10);
             header.setAlignment(Pos.CENTER_LEFT);

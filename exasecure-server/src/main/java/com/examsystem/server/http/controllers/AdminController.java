@@ -25,6 +25,9 @@ import io.javalin.http.Context;
 import io.javalin.http.ForbiddenResponse;
 import io.javalin.http.NotFoundResponse;
 
+import com.examsystem.application.ports.ExamAttemptRepository;
+import io.javalin.http.ConflictResponse;
+
 import java.util.List;
 
 public class AdminController {
@@ -32,16 +35,19 @@ public class AdminController {
     private final AdminUserMutationUseCase userMutationUseCase;
     private final AdminExamDefinitionUseCase examDefinitionUseCase;
     private final QuestionRepository questionRepository;
+    private final ExamAttemptRepository attemptRepository;
 
     public AdminController(
             AdminQueryPort adminQueryPort,
             AdminUserMutationUseCase userMutationUseCase,
             AdminExamDefinitionUseCase examDefinitionUseCase,
-            QuestionRepository questionRepository) {
+            QuestionRepository questionRepository,
+            ExamAttemptRepository attemptRepository) {
         this.adminQueryPort = adminQueryPort;
         this.userMutationUseCase = userMutationUseCase;
         this.examDefinitionUseCase = examDefinitionUseCase;
         this.questionRepository = questionRepository;
+        this.attemptRepository = attemptRepository;
     }
 
     public void listExams(Context ctx) {
@@ -168,6 +174,30 @@ public class AdminController {
         int id = Integer.parseInt(ctx.pathParam("userId"));
         if (!userMutationUseCase.reactivateUser(id)) {
             throw new NotFoundResponse("Inactive user not found");
+        }
+        ctx.status(204);
+    }
+
+    public void deleteUser(Context ctx) {
+        int id = Integer.parseInt(ctx.pathParam("userId"));
+        User currentUser = ctx.attribute("user");
+        if (currentUser != null && currentUser.id() == id) {
+            throw new ForbiddenResponse("Cannot delete your own account");
+        }
+        try {
+            if (!userMutationUseCase.deleteUser(id)) {
+                throw new NotFoundResponse("User not found");
+            }
+            ctx.status(204);
+        } catch (IllegalStateException exception) {
+            throw new ConflictResponse(exception.getMessage());
+        }
+    }
+
+    public void deleteAttempt(Context ctx) {
+        int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
+        if (!attemptRepository.deleteAttempt(attemptId)) {
+            throw new NotFoundResponse("Attempt not found");
         }
         ctx.status(204);
     }

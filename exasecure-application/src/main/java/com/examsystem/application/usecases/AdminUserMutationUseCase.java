@@ -59,6 +59,11 @@ public class AdminUserMutationUseCase {
         return mutationPort.reactivateUser(id);
     }
 
+    public boolean deleteUser(int id) {
+        requirePositiveId(id);
+        return mutationPort.deleteUser(id);
+    }
+
     private static String requirePassword(String password) {
         if (password == null || password.length() < 8) {
             throw new IllegalArgumentException("Password must be at least 8 characters");

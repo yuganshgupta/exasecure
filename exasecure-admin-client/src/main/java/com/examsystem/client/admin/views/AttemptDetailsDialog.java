@@ -30,13 +30,13 @@ public class AttemptDetailsDialog extends Dialog<Void> {
         HBox summaryCard = new HBox(20);
         summaryCard.setPadding(new Insets(12, 16, 12, 16));
         summaryCard.setAlignment(Pos.CENTER_LEFT);
-        summaryCard.setStyle("-fx-background-color: #f1f5f9; -fx-background-radius: 8px; -fx-border-color: #cbd5e1; -fx-border-radius: 8px;");
+        summaryCard.getStyleClass().add("theme-card");
 
         VBox stuInfo = new VBox(2);
         Label stuName = new Label(attempt.studentName());
         stuName.setFont(Font.font("Segoe UI", FontWeight.BOLD, 15));
-        stuName.setStyle("-fx-text-fill: #0f172a;");
-        Label stuSub = new Label("Student ID: #" + attempt.studentId() + " • Attempt #" + attempt.id());
+        String enrollText = attempt.enrollmentNumber() != null ? " • Enrollment: " + attempt.enrollmentNumber() : "";
+        Label stuSub = new Label("Student ID: #" + attempt.studentId() + enrollText + " • Attempt #" + attempt.id());
         stuSub.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
         stuInfo.getChildren().addAll(stuName, stuSub);
 
@@ -45,7 +45,7 @@ public class AttemptDetailsDialog extends Dialog<Void> {
 
         HBox scoreBox = new HBox(8);
         scoreBox.setAlignment(Pos.CENTER);
-        scoreBox.setStyle("-fx-background-color: white; -fx-padding: 6 12; -fx-background-radius: 6px; -fx-border-color: #e2e8f0; -fx-border-radius: 6px;");
+        scoreBox.setPadding(new Insets(6, 12, 6, 12));
 
         Label scoreLabel = new Label("Score: " + (attempt.score() != null ? attempt.score() + " pts" : "Pending"));
         scoreLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
@@ -57,7 +57,7 @@ public class AttemptDetailsDialog extends Dialog<Void> {
         Label violationsBadge = new Label("Violations: " + attempt.focusLostCount());
         violationsBadge.setStyle("-fx-background-color: #f1f5f9; -fx-text-fill: #475569; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;");
 
-        Label integrityBadge = new Label(attempt.flagged() ? "⚠️ FLAGGED FOR REVIEW" : "CLEAN");
+        Label integrityBadge = new Label(attempt.flagged() ? "⚠️ FLAGGED" : "CLEAN");
         integrityBadge.setStyle(attempt.flagged()
                 ? "-fx-background-color: #fee2e2; -fx-text-fill: #991b1b; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;"
                 : "-fx-background-color: #dcfce7; -fx-text-fill: #15803d; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;");
