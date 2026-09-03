@@ -75,7 +75,7 @@ class ServerIntegrationTest {
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (201, 1, 101, NOW(), 'ACTIVE')");
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (202, 2, 102, NOW(), 'ACTIVE')");
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (203, 3, 101, NOW(), 'ACTIVE')");
-            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (204, 4, 101, DATE_SUB(NOW(), INTERVAL 2 HOUR), 'ACTIVE')");
+            stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (204, 4, 101, DATE_SUB(UTC_TIMESTAMP(), INTERVAL 2 HOUR), 'ACTIVE')");
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (205, 5, 101, NOW(), 'ACTIVE')");
             stmt.execute("INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status) VALUES (206, 6, 101, NOW(), 'ACTIVE')");
             stmt.execute("INSERT INTO proctor_events (id, attempt_id, event_type, recorded_at) VALUES (301, 202, 'FOCUS_LOST', NOW())");
