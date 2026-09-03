@@ -301,12 +301,29 @@ public class StudentExamController {
         ctx.status(200);
     }
 
+    private static final long LONG_ABSENCE_MIN_DURATION_MS = 4800; // ~5 seconds (with 200ms grace for network/clock resolution)
+
     public void recordLongAbsence(Context ctx) {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
         enforceOwnership(ctx, attemptId);
         int eventId = Integer.parseInt(ctx.pathParam("eventId"));
         if (!proctorRepository.eventBelongsToAttempt(eventId, attemptId)) {
             throw new NotFoundResponse("Event not found for this attempt");
+        }
+
+        var eventOpt = proctorRepository.findEventById(eventId);
+        if (eventOpt.isEmpty()) {
+            throw new NotFoundResponse("Event not found");
+        }
+        var event = eventOpt.get();
+
+        java.time.Instant serverNow = java.time.Instant.now();
+        java.time.Instant endTime = event.returnedAt() != null ? event.returnedAt() : serverNow;
+        long elapsedMs = Math.max(0, java.time.Duration.between(event.recordedAt(), endTime).toMillis());
+
+        // Independent server-side authoritative check: incident must have actually existed for >= 5 seconds
+        if (elapsedMs < LONG_ABSENCE_MIN_DURATION_MS) {
+            throw new BadRequestResponse("Focus-loss incident duration (" + elapsedMs + "ms) has not existed for >= 5 seconds");
         }
 
         proctorRepository.markLongAbsence(eventId);

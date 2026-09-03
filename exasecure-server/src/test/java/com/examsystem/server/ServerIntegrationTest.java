@@ -996,7 +996,20 @@ class ServerIntegrationTest {
         HttpResponse<String> initUploadRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", initialBytes, "INITIAL");
         assertThat(initUploadRes.statusCode()).isEqualTo(200);
 
-        // 3. Mark long absence state (~5000ms)
+        // 3. Early call to /long-absence after ~10-50ms MUST be rejected (HTTP 400)
+        HttpResponse<String> earlyLongAbsenceRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", "token-stu1", null);
+        assertThat(earlyLongAbsenceRes.statusCode()).isEqualTo(400);
+
+        // Fast-forward event recorded_at to 6 seconds ago (existed for >= 5s)
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE proctor_events SET recorded_at = ? WHERE id = ?")) {
+            ps.setTimestamp(1, java.sql.Timestamp.from(Instant.now().minusSeconds(6)));
+            ps.setInt(2, eventId);
+            ps.executeUpdate();
+        }
+
+        // Now mark long absence state (~5000ms) succeeds with 200
         HttpResponse<String> longAbsenceRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", "token-stu1", null);
         assertThat(longAbsenceRes.statusCode()).isEqualTo(200);
 
@@ -1102,6 +1115,75 @@ class ServerIntegrationTest {
             try (ResultSet rs = ps.executeQuery()) {
                 assertThat(rs.next()).isTrue();
                 assertThat(rs.getLong("away_duration_ms")).isGreaterThanOrEqualTo(0); // Validated to non-negative
+            }
+        }
+    }
+
+    @Test
+    void longAbsence_rejectedWhenCalledTooEarly_andAcceptedWhenThresholdMet() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        int attemptId = 9803;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM exam_attempts WHERE id = " + attemptId);
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status, focus_lost_count, is_flagged, proctoring_status) "
+                            + "VALUES (?, 1, 101, NOW(), 'ACTIVE', 0, 0, 'CLEAN')")) {
+                ps.setInt(1, attemptId);
+                ps.executeUpdate();
+            }
+        }
+
+        String clientEventId = UUID.randomUUID().toString();
+        HttpResponse<String> eventRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events", "token-stu1",
+                "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + clientEventId + "\"}");
+        int eventId = new ObjectMapper().readTree(eventRes.body()).get("eventId").asInt();
+
+        // 1. Malicious/early call after ~10-100ms -> MUST BE REJECTED (HTTP 400)
+        HttpResponse<String> earlyRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", "token-stu1", null);
+        assertThat(earlyRes.statusCode()).isEqualTo(400);
+
+        // Invariant: is_long_absence remains false (0) and strikes remain exactly 1
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT is_long_absence FROM proctor_events WHERE id = ?")) {
+            ps.setInt(1, eventId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getBoolean("is_long_absence")).isFalse();
+            }
+        }
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT focus_lost_count FROM exam_attempts WHERE id = ?")) {
+            ps.setInt(1, attemptId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt("focus_lost_count")).isEqualTo(1);
+            }
+        }
+
+        // 2. Fast-forward event recorded_at to 6 seconds ago -> eligible (HTTP 200)
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE proctor_events SET recorded_at = ? WHERE id = ?")) {
+            ps.setTimestamp(1, java.sql.Timestamp.from(Instant.now().minusSeconds(6)));
+            ps.setInt(2, eventId);
+            ps.executeUpdate();
+        }
+
+        HttpResponse<String> validRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", "token-stu1", null);
+        assertThat(validRes.statusCode()).isEqualTo(200);
+
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT is_long_absence FROM proctor_events WHERE id = ?")) {
+            ps.setInt(1, eventId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getBoolean("is_long_absence")).isTrue();
             }
         }
     }
