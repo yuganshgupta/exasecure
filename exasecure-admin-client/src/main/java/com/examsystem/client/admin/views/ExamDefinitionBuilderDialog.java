@@ -9,8 +9,6 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,11 +25,12 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
 
         ButtonType saveBtnType = new ButtonType("Save Exam Definition", ButtonBar.ButtonData.OK_DONE);
         getDialogPane().getButtonTypes().addAll(saveBtnType, ButtonType.CANCEL);
+        getDialogPane().getStyleClass().add("product-dialog");
 
         VBox content = new VBox(16);
         content.setPadding(new Insets(16));
-        content.setPrefWidth(680);
-        content.setPrefHeight(560);
+        content.setPrefWidth(720);
+        content.setPrefHeight(620);
 
         // Metadata grid
         GridPane metaGrid = new GridPane();
@@ -47,32 +46,35 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
 
         metaGrid.add(new Label("Exam Title:"), 0, 0);
         titleField.setPromptText("Enter examination title");
-        titleField.setPrefWidth(380);
+        titleField.setMaxWidth(Double.MAX_VALUE);
         metaGrid.add(titleField, 1, 0);
 
         metaGrid.add(new Label("Duration (Minutes):"), 0, 1);
         durationField.setPromptText("60");
         durationField.setPrefWidth(120);
         metaGrid.add(durationField, 1, 1);
+        ColumnConstraints labelColumn = new ColumnConstraints();
+        ColumnConstraints fieldColumn = new ColumnConstraints();
+        fieldColumn.setHgrow(Priority.ALWAYS);
+        metaGrid.getColumnConstraints().addAll(labelColumn, fieldColumn);
 
         // Questions section header
         HBox questionsHeader = new HBox(12);
         questionsHeader.setAlignment(Pos.CENTER_LEFT);
         Label qLabel = new Label("Questions Bank");
-        qLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 15));
+        qLabel.getStyleClass().add("section-title");
 
         Region qSpacer = new Region();
         HBox.setHgrow(qSpacer, Priority.ALWAYS);
 
         Button addQBtn = new Button("+ Add Question");
-        addQBtn.setStyle("-fx-background-color: #2563eb; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 4px; -fx-cursor: hand;");
+        addQBtn.getStyleClass().add("btn-primary");
         addQBtn.setOnAction(e -> addQuestionCard(null));
 
         questionsHeader.getChildren().addAll(qLabel, qSpacer, addQBtn);
 
         ScrollPane scrollPane = new ScrollPane(questionsContainer);
         scrollPane.setFitToWidth(true);
-        scrollPane.setStyle("-fx-background: #f8fafc; -fx-background-color: #f8fafc; -fx-border-color: #cbd5e1; -fx-border-radius: 6px;");
         VBox.setVgrow(scrollPane, Priority.ALWAYS);
 
         content.getChildren().addAll(metaGrid, new Separator(), questionsHeader, scrollPane);
@@ -172,7 +174,7 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
             header.setAlignment(Pos.CENTER_LEFT);
 
             numberLabel = new Label("Question " + index);
-            numberLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
+            numberLabel.getStyleClass().add("question-number-small");
 
             typeCombo.getItems().addAll("SINGLE", "MULTI");
             typeCombo.setValue(existing != null && "MULTI".equalsIgnoreCase(existing.type()) ? "MULTI" : "SINGLE");
@@ -181,7 +183,7 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
             HBox.setHgrow(spacer, Priority.ALWAYS);
 
             Button removeQBtn = new Button("✕ Remove");
-            removeQBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #dc2626; -fx-cursor: hand; -fx-font-size: 11px;");
+            removeQBtn.getStyleClass().add("btn-danger");
             removeQBtn.setOnAction(e -> parent.removeQuestionCard(this));
 
             header.getChildren().addAll(numberLabel, new Label("Type:"), typeCombo, spacer, removeQBtn);
@@ -194,13 +196,13 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
             HBox optionsHeader = new HBox(8);
             optionsHeader.setAlignment(Pos.CENTER_LEFT);
             Label optLabel = new Label("Options (Check box to mark correct):");
-            optLabel.setStyle("-fx-font-size: 11px; -fx-text-fill: #64748b;");
+            optLabel.getStyleClass().addAll("secondary-text", "small-text");
 
             Region optSpacer = new Region();
             HBox.setHgrow(optSpacer, Priority.ALWAYS);
 
             Button addOptBtn = new Button("+ Add Option");
-            addOptBtn.setStyle("-fx-background-color: #f1f5f9; -fx-text-fill: #334155; -fx-font-size: 11px; -fx-cursor: hand;");
+            addOptBtn.getStyleClass().add("btn-secondary");
             addOptBtn.setOnAction(e -> addOptionRow(null));
 
             optionsHeader.getChildren().addAll(optLabel, optSpacer, addOptBtn);
@@ -277,14 +279,15 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
             setAlignment(Pos.CENTER_LEFT);
 
             textField.setPromptText("Enter option text");
-            textField.setPrefWidth(360);
+            textField.setMaxWidth(Double.MAX_VALUE);
+            HBox.setHgrow(textField, Priority.ALWAYS);
             if (existing != null) {
                 textField.setText(existing.text());
                 correctBox.setSelected(existing.correct());
             }
 
             Button removeBtn = new Button("✕");
-            removeBtn.setStyle("-fx-background-color: transparent; -fx-text-fill: #94a3b8; -fx-cursor: hand;");
+            removeBtn.getStyleClass().add("btn-secondary");
             removeBtn.setOnAction(e -> card.removeOptionRow(this));
 
             getChildren().addAll(correctBox, textField, removeBtn);

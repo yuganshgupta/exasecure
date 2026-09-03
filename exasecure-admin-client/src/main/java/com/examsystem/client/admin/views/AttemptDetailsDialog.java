@@ -7,63 +7,66 @@ import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 
 import java.util.List;
 
 public class AttemptDetailsDialog extends Dialog<Void> {
 
     public AttemptDetailsDialog(AdminAttemptDto attempt, List<AdminAttemptDetailDto> details) {
-        setTitle("Attempt Report Card - #" + attempt.id());
+        setTitle("Attempt Report Card - " + attempt.studentName());
         setHeaderText(null);
 
         DialogPane pane = getDialogPane();
         pane.getButtonTypes().add(ButtonType.CLOSE);
-        pane.setPrefWidth(850);
-        pane.setPrefHeight(560);
+        pane.setPrefWidth(900);
+        pane.setPrefHeight(620);
+        pane.getStyleClass().add("product-dialog");
 
         VBox root = new VBox(14);
         root.setPadding(new Insets(16));
 
         // Header Summary Card
-        HBox summaryCard = new HBox(20);
+        VBox summaryCard = new VBox(10);
         summaryCard.setPadding(new Insets(12, 16, 12, 16));
         summaryCard.setAlignment(Pos.CENTER_LEFT);
-        summaryCard.getStyleClass().add("theme-card");
+        summaryCard.getStyleClass().addAll("theme-card", "details-panel");
 
         VBox stuInfo = new VBox(2);
         Label stuName = new Label(attempt.studentName());
-        stuName.setFont(Font.font("Segoe UI", FontWeight.BOLD, 15));
-        String enrollText = attempt.enrollmentNumber() != null ? " • Enrollment: " + attempt.enrollmentNumber() : "";
-        Label stuSub = new Label("Student ID: #" + attempt.studentId() + enrollText + " • Attempt #" + attempt.id());
-        stuSub.setStyle("-fx-text-fill: #64748b; -fx-font-size: 12px;");
+        stuName.getStyleClass().add("section-title");
+        Label stuSub = new Label((attempt.enrollmentNumber() != null ? "Enrollment: " + attempt.enrollmentNumber() : "Enrollment unavailable")
+                + "  •  Started: " + (attempt.startTime() != null ? attempt.startTime() : "Time unavailable"));
+        stuSub.getStyleClass().addAll("secondary-text", "small-text");
         stuInfo.getChildren().addAll(stuName, stuSub);
-
-        Region spacer = new Region();
-        HBox.setHgrow(spacer, Priority.ALWAYS);
 
         HBox scoreBox = new HBox(8);
         scoreBox.setAlignment(Pos.CENTER);
         scoreBox.setPadding(new Insets(6, 12, 6, 12));
 
-        Label scoreLabel = new Label("Score: " + (attempt.score() != null ? attempt.score() + " pts" : "Pending"));
-        scoreLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
-        scoreLabel.setStyle("-fx-text-fill: #16a34a;");
+        int maximumScore = details == null ? 0 : details.stream().mapToInt(AdminAttemptDetailDto::marks).sum();
+        String scoreText = attempt.score() == null ? "Pending" : maximumScore > 0
+                ? attempt.score() + " / " + maximumScore
+                : String.valueOf(attempt.score());
+        Label scoreLabel = new Label("Score: " + scoreText);
+        scoreLabel.getStyleClass().addAll("metric-value", "metric-value-success");
 
         Label statusBadge = new Label(attempt.status());
-        statusBadge.setStyle("-fx-background-color: #dbeafe; -fx-text-fill: #1e40af; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;");
+        statusBadge.getStyleClass().add(switch (attempt.status().toUpperCase()) {
+            case "ACTIVE" -> "badge-active";
+            case "SUBMITTED" -> "badge-submitted";
+            case "EXPIRED" -> "badge-expired";
+            default -> "badge-neutral";
+        });
 
         Label violationsBadge = new Label("Violations: " + attempt.focusLostCount());
-        violationsBadge.setStyle("-fx-background-color: #f1f5f9; -fx-text-fill: #475569; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;");
+        violationsBadge.getStyleClass().add(attempt.focusLostCount() > 0 ? "badge-warning" : "badge-neutral");
 
         Label integrityBadge = new Label(attempt.flagged() ? "⚠️ FLAGGED" : "CLEAN");
-        integrityBadge.setStyle(attempt.flagged()
-                ? "-fx-background-color: #fee2e2; -fx-text-fill: #991b1b; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;"
-                : "-fx-background-color: #dcfce7; -fx-text-fill: #15803d; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;");
+        integrityBadge.setText(attempt.flagged() ? "FLAGGED" : "CLEAN");
+        integrityBadge.getStyleClass().add(attempt.flagged() ? "badge-flagged" : "badge-clean");
 
         scoreBox.getChildren().addAll(scoreLabel, statusBadge, violationsBadge, integrityBadge);
-        summaryCard.getChildren().addAll(stuInfo, spacer, scoreBox);
+        summaryCard.getChildren().addAll(stuInfo, scoreBox);
 
         setOnShowing(e -> {
             if (pane.getScene() != null) {
@@ -83,6 +86,7 @@ public class AttemptDetailsDialog extends Dialog<Void> {
         TableColumn<AdminAttemptDetailDto, String> qTextCol = new TableColumn<>("Question");
         qTextCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().questionText()));
         qTextCol.setPrefWidth(220);
+        qTextCol.setCellFactory(col -> wrappingCell());
 
         TableColumn<AdminAttemptDetailDto, String> typeCol = new TableColumn<>("Type");
         typeCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().questionType()));
@@ -106,6 +110,7 @@ public class AttemptDetailsDialog extends Dialog<Void> {
             return new SimpleStringProperty(sb.toString());
         });
         studentAnsCol.setPrefWidth(180);
+        studentAnsCol.setCellFactory(col -> wrappingCell());
 
         TableColumn<AdminAttemptDetailDto, String> correctAnsCol = new TableColumn<>("Correct Answer");
         correctAnsCol.setCellValueFactory(d -> {
@@ -125,6 +130,7 @@ public class AttemptDetailsDialog extends Dialog<Void> {
             return new SimpleStringProperty(sb.toString());
         });
         correctAnsCol.setPrefWidth(180);
+        correctAnsCol.setCellFactory(col -> wrappingCell());
 
         TableColumn<AdminAttemptDetailDto, String> resultCol = new TableColumn<>("Result");
         resultCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().isCorrect() ? "✔ Correct" : "✘ Incorrect"));
@@ -142,5 +148,27 @@ public class AttemptDetailsDialog extends Dialog<Void> {
         root.getChildren().addAll(summaryCard, table);
         VBox.setVgrow(table, Priority.ALWAYS);
         pane.setContent(root);
+    }
+
+    private TableCell<AdminAttemptDetailDto, String> wrappingCell() {
+        return new TableCell<>() {
+            private final Label label = new Label();
+            {
+                label.setWrapText(true);
+                label.maxWidthProperty().bind(widthProperty().subtract(12));
+            }
+
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(null);
+                if (empty || item == null) {
+                    setGraphic(null);
+                } else {
+                    label.setText(item);
+                    setGraphic(label);
+                }
+            }
+        };
     }
 }

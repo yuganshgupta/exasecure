@@ -19,8 +19,6 @@ import javafx.scene.control.*;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.layout.*;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
@@ -65,7 +63,6 @@ public class AdminDashboardView {
 
     // 4. Attempts Tab Controls
     private final ComboBox<AdminExamDto> attemptsExamCombo = new ComboBox<>();
-    private final TextField attemptsExamIdField = new TextField();
     private final TableView<AdminAttemptDto> attemptsTable = new TableView<>();
     private final Label attemptsStatusLabel = new Label();
 
@@ -77,8 +74,10 @@ public class AdminDashboardView {
     private final ImageView evidenceImageView = new ImageView();
     private final ScrollPane evidenceScrollPane = new ScrollPane();
     private final Label evidenceStatusLabel = new Label("Select an exam, then an attempt, and a proctor event to review.");
+    private final Label evidenceContextLabel = new Label("No attempt or incident selected.");
     private final Label evidenceZoomLabel = new Label("100%");
     private double evidenceZoom = 1.0;
+    private boolean evidenceFitMode = true;
     private final Map<Integer, byte[]> evidenceCache = new HashMap<>();
     private byte[] currentEvidenceBytes = null;
     private int currentEvidenceEventId = -1;
@@ -105,7 +104,12 @@ public class AdminDashboardView {
     }
 
     private void buildUI() {
-        view.setStyle("-fx-background-color: #f8fafc;");
+        view.getStyleClass().add("app-root");
+        for (Label status : List.of(usersStatusLabel, examsStatusLabel, qbStatusLabel,
+                attemptsStatusLabel, evidenceStatusLabel)) {
+            status.getStyleClass().add("status-text");
+            status.setWrapText(true);
+        }
 
         // Top Navigation Bar
         VBox topContainer = new VBox();
@@ -113,14 +117,13 @@ public class AdminDashboardView {
         HBox topBar = new HBox(16);
         topBar.setPadding(new Insets(14, 24, 14, 24));
         topBar.setAlignment(Pos.CENTER_LEFT);
-        topBar.setStyle("-fx-background-color: #0f172a;");
+        topBar.getStyleClass().addAll("app-header", "app-header-admin");
 
         Label brand = new Label("ExaSecure");
-        brand.setFont(Font.font("Segoe UI", FontWeight.BOLD, 20));
-        brand.setStyle("-fx-text-fill: white;");
+        brand.getStyleClass().add("header-title");
 
         Label adminBadge = new Label("ADMIN CONSOLE");
-        adminBadge.setStyle("-fx-background-color: #dc2626; -fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 3 8; -fx-background-radius: 4px;");
+        adminBadge.getStyleClass().addAll("portal-badge", "portal-badge-admin");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -129,10 +132,10 @@ public class AdminDashboardView {
                 ? apiClient.getSessionState().fullName()
                 : apiClient.getSessionState().username();
         Label userLabel = new Label("Admin: " + adminName);
-        userLabel.setStyle("-fx-text-fill: #cbd5e1; -fx-font-size: 13px;");
+        userLabel.getStyleClass().add("header-meta");
 
         Button logoutBtn = new Button("Sign Out");
-        logoutBtn.setStyle("-fx-background-color: #334155; -fx-text-fill: white; -fx-background-radius: 6px; -fx-cursor: hand;");
+        logoutBtn.getStyleClass().add("btn-header");
         logoutBtn.setOnAction(e -> {
             apiClient.logout();
             app.showLogin();
@@ -145,24 +148,24 @@ public class AdminDashboardView {
         HBox overviewStrip = new HBox(20);
         overviewStrip.setPadding(new Insets(8, 24, 8, 24));
         overviewStrip.setAlignment(Pos.CENTER_LEFT);
-        overviewStrip.setStyle("-fx-background-color: #1e293b; -fx-border-color: #334155; -fx-border-width: 1 0 0 0;");
+        overviewStrip.getStyleClass().add("status-strip");
 
-        metricUsersLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12px;");
-        metricExamsLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12px;");
-        metricAttemptsLabel.setStyle("-fx-text-fill: #94a3b8; -fx-font-size: 12px;");
+        metricUsersLabel.getStyleClass().add("small-text");
+        metricExamsLabel.getStyleClass().add("small-text");
+        metricAttemptsLabel.getStyleClass().add("small-text");
 
         Region stripSpacer = new Region();
         HBox.setHgrow(stripSpacer, Priority.ALWAYS);
 
         Label quickLabel = new Label("Quick Actions:");
-        quickLabel.setStyle("-fx-text-fill: #64748b; -fx-font-size: 11px;");
+        quickLabel.getStyleClass().addAll("secondary-text", "small-text");
 
         Button quickAddExamBtn = new Button("+ New Exam");
-        quickAddExamBtn.setStyle("-fx-background-color: #2563eb; -fx-text-fill: white; -fx-font-size: 11px; -fx-padding: 3 8; -fx-background-radius: 4px; -fx-cursor: hand;");
+        quickAddExamBtn.getStyleClass().add("btn-primary");
         quickAddExamBtn.setOnAction(e -> showCreateExamDialog());
 
         Button quickAddUserBtn = new Button("+ New User");
-        quickAddUserBtn.setStyle("-fx-background-color: #3b82f6; -fx-text-fill: white; -fx-font-size: 11px; -fx-padding: 3 8; -fx-background-radius: 4px; -fx-cursor: hand;");
+        quickAddUserBtn.getStyleClass().add("btn-primary");
         quickAddUserBtn.setOnAction(e -> showCreateUserDialog());
 
         overviewStrip.getChildren().addAll(metricUsersLabel, metricExamsLabel, metricAttemptsLabel, stripSpacer, quickLabel, quickAddExamBtn, quickAddUserBtn);
@@ -192,14 +195,14 @@ public class AdminDashboardView {
         VBox content = new VBox(14);
         content.setPadding(new Insets(20));
 
-        HBox toolbar = new HBox(12);
+        FlowPane toolbar = new FlowPane(Orientation.HORIZONTAL, 10, 8);
         toolbar.setAlignment(Pos.CENTER_LEFT);
+        toolbar.setPrefWrapLength(1000);
 
         Label title = new Label("System Users");
-        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
-        title.setStyle("-fx-text-fill: #0f172a;");
+        title.getStyleClass().add("section-title");
 
-        userSearchField.setPromptText("🔍 Search by name, username, enrollment...");
+        userSearchField.setPromptText("Search by name, username, or enrollment...");
         userSearchField.setPrefWidth(260);
         userSearchField.textProperty().addListener((obs, oldVal, newVal) -> filterUsers(newVal));
 
@@ -277,7 +280,7 @@ public class AdminDashboardView {
             }
         });
 
-        toolbar.getChildren().addAll(title, userSearchField, spacer, addBtn, editBtn, deactivateBtn, reactivateBtn, deleteBtn, refreshBtn);
+        toolbar.getChildren().addAll(title, userSearchField, addBtn, editBtn, deactivateBtn, reactivateBtn, deleteBtn, refreshBtn);
 
         setupUsersTable();
 
@@ -290,10 +293,6 @@ public class AdminDashboardView {
     private void setupUsersTable() {
         usersTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         usersTable.setPlaceholder(new Label("No user accounts found."));
-
-        TableColumn<AdminUserDto, String> idCol = new TableColumn<>("ID");
-        idCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().id())));
-        idCol.setMaxWidth(60);
 
         TableColumn<AdminUserDto, String> usernameCol = new TableColumn<>("Username");
         usernameCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().username()));
@@ -316,27 +315,29 @@ public class AdminDashboardView {
         roleCol.setMaxWidth(90);
 
         TableColumn<AdminUserDto, String> statusCol = new TableColumn<>("Status");
-        statusCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().isActive() ? "Active" : "Inactive"));
-        statusCol.setMaxWidth(80);
+        statusCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().isActive() ? "ACTIVE" : "INACTIVE"));
+        statusCol.setPrefWidth(100);
+        statusCol.setCellFactory(col -> createBadgeCell());
 
-        usersTable.getColumns().addAll(idCol, usernameCol, nameCol, enrollCol, secCol, roleCol, statusCol);
+        usersTable.getColumns().addAll(nameCol, usernameCol, enrollCol, secCol, roleCol, statusCol);
     }
 
     private void loadUsers() {
         usersTable.getItems().clear();
         allUsersList.clear();
-        usersStatusLabel.setText("Loading user accounts from server...");
+        setStatus(usersStatusLabel, "Loading user accounts from server...", null);
         AsyncRunner.runAsync(
                 apiClient::adminListUsers,
                 (List<AdminUserDto> users) -> {
-                    usersStatusLabel.setText("");
+                    setStatus(usersStatusLabel, "", null);
                     if (users != null) {
                         allUsersList.addAll(users);
                         filterUsers(userSearchField.getText());
                         metricUsersLabel.setText("Users: " + users.size());
                     }
                 },
-                (Throwable err) -> usersStatusLabel.setText("Failed to load users: " + err.getMessage())
+                (Throwable err) -> setStatus(usersStatusLabel,
+                        "Unable to load user accounts. Check the server connection and retry.", "status-error")
         );
     }
 
@@ -583,11 +584,12 @@ public class AdminDashboardView {
         VBox content = new VBox(14);
         content.setPadding(new Insets(20));
 
-        HBox toolbar = new HBox(12);
+        FlowPane toolbar = new FlowPane(Orientation.HORIZONTAL, 10, 8);
         toolbar.setAlignment(Pos.CENTER_LEFT);
+        toolbar.setPrefWrapLength(1000);
 
         Label title = new Label("Exam Definitions");
-        title.setFont(Font.font("Segoe UI", FontWeight.BOLD, 18));
+        title.getStyleClass().add("section-title");
 
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -650,7 +652,7 @@ public class AdminDashboardView {
             }
         });
 
-        toolbar.getChildren().addAll(title, spacer, createBtn, reviseBtn, deactivateBtn, reactivateBtn, refreshBtn);
+        toolbar.getChildren().addAll(title, createBtn, reviseBtn, deactivateBtn, reactivateBtn, refreshBtn);
 
         setupExamsTable();
 
@@ -664,10 +666,6 @@ public class AdminDashboardView {
         examsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         examsTable.setPlaceholder(new Label("No examinations defined in the system."));
 
-        TableColumn<AdminExamDto, String> idCol = new TableColumn<>("ID");
-        idCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().id())));
-        idCol.setMaxWidth(70);
-
         TableColumn<AdminExamDto, String> titleCol = new TableColumn<>("Title");
         titleCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().title()));
 
@@ -678,30 +676,10 @@ public class AdminDashboardView {
         verCol.setCellValueFactory(d -> new SimpleStringProperty("v" + d.getValue().versionNumber()));
 
         TableColumn<AdminExamDto, String> activeCol = new TableColumn<>("Status");
-        activeCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().isActive() ? "Active" : "Archived / Inactive"));
-        activeCol.setCellFactory(col -> new TableCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    setStyle("");
-                } else {
-                    setText(item);
-                    if ("Active".equals(item)) {
-                        setStyle("-fx-text-fill: #16a34a; -fx-font-weight: bold;");
-                    } else {
-                        setStyle("-fx-text-fill: #64748b;");
-                    }
-                }
-            }
-        });
+        activeCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().isActive() ? "ACTIVE" : "INACTIVE"));
+        activeCol.setCellFactory(col -> createBadgeCell());
 
-        TableColumn<AdminExamDto, String> supersedesCol = new TableColumn<>("Supersedes ID");
-        supersedesCol.setCellValueFactory(d -> new SimpleStringProperty(
-                d.getValue().supersedesExamId() != null ? "#" + d.getValue().supersedesExamId() : "-"));
-
-        examsTable.getColumns().addAll(idCol, titleCol, durCol, verCol, activeCol, supersedesCol);
+        examsTable.getColumns().addAll(titleCol, durCol, verCol, activeCol);
     }
 
     private void loadExams() {
@@ -711,11 +689,11 @@ public class AdminDashboardView {
     private void loadExams(int reselectExamId) {
         examsTable.getItems().clear();
         allExamsList.clear();
-        examsStatusLabel.setText("Loading examinations from server...");
+        setStatus(examsStatusLabel, "Loading examinations from server...", null);
         AsyncRunner.runAsync(
                 apiClient::adminListExams,
                 (List<AdminExamDto> exams) -> {
-                    examsStatusLabel.setText("");
+                    setStatus(examsStatusLabel, "", null);
                     if (exams != null) {
                         allExamsList.addAll(exams);
                         examsTable.getItems().addAll(exams);
@@ -734,7 +712,8 @@ public class AdminDashboardView {
                         }
                     }
                 },
-                (Throwable err) -> examsStatusLabel.setText("Failed to load exams: " + err.getMessage())
+                (Throwable err) -> setStatus(examsStatusLabel,
+                        "Unable to load examinations. Check the server connection and retry.", "status-error")
         );
     }
 
@@ -787,7 +766,7 @@ public class AdminDashboardView {
             AsyncRunner.runAsync(
                     () -> apiClient.adminCreateExam(req),
                     (AdminExamMutationResultDto res) -> {
-                        UiFeedback.showInfo(primaryStage, "Exam Created", "Exam created with ID #" + res.id() + " (Version " + res.versionNumber() + ").");
+                        UiFeedback.showInfo(primaryStage, "Exam Created", "The examination was created successfully as version " + res.versionNumber() + ".");
                         loadExams(res.id());
                     },
                     (Throwable err) -> UiFeedback.showError(primaryStage, "Creation Failed", err.getMessage())
@@ -796,14 +775,14 @@ public class AdminDashboardView {
     }
 
     private void showReviseExamDialog(AdminExamDto exam) {
-        examsStatusLabel.setText("Loading questions for exam #" + exam.id() + "...");
+        setStatus(examsStatusLabel, "Loading questions for “" + exam.title() + "”...", null);
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetExamQuestions(exam.id()),
                 (List<AdminQuestionDefinitionDto> questions) -> {
-                    examsStatusLabel.setText("");
+                    setStatus(examsStatusLabel, "", null);
                     ExamDefinitionBuilderDialog builder = new ExamDefinitionBuilderDialog(
                             "Revise Examination (v" + (exam.versionNumber() + 1) + ")",
-                            "Creating a copy-on-write revision superseding exam #" + exam.id() + ":",
+                            "Create a new version while preserving completed attempts from the current version:",
                             exam,
                             questions
                     );
@@ -814,7 +793,7 @@ public class AdminDashboardView {
                         AsyncRunner.runAsync(
                                 () -> apiClient.adminReviseExam(exam.id(), req),
                                 (AdminExamMutationResultDto res) -> {
-                                    UiFeedback.showInfo(primaryStage, "Exam Revised", "New revision created with ID #" + res.id() + " (Version " + res.versionNumber() + ").");
+                                    UiFeedback.showInfo(primaryStage, "Exam Revised", "The new examination version " + res.versionNumber() + " was created successfully.");
                                     loadExams(res.id());
                                 },
                                 (Throwable err) -> UiFeedback.showError(primaryStage, "Revision Failed", err.getMessage())
@@ -822,7 +801,7 @@ public class AdminDashboardView {
                     });
                 },
                 (Throwable err) -> {
-                    examsStatusLabel.setText("");
+                    setStatus(examsStatusLabel, "", null);
                     UiFeedback.showError(primaryStage, "Failed to Load Questions", err.getMessage());
                 }
         );
@@ -895,21 +874,21 @@ public class AdminDashboardView {
         topBar.setAlignment(Pos.CENTER_LEFT);
 
         Label examSelectLabel = new Label("Select Examination:");
-        examSelectLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #1e293b;");
+        examSelectLabel.getStyleClass().add("field-label");
 
         questionBankExamCombo.setPrefWidth(280);
         questionBankExamCombo.setCellFactory(lv -> new ListCell<>() {
             @Override
             protected void updateItem(AdminExamDto item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? "" : "#" + item.id() + " - " + item.title() + " (v" + item.versionNumber() + ")");
+                setText(empty || item == null ? "" : item.title() + " (v" + item.versionNumber() + ")");
             }
         });
         questionBankExamCombo.setButtonCell(new ListCell<>() {
             @Override
             protected void updateItem(AdminExamDto item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? "Select Exam..." : "#" + item.id() + " - " + item.title() + " (v" + item.versionNumber() + ")");
+                setText(empty || item == null ? "Select examination" : item.title() + " (v" + item.versionNumber() + ")");
             }
         });
         questionBankExamCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
@@ -917,7 +896,7 @@ public class AdminDashboardView {
         });
 
         Button loadQbBtn = new Button("Load Questions");
-        loadQbBtn.setStyle("-fx-background-color: #2563eb; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 6px; -fx-padding: 6 14; -fx-cursor: hand;");
+        loadQbBtn.getStyleClass().add("btn-primary");
         loadQbBtn.setOnAction(e -> {
             AdminExamDto sel = questionBankExamCombo.getValue();
             if (sel != null) loadQuestionBank(sel.id());
@@ -937,15 +916,13 @@ public class AdminDashboardView {
         // Right: Question & Options Preview Card
         VBox right = new VBox(12);
         right.setPadding(new Insets(14));
-        right.getStyleClass().add("theme-card");
+        right.getStyleClass().addAll("theme-card", "details-panel");
 
         Label detailsTitle = new Label("Question & Answer Key Preview");
-        detailsTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 15));
-        detailsTitle.setStyle("-fx-text-fill: #0f172a;");
+        detailsTitle.getStyleClass().add("section-title");
 
         ScrollPane optScroll = new ScrollPane(qbOptionsDetailsBox);
         optScroll.setFitToWidth(true);
-        optScroll.setStyle("-fx-background: transparent; -fx-background-color: transparent; -fx-border-color: transparent;");
 
         right.getChildren().addAll(detailsTitle, optScroll);
         VBox.setVgrow(optScroll, Priority.ALWAYS);
@@ -992,7 +969,9 @@ public class AdminDashboardView {
         long reqId = ++currentQbReqId;
         qbQuestionsTable.getItems().clear();
         qbOptionsDetailsBox.getChildren().clear();
-        qbStatusLabel.setText("Loading question bank for exam #" + examId + "...");
+        AdminExamDto selectedExam = questionBankExamCombo.getValue();
+        String selectedTitle = selectedExam != null ? selectedExam.title() : "selected examination";
+        setStatus(qbStatusLabel, "Loading question bank for “" + selectedTitle + "”...", null);
 
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetExamQuestions(examId),
@@ -1001,7 +980,7 @@ public class AdminDashboardView {
                     AdminExamDto curExam = questionBankExamCombo.getValue();
                     if (curExam != null && curExam.id() != examId) return;
 
-                    qbStatusLabel.setText("");
+                    setStatus(qbStatusLabel, "", null);
                     if (questions != null) {
                         qbQuestionsTable.getItems().setAll(questions);
                         if (!questions.isEmpty()) {
@@ -1011,7 +990,8 @@ public class AdminDashboardView {
                 },
                 (Throwable err) -> {
                     if (reqId != currentQbReqId) return;
-                    qbStatusLabel.setText("Failed to load questions: " + err.getMessage());
+                    setStatus(qbStatusLabel,
+                            "Unable to load the question bank. Check the server connection and retry.", "status-error");
                 }
         );
     }
@@ -1020,18 +1000,16 @@ public class AdminDashboardView {
         qbOptionsDetailsBox.getChildren().clear();
 
         Label qLabel = new Label(q.text());
-        qLabel.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
+        qLabel.getStyleClass().add("theme-label-bold");
         qLabel.setWrapText(true);
-        qLabel.setStyle("-fx-text-fill: #1e293b;");
 
         Label typeBadge = new Label("Type: " + q.type());
-        typeBadge.setStyle("-fx-background-color: #f1f5f9; -fx-text-fill: #475569; -fx-font-size: 11px; -fx-padding: 2 6; -fx-background-radius: 4px;");
+        typeBadge.getStyleClass().add("badge-neutral");
 
         qbOptionsDetailsBox.getChildren().addAll(qLabel, typeBadge, new Separator());
 
         Label optionsHeader = new Label("Options & Answer Keys:");
-        optionsHeader.setFont(Font.font("Segoe UI", FontWeight.BOLD, 12));
-        optionsHeader.setStyle("-fx-text-fill: #475569;");
+        optionsHeader.getStyleClass().add("field-label");
         qbOptionsDetailsBox.getChildren().add(optionsHeader);
 
         int optNum = 1;
@@ -1039,24 +1017,19 @@ public class AdminDashboardView {
             HBox optRow = new HBox(10);
             optRow.setAlignment(Pos.CENTER_LEFT);
             optRow.setPadding(new Insets(8, 12, 8, 12));
-            optRow.setStyle(opt.correct()
-                    ? "-fx-background-color: #f0fdf4; -fx-border-color: #86efac; -fx-border-radius: 6px; -fx-background-radius: 6px;"
-                    : "-fx-background-color: #f8fafc; -fx-border-color: #e2e8f0; -fx-border-radius: 6px; -fx-background-radius: 6px;");
+            optRow.getStyleClass().add(opt.correct() ? "correct-option" : "incorrect-option");
 
             Label optNumLabel = new Label(optNum + ".");
-            optNumLabel.setStyle("-fx-font-weight: bold; -fx-text-fill: #334155;");
+            optNumLabel.getStyleClass().add("theme-label-bold");
 
             Label optTextLabel = new Label(opt.text());
-            optTextLabel.setStyle("-fx-text-fill: #1e293b;");
             optTextLabel.setWrapText(true);
 
             Region rowSpacer = new Region();
             HBox.setHgrow(rowSpacer, Priority.ALWAYS);
 
             Label badge = new Label(opt.correct() ? "✔ CORRECT" : "✘ Incorrect");
-            badge.setStyle(opt.correct()
-                    ? "-fx-background-color: #16a34a; -fx-text-fill: white; -fx-font-size: 10px; -fx-font-weight: bold; -fx-padding: 2 6; -fx-background-radius: 4px;"
-                    : "-fx-background-color: #e2e8f0; -fx-text-fill: #64748b; -fx-font-size: 10px; -fx-padding: 2 6; -fx-background-radius: 4px;");
+            badge.getStyleClass().add(opt.correct() ? "badge-success" : "badge-neutral");
 
             optRow.getChildren().addAll(optNumLabel, optTextLabel, rowSpacer, badge);
             qbOptionsDetailsBox.getChildren().add(optRow);
@@ -1073,36 +1046,33 @@ public class AdminDashboardView {
         VBox content = new VBox(14);
         content.setPadding(new Insets(20));
 
-        HBox filterBar = new HBox(12);
+        FlowPane filterBar = new FlowPane(Orientation.HORIZONTAL, 10, 8);
         filterBar.setAlignment(Pos.CENTER_LEFT);
+        filterBar.setPrefWrapLength(1060);
 
         Label label = new Label("Select Exam:");
-        label.setStyle("-fx-font-weight: bold;");
+        label.getStyleClass().add("field-label");
 
         attemptsExamCombo.setPrefWidth(240);
         attemptsExamCombo.setCellFactory(lv -> new ListCell<>() {
             @Override
             protected void updateItem(AdminExamDto item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? "" : "#" + item.id() + " - " + item.title());
+                setText(empty || item == null ? "" : item.title() + " (v" + item.versionNumber() + ")");
             }
         });
         attemptsExamCombo.setButtonCell(new ListCell<>() {
             @Override
             protected void updateItem(AdminExamDto item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? "Select Exam..." : "#" + item.id() + " - " + item.title());
+                setText(empty || item == null ? "Select examination" : item.title() + " (v" + item.versionNumber() + ")");
             }
         });
         attemptsExamCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
-                attemptsExamIdField.setText(String.valueOf(newVal.id()));
                 loadAttempts();
             }
         });
-
-        attemptsExamIdField.setPromptText("Or ID (e.g. 1)");
-        attemptsExamIdField.setPrefWidth(90);
 
         Button loadBtn = new Button("Load Attempts");
         loadBtn.getStyleClass().add("btn-primary");
@@ -1112,10 +1082,12 @@ public class AdminDashboardView {
         HBox.setHgrow(filterSpacer, Priority.ALWAYS);
 
         Button exportCsvBtn = new Button("📥 Export to CSV");
+        exportCsvBtn.setText("Export to CSV");
         exportCsvBtn.getStyleClass().add("btn-secondary");
         exportCsvBtn.setOnAction(e -> exportAttemptsToCsv());
 
         Button viewDetailsBtn = new Button("📋 View Report Card");
+        viewDetailsBtn.setText("View Report Card");
         viewDetailsBtn.getStyleClass().add("btn-secondary");
         viewDetailsBtn.setOnAction(e -> {
             AdminAttemptDto sel = attemptsTable.getSelectionModel().getSelectedItem();
@@ -1127,10 +1099,12 @@ public class AdminDashboardView {
         });
 
         Button statsBtn = new Button("📊 Exam Analytics");
+        statsBtn.setText("Exam Analytics");
         statsBtn.getStyleClass().add("btn-secondary");
         statsBtn.setOnAction(e -> openExamStatistics());
 
         Button inspectProctorBtn = new Button("🛡️ Inspect Proctor Events");
+        inspectProctorBtn.setText("Inspect Proctor Events");
         inspectProctorBtn.getStyleClass().add("btn-secondary");
         inspectProctorBtn.setOnAction(e -> {
             AdminAttemptDto sel = attemptsTable.getSelectionModel().getSelectedItem();
@@ -1148,6 +1122,7 @@ public class AdminDashboardView {
         });
 
         Button deleteAttemptBtn = new Button("🗑️ Delete Attempt");
+        deleteAttemptBtn.setText("Delete Attempt");
         deleteAttemptBtn.getStyleClass().add("btn-danger");
         deleteAttemptBtn.setOnAction(e -> {
             AdminAttemptDto sel = attemptsTable.getSelectionModel().getSelectedItem();
@@ -1169,7 +1144,7 @@ public class AdminDashboardView {
             deleteAttemptBtn.setDisable(!hasSel);
         });
 
-        filterBar.getChildren().addAll(label, attemptsExamCombo, attemptsExamIdField, loadBtn, filterSpacer, exportCsvBtn, viewDetailsBtn, statsBtn, inspectProctorBtn, deleteAttemptBtn);
+        filterBar.getChildren().addAll(label, attemptsExamCombo, loadBtn, exportCsvBtn, viewDetailsBtn, statsBtn, inspectProctorBtn, deleteAttemptBtn);
 
         setupAttemptsTable();
 
@@ -1181,15 +1156,7 @@ public class AdminDashboardView {
 
     private void setupAttemptsTable() {
         attemptsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
-        attemptsTable.setPlaceholder(new Label("Select or enter an Exam ID above to view student attempts."));
-
-        TableColumn<AdminAttemptDto, String> idCol = new TableColumn<>("Attempt ID");
-        idCol.setCellValueFactory(d -> new SimpleStringProperty("#" + d.getValue().id()));
-        idCol.setMaxWidth(90);
-
-        TableColumn<AdminAttemptDto, String> stuIdCol = new TableColumn<>("Student ID");
-        stuIdCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().studentId())));
-        stuIdCol.setMaxWidth(90);
+        attemptsTable.setPlaceholder(new Label("Select an examination to view its attempts."));
 
         TableColumn<AdminAttemptDto, String> nameCol = new TableColumn<>("Student Name");
         nameCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().studentName()));
@@ -1205,10 +1172,11 @@ public class AdminDashboardView {
 
         TableColumn<AdminAttemptDto, String> statusCol = new TableColumn<>("Status");
         statusCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().status()));
+        statusCol.setCellFactory(col -> createBadgeCell());
 
         TableColumn<AdminAttemptDto, String> scoreCol = new TableColumn<>("Score");
         scoreCol.setCellValueFactory(d -> new SimpleStringProperty(
-                d.getValue().score() != null ? d.getValue().score() + " pts" : "Pending"));
+                d.getValue().score() != null ? String.valueOf(d.getValue().score()) : "Pending"));
 
         TableColumn<AdminAttemptDto, String> violationsCol = new TableColumn<>("Violations");
         violationsCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().focusLostCount())));
@@ -1218,25 +1186,9 @@ public class AdminDashboardView {
         proctoringCol.setCellValueFactory(d -> new SimpleStringProperty(
                 d.getValue().flagged() ? "⚠️ FLAGGED" : "CLEAN"));
         proctoringCol.setPrefWidth(120);
-        proctoringCol.setCellFactory(col -> new TableCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    setStyle("");
-                } else {
-                    setText(item);
-                    if (item.contains("FLAGGED")) {
-                        setStyle("-fx-text-fill: #dc2626; -fx-font-weight: bold;");
-                    } else {
-                        setStyle("-fx-text-fill: #16a34a; -fx-font-weight: bold;");
-                    }
-                }
-            }
-        });
+        proctoringCol.setCellFactory(col -> createBadgeCell());
 
-        attemptsTable.getColumns().addAll(idCol, stuIdCol, nameCol, enrollCol, startCol, statusCol, scoreCol, violationsCol, proctoringCol);
+        attemptsTable.getColumns().addAll(nameCol, enrollCol, startCol, statusCol, scoreCol, violationsCol, proctoringCol);
 
         attemptsTable.setRowFactory(tv -> {
             TableRow<AdminAttemptDto> row = new TableRow<>();
@@ -1261,38 +1213,33 @@ public class AdminDashboardView {
     }
 
     private void loadAttempts() {
-        String input = attemptsExamIdField.getText().trim();
-        if (input.isEmpty()) {
-            attemptsStatusLabel.setText("Please enter an Exam ID.");
+        AdminExamDto selectedExam = attemptsExamCombo.getValue();
+        if (selectedExam == null) {
+            setStatus(attemptsStatusLabel, "Select an examination to load attempts.", null);
             return;
         }
-        int examId;
-        try {
-            examId = Integer.parseInt(input);
-        } catch (NumberFormatException e) {
-            attemptsStatusLabel.setText("Exam ID must be an integer.");
-            return;
-        }
+        int examId = selectedExam.id();
 
         long reqId = ++currentAttemptsReqId;
         attemptsTable.getItems().clear();
-        attemptsStatusLabel.setText("Loading attempts for exam #" + examId + "...");
+        setStatus(attemptsStatusLabel, "Loading attempts for “" + selectedExam.title() + "”...", null);
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetAttemptHistory(examId),
                 (List<AdminAttemptDto> attempts) -> {
                     if (reqId != currentAttemptsReqId) return;
-                    String curInput = attemptsExamIdField.getText().trim();
-                    if (!curInput.equals(String.valueOf(examId))) return;
+                    AdminExamDto currentExam = attemptsExamCombo.getValue();
+                    if (currentExam == null || currentExam.id() != examId) return;
 
-                    attemptsStatusLabel.setText("");
+                    setStatus(attemptsStatusLabel, "", null);
                     if (attempts != null) {
                         attemptsTable.getItems().addAll(attempts);
-                        metricAttemptsLabel.setText("Attempts: " + attempts.size() + " for exam #" + examId);
+                        metricAttemptsLabel.setText("Attempts: " + attempts.size() + " for " + selectedExam.title());
                     }
                 },
                 (Throwable err) -> {
                     if (reqId != currentAttemptsReqId) return;
-                    attemptsStatusLabel.setText("Failed to load attempts: " + err.getMessage());
+                    setStatus(attemptsStatusLabel,
+                            "Unable to load attempts. Check the server connection and retry.", "status-error");
                 }
         );
     }
@@ -1346,18 +1293,12 @@ public class AdminDashboardView {
     }
 
     private void openExamStatistics() {
-        String input = attemptsExamIdField.getText().trim();
-        if (input.isEmpty()) {
+        AdminExamDto selectedExam = attemptsExamCombo.getValue();
+        if (selectedExam == null) {
             UiFeedback.showError(primaryStage, "Selection Required", "Please select an exam first to view statistics.");
             return;
         }
-        int examId;
-        try {
-            examId = Integer.parseInt(input);
-        } catch (NumberFormatException e) {
-            UiFeedback.showError(primaryStage, "Invalid Input", "Exam ID must be an integer.");
-            return;
-        }
+        int examId = selectedExam.id();
 
         attemptsStatusLabel.setText("Loading analytics for exam #" + examId + "...");
         AsyncRunner.runAsync(
@@ -1383,10 +1324,11 @@ public class AdminDashboardView {
             return;
         }
 
-        String examId = attemptsExamIdField.getText().trim();
+        AdminExamDto selectedExam = attemptsExamCombo.getValue();
+        String examId = selectedExam != null ? String.valueOf(selectedExam.id()) : "all";
         FileChooser fileChooser = new FileChooser();
         fileChooser.setTitle("Export Attempts to CSV");
-        fileChooser.setInitialFileName("attempts-exam-" + (examId.isEmpty() ? "all" : examId) + ".csv");
+        fileChooser.setInitialFileName("attempts-exam-" + examId + ".csv");
         fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV Files (*.csv)", "*.csv"));
 
         File file = fileChooser.showSaveDialog(view.getScene() != null ? view.getScene().getWindow() : null);
@@ -1446,21 +1388,21 @@ public class AdminDashboardView {
         filterBar.setAlignment(Pos.CENTER_LEFT);
 
         Label label = new Label("Select Exam:");
-        label.setStyle("-fx-font-weight: bold;");
+        label.getStyleClass().add("field-label");
 
         proctorExamCombo.setPrefWidth(260);
         proctorExamCombo.setCellFactory(lv -> new ListCell<>() {
             @Override
             protected void updateItem(AdminExamDto item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? "" : "#" + item.id() + " - " + item.title());
+                setText(empty || item == null ? "" : item.title() + " (v" + item.versionNumber() + ")");
             }
         });
         proctorExamCombo.setButtonCell(new ListCell<>() {
             @Override
             protected void updateItem(AdminExamDto item, boolean empty) {
                 super.updateItem(item, empty);
-                setText(empty || item == null ? "Select Exam..." : "#" + item.id() + " - " + item.title());
+                setText(empty || item == null ? "Select examination" : item.title() + " (v" + item.versionNumber() + ")");
             }
         });
         proctorExamCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
@@ -1492,14 +1434,14 @@ public class AdminDashboardView {
 
         VBox attemptsBox = new VBox(8);
         Label attemptsTitle = new Label("1. Examination Attempts:");
-        attemptsTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
+        attemptsTitle.getStyleClass().add("workflow-title");
         setupProctorAttemptsTable();
         attemptsBox.getChildren().addAll(attemptsTitle, proctorAttemptsTable);
         VBox.setVgrow(proctorAttemptsTable, Priority.ALWAYS);
 
         VBox eventsBox = new VBox(8);
         Label eventsTitle = new Label("2. Proctor Incidents for Selected Attempt:");
-        eventsTitle.setFont(Font.font("Segoe UI", FontWeight.BOLD, 13));
+        eventsTitle.getStyleClass().add("workflow-title");
         setupProctorEventsTable();
         eventsBox.getChildren().addAll(eventsTitle, proctorEventsTable);
         VBox.setVgrow(proctorEventsTable, Priority.ALWAYS);
@@ -1511,12 +1453,12 @@ public class AdminDashboardView {
         VBox rightPanel = new VBox(10);
         rightPanel.setPadding(new Insets(10));
         rightPanel.setAlignment(Pos.TOP_CENTER);
-        rightPanel.getStyleClass().add("theme-card");
+        rightPanel.getStyleClass().addAll("theme-card", "evidence-panel");
 
         HBox evidenceHeaderBox = new HBox(10);
         evidenceHeaderBox.setAlignment(Pos.CENTER_LEFT);
         Label evidenceHeader = new Label("3. Screenshot Evidence Inspection");
-        evidenceHeader.setFont(Font.font("Segoe UI", FontWeight.BOLD, 14));
+        evidenceHeader.getStyleClass().add("workflow-title-large");
         evidenceHeaderBox.getChildren().add(evidenceHeader);
 
         // Viewer toolbar
@@ -1531,50 +1473,59 @@ public class AdminDashboardView {
         zoomOutBtn.getStyleClass().add("btn-secondary");
         zoomOutBtn.setOnAction(e -> zoomEvidence(0.8));
 
-        Button resetZoomBtn = new Button("1:1 Reset");
+        Button resetZoomBtn = new Button("100%");
         resetZoomBtn.getStyleClass().add("btn-secondary");
         resetZoomBtn.setOnAction(e -> resetEvidenceZoom());
 
-        Button fitBtn = new Button("Fit Window");
+        Button fitBtn = new Button("Fit");
         fitBtn.getStyleClass().add("btn-secondary");
         fitBtn.setOnAction(e -> fitEvidenceToWindow());
 
-        evidenceZoomLabel.setStyle("-fx-font-weight: bold; -fx-min-width: 45px;");
+        evidenceZoomLabel.getStyleClass().add("theme-label-bold");
+        evidenceZoomLabel.setMinWidth(52);
 
         Region vSpacer = new Region();
         HBox.setHgrow(vSpacer, Priority.ALWAYS);
 
         Button prevEvBtn = new Button("← Prev");
+        prevEvBtn.setText("Previous");
         prevEvBtn.getStyleClass().add("btn-secondary");
         prevEvBtn.setOnAction(e -> navigateEvidence(-1));
 
         Button nextEvBtn = new Button("Next →");
+        nextEvBtn.setText("Next");
         nextEvBtn.getStyleClass().add("btn-secondary");
         nextEvBtn.setOnAction(e -> navigateEvidence(1));
 
         Button enlargeBtn = new Button("🔍 Full View");
+        enlargeBtn.setText("Enlarge");
         enlargeBtn.getStyleClass().add("btn-primary");
         enlargeBtn.setOnAction(e -> showEnlargedEvidence());
 
         viewerBar.getChildren().addAll(zoomInBtn, zoomOutBtn, resetZoomBtn, fitBtn, evidenceZoomLabel, vSpacer, prevEvBtn, nextEvBtn, enlargeBtn);
 
         evidenceImageView.setPreserveRatio(true);
-        evidenceImageView.setStyle("-fx-effect: dropshadow(gaussian, rgba(0,0,0,0.15), 10, 0, 0, 2);");
 
         StackPane imageHolder = new StackPane(evidenceImageView);
         imageHolder.setAlignment(Pos.CENTER);
         imageHolder.setPadding(new Insets(10));
+        imageHolder.getStyleClass().add("evidence-canvas");
 
         evidenceScrollPane.setContent(imageHolder);
         evidenceScrollPane.setPannable(true);
         evidenceScrollPane.setFitToWidth(true);
         evidenceScrollPane.setFitToHeight(true);
+        evidenceScrollPane.viewportBoundsProperty().addListener((obs, oldBounds, newBounds) -> {
+            if (evidenceFitMode) fitEvidenceToWindow();
+        });
 
-        rightPanel.getChildren().addAll(evidenceHeaderBox, viewerBar, evidenceStatusLabel, evidenceScrollPane);
+        evidenceContextLabel.getStyleClass().addAll("secondary-text", "small-text");
+        evidenceContextLabel.setWrapText(true);
+        rightPanel.getChildren().addAll(evidenceHeaderBox, viewerBar, evidenceContextLabel, evidenceStatusLabel, evidenceScrollPane);
         VBox.setVgrow(evidenceScrollPane, Priority.ALWAYS);
 
         mainSplit.getItems().addAll(leftSplit, rightPanel);
-        mainSplit.setDividerPositions(0.52);
+        mainSplit.setDividerPositions(0.44);
 
         content.getChildren().addAll(filterBar, mainSplit);
         VBox.setVgrow(mainSplit, Priority.ALWAYS);
@@ -1601,6 +1552,7 @@ public class AdminDashboardView {
         TableColumn<AdminAttemptDto, String> statusCol = new TableColumn<>("Status");
         statusCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().status()));
         statusCol.setMaxWidth(90);
+        statusCol.setCellFactory(col -> createBadgeCell());
 
         TableColumn<AdminAttemptDto, String> violCol = new TableColumn<>("Violations");
         violCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().focusLostCount())));
@@ -1609,27 +1561,11 @@ public class AdminDashboardView {
         TableColumn<AdminAttemptDto, String> procCol = new TableColumn<>("Integrity");
         procCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().flagged() ? "⚠️ FLAGGED" : "CLEAN"));
         procCol.setMaxWidth(110);
-        procCol.setCellFactory(col -> new TableCell<>() {
-            @Override
-            protected void updateItem(String item, boolean empty) {
-                super.updateItem(item, empty);
-                if (empty || item == null) {
-                    setText(null);
-                    setStyle("");
-                } else {
-                    setText(item);
-                    if (item.contains("FLAGGED")) {
-                        setStyle("-fx-text-fill: #dc2626; -fx-font-weight: bold;");
-                    } else {
-                        setStyle("-fx-text-fill: #16a34a; -fx-font-weight: bold;");
-                    }
-                }
-            }
-        });
+        procCol.setCellFactory(col -> createBadgeCell());
 
         TableColumn<AdminAttemptDto, String> scoreCol = new TableColumn<>("Score");
         scoreCol.setCellValueFactory(d -> new SimpleStringProperty(
-                d.getValue().score() != null ? d.getValue().score() + " pts" : "Pending"));
+                d.getValue().score() != null ? String.valueOf(d.getValue().score()) : "Pending"));
         scoreCol.setMaxWidth(80);
 
         proctorAttemptsTable.getColumns().addAll(studentCol, enrollCol, timeCol, statusCol, violCol, procCol, scoreCol);
@@ -1648,10 +1584,6 @@ public class AdminDashboardView {
         proctorEventsTable.setColumnResizePolicy(TableView.CONSTRAINED_RESIZE_POLICY_FLEX_LAST_COLUMN);
         proctorEventsTable.setPlaceholder(new Label("Select an attempt above to view proctor incidents."));
 
-        TableColumn<AdminProctorEventDto, String> idCol = new TableColumn<>("ID");
-        idCol.setCellValueFactory(d -> new SimpleStringProperty("#" + d.getValue().id()));
-        idCol.setMaxWidth(70);
-
         TableColumn<AdminProctorEventDto, String> typeCol = new TableColumn<>("Incident Type");
         typeCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().eventType()));
 
@@ -1662,24 +1594,24 @@ public class AdminDashboardView {
         TableColumn<AdminProctorEventDto, String> evCol = new TableColumn<>("Evidence");
         evCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().hasEvidence() ? "✓ Screenshot" : "None"));
         evCol.setCellFactory(col -> new TableCell<>() {
+            private final Label badge = new Label();
+
             @Override
             protected void updateItem(String item, boolean empty) {
                 super.updateItem(item, empty);
+                setText(null);
                 if (empty || item == null) {
-                    setText(null);
-                    setStyle("");
+                    setGraphic(null);
                 } else {
-                    setText(item);
-                    if (item.contains("Screenshot")) {
-                        setStyle("-fx-text-fill: #2563eb; -fx-font-weight: bold;");
-                    } else {
-                        setStyle("-fx-text-fill: #64748b;");
-                    }
+                    boolean available = item.contains("Screenshot");
+                    badge.setText(available ? "AVAILABLE" : "NONE");
+                    badge.getStyleClass().setAll(available ? "badge-info" : "badge-neutral");
+                    setGraphic(badge);
                 }
             }
         });
 
-        proctorEventsTable.getColumns().addAll(idCol, typeCol, timeCol, evCol);
+        proctorEventsTable.getColumns().addAll(typeCol, timeCol, evCol);
 
         proctorEventsTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, sel) -> {
             if (sel != null) {
@@ -1695,13 +1627,16 @@ public class AdminDashboardView {
         proctorAttemptsTable.getItems().clear();
         proctorEventsTable.getItems().clear();
         clearEvidenceViewer();
-        evidenceStatusLabel.setText("Loading student attempts for exam #" + examId + "...");
+        AdminExamDto selectedExam = proctorExamCombo.getValue();
+        String selectedTitle = selectedExam != null ? selectedExam.title() : "selected examination";
+        setStatus(evidenceStatusLabel, "Loading student attempts for “" + selectedTitle + "”...", null);
 
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetAttemptHistory(examId),
                 (List<AdminAttemptDto> attempts) -> {
                     if (reqId != currentProctorAttemptsReqId) return;
-                    evidenceStatusLabel.setText("Loaded " + (attempts != null ? attempts.size() : 0) + " attempt(s).");
+                    setStatus(evidenceStatusLabel,
+                            "Loaded " + (attempts != null ? attempts.size() : 0) + " attempt(s).", "status-success");
                     if (attempts != null && !attempts.isEmpty()) {
                         proctorAttemptsTable.getItems().addAll(attempts);
                         AdminAttemptDto toSelect = attempts.stream().filter(AdminAttemptDto::flagged).findFirst().orElse(attempts.get(0));
@@ -1710,7 +1645,8 @@ public class AdminDashboardView {
                 },
                 (Throwable err) -> {
                     if (reqId != currentProctorAttemptsReqId) return;
-                    evidenceStatusLabel.setText("Failed to load attempts: " + err.getMessage());
+                    setStatus(evidenceStatusLabel,
+                            "Unable to load attempts for evidence review. Check the server connection and retry.", "status-error");
                 }
         );
     }
@@ -1721,13 +1657,16 @@ public class AdminDashboardView {
         proctorEventsTable.getItems().clear();
         clearEvidenceViewer();
         evidenceCache.clear();
-        evidenceStatusLabel.setText("Loading incidents for student " + attempt.studentName() + " (Attempt #" + attemptId + ")...");
+        updateEvidenceContext(null);
+        setStatus(evidenceStatusLabel, "Loading incidents for " + attempt.studentName() + "...", null);
 
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetProctorEvents(attemptId),
                 (List<AdminProctorEventDto> events) -> {
                     if (reqId != currentProctorEventsReqId) return;
-                    evidenceStatusLabel.setText("Loaded " + (events != null ? events.size() : 0) + " incident(s) for Attempt #" + attemptId);
+                    setStatus(evidenceStatusLabel, events == null || events.isEmpty()
+                            ? "No proctoring incidents recorded for this attempt."
+                            : "Loaded " + events.size() + " incident(s).", events == null || events.isEmpty() ? null : "status-success");
                     if (events != null && !events.isEmpty()) {
                         proctorEventsTable.getItems().addAll(events);
                         for (AdminProctorEventDto ev : events) {
@@ -1740,7 +1679,8 @@ public class AdminDashboardView {
                 },
                 (Throwable err) -> {
                     if (reqId != currentProctorEventsReqId) return;
-                    evidenceStatusLabel.setText("Failed to load incidents: " + err.getMessage());
+                    setStatus(evidenceStatusLabel,
+                            "Unable to load proctoring incidents. Check the server connection and retry.", "status-error");
                 }
         );
     }
@@ -1750,23 +1690,27 @@ public class AdminDashboardView {
         currentEvidenceBytes = null;
         currentEvidenceEventId = -1;
         evidenceZoom = 1.0;
+        evidenceFitMode = true;
         evidenceZoomLabel.setText("100%");
     }
 
     private void zoomEvidence(double factor) {
         if (evidenceImageView.getImage() == null) return;
+        evidenceFitMode = false;
         evidenceZoom = Math.max(0.25, Math.min(4.0, evidenceZoom * factor));
         applyEvidenceZoom();
     }
 
     private void resetEvidenceZoom() {
         if (evidenceImageView.getImage() == null) return;
+        evidenceFitMode = false;
         evidenceZoom = 1.0;
         applyEvidenceZoom();
     }
 
     private void fitEvidenceToWindow() {
         if (evidenceImageView.getImage() == null || evidenceScrollPane == null) return;
+        evidenceFitMode = true;
         Image img = evidenceImageView.getImage();
         double scrollW = evidenceScrollPane.getViewportBounds().getWidth();
         double scrollH = evidenceScrollPane.getViewportBounds().getHeight();
@@ -1804,10 +1748,11 @@ public class AdminDashboardView {
     private void loadEvidenceImage(AdminProctorEventDto event) {
         int eventId = event.id();
         long reqId = ++currentEvidenceReqId;
+        updateEvidenceContext(event);
 
         if (!event.hasEvidence()) {
             clearEvidenceViewer();
-            evidenceStatusLabel.setText("Event #" + eventId + " (" + event.eventType() + ") has no screenshot evidence.");
+            evidenceStatusLabel.setText("No evidence attached to this incident.");
             return;
         }
 
@@ -1817,7 +1762,7 @@ public class AdminDashboardView {
             return;
         }
 
-        evidenceStatusLabel.setText("Fetching screenshot bytes for Event #" + eventId + "...");
+        evidenceStatusLabel.setText("Loading screenshot evidence...");
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetEvidence(eventId),
                 (byte[] imageBytes) -> {
@@ -1827,7 +1772,7 @@ public class AdminDashboardView {
 
                     if (imageBytes == null || imageBytes.length == 0) {
                         clearEvidenceViewer();
-                        evidenceStatusLabel.setText("Evidence file is empty for Event #" + eventId);
+                        evidenceStatusLabel.setText("The attached evidence file is empty.");
                         return;
                     }
 
@@ -1847,8 +1792,9 @@ public class AdminDashboardView {
             currentEvidenceEventId = eventId;
             Image img = new Image(new ByteArrayInputStream(imageBytes));
             evidenceImageView.setImage(img);
-            resetEvidenceZoom();
-            evidenceStatusLabel.setText("Event #" + eventId + " evidence loaded (" + imageBytes.length + " bytes).");
+            evidenceFitMode = true;
+            Platform.runLater(this::fitEvidenceToWindow);
+            evidenceStatusLabel.setText("Screenshot evidence loaded.");
         } catch (Exception e) {
             evidenceStatusLabel.setText("Failed to decode screenshot image: " + e.getMessage());
         }
@@ -1864,25 +1810,26 @@ public class AdminDashboardView {
         Stage viewerStage = new Stage();
         viewerStage.initOwner(primaryStage);
         viewerStage.initModality(Modality.NONE);
-        viewerStage.setTitle("Evidence Inspector — Event #" + currentEvidenceEventId + " (" + sel.eventType() + ")");
+        viewerStage.setTitle("ExaSecure Evidence Inspector");
 
         BorderPane modalRoot = new BorderPane();
-        modalRoot.setStyle("-fx-background-color: #0f172a;");
+        modalRoot.getStyleClass().add("app-root");
 
         HBox bar = new HBox(10);
         bar.setPadding(new Insets(10, 16, 10, 16));
         bar.setAlignment(Pos.CENTER_LEFT);
-        bar.setStyle("-fx-background-color: #1e293b; -fx-border-color: #334155; -fx-border-width: 0 0 1 0;");
+        bar.getStyleClass().addAll("app-header", "app-header-admin");
 
-        Label title = new Label("Event #" + currentEvidenceEventId + " (" + sel.eventType() + ") Evidence Inspection");
-        title.setStyle("-fx-text-fill: white; -fx-font-weight: bold; -fx-font-size: 14px;");
+        Label title = new Label(sel.eventType() + " evidence inspection");
+        title.getStyleClass().add("header-title");
 
         Region barSpacer = new Region();
         HBox.setHgrow(barSpacer, Priority.ALWAYS);
 
         final double[] modalZoom = {1.0};
         Label modalZoomLbl = new Label("100%");
-        modalZoomLbl.setStyle("-fx-text-fill: #94a3b8; -fx-min-width: 50px;");
+        modalZoomLbl.getStyleClass().add("header-meta");
+        modalZoomLbl.setMinWidth(50);
 
         Image img = new Image(new ByteArrayInputStream(currentEvidenceBytes));
         ImageView modalImageView = new ImageView(img);
@@ -1895,22 +1842,22 @@ public class AdminDashboardView {
         };
 
         Button zIn = new Button("+ Zoom In");
-        zIn.setStyle("-fx-background-color: #334155; -fx-text-fill: white; -fx-border-color: #475569; -fx-border-radius: 4px;");
+        zIn.getStyleClass().add("btn-header");
         zIn.setOnAction(e -> { modalZoom[0] = Math.min(4.0, modalZoom[0] * 1.25); applyModalZoom.run(); });
 
         Button zOut = new Button("- Zoom Out");
-        zOut.setStyle("-fx-background-color: #334155; -fx-text-fill: white; -fx-border-color: #475569; -fx-border-radius: 4px;");
+        zOut.getStyleClass().add("btn-header");
         zOut.setOnAction(e -> { modalZoom[0] = Math.max(0.25, modalZoom[0] / 1.25); applyModalZoom.run(); });
 
-        Button zReset = new Button("1:1 Reset");
-        zReset.setStyle("-fx-background-color: #334155; -fx-text-fill: white; -fx-border-color: #475569; -fx-border-radius: 4px;");
+        Button zReset = new Button("100%");
+        zReset.getStyleClass().add("btn-header");
         zReset.setOnAction(e -> { modalZoom[0] = 1.0; applyModalZoom.run(); });
 
-        Button fitBtn = new Button("Fit Window");
-        fitBtn.setStyle("-fx-background-color: #334155; -fx-text-fill: white; -fx-border-color: #475569; -fx-border-radius: 4px;");
+        Button fitBtn = new Button("Fit");
+        fitBtn.getStyleClass().add("btn-header");
 
         Button closeBtn = new Button("Close");
-        closeBtn.setStyle("-fx-background-color: #ef4444; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 4px;");
+        closeBtn.getStyleClass().add("btn-danger");
         closeBtn.setOnAction(e -> viewerStage.close());
 
         bar.getChildren().addAll(title, barSpacer, zIn, zOut, zReset, fitBtn, modalZoomLbl, closeBtn);
@@ -1923,7 +1870,7 @@ public class AdminDashboardView {
         modalScroll.setPannable(true);
         modalScroll.setFitToWidth(false);
         modalScroll.setFitToHeight(false);
-        modalScroll.setStyle("-fx-background: transparent; -fx-background-color: transparent;");
+        modalScroll.getStyleClass().add("evidence-canvas");
         modalRoot.setCenter(modalScroll);
 
         fitBtn.setOnAction(e -> {
@@ -1940,5 +1887,72 @@ public class AdminDashboardView {
         viewerStage.setScene(scene);
         viewerStage.show();
         Platform.runLater(fitBtn::fire);
+    }
+
+    private void updateEvidenceContext(AdminProctorEventDto event) {
+        AdminExamDto exam = proctorExamCombo.getValue();
+        AdminAttemptDto attempt = proctorAttemptsTable.getSelectionModel().getSelectedItem();
+        if (attempt == null) {
+            evidenceContextLabel.setText("No attempt or incident selected.");
+            return;
+        }
+        StringBuilder context = new StringBuilder();
+        context.append("Student: ").append(attempt.studentName());
+        if (attempt.enrollmentNumber() != null && !attempt.enrollmentNumber().isBlank()) {
+            context.append("  •  Enrollment: ").append(attempt.enrollmentNumber());
+        }
+        if (exam != null) context.append("  •  Exam: ").append(exam.title());
+        context.append("\nAttempt: ").append(attempt.startTime() != null ? attempt.startTime() : "Time unavailable")
+                .append("  •  Violations: ").append(attempt.focusLostCount())
+                .append("  •  ").append(attempt.flagged() ? "FLAGGED" : "CLEAN");
+        if (event != null) {
+            context.append("\nIncident: ").append(event.eventType())
+                    .append("  •  ").append(event.recordedAt() != null ? event.recordedAt() : "Time unavailable");
+        }
+        evidenceContextLabel.setText(context.toString());
+    }
+
+    private static void setStatus(Label label, String message, String stateClass) {
+        label.setText(message);
+        label.getStyleClass().removeAll("status-error", "status-warning", "status-success");
+        if (!label.getStyleClass().contains("status-text")) {
+            label.getStyleClass().add("status-text");
+        }
+        if (stateClass != null) {
+            label.getStyleClass().add(stateClass);
+        }
+    }
+
+    private <T> TableCell<T, String> createBadgeCell() {
+        return new TableCell<>() {
+            private final Label badge = new Label();
+
+            @Override
+            protected void updateItem(String item, boolean empty) {
+                super.updateItem(item, empty);
+                setText(null);
+                if (empty || item == null) {
+                    setGraphic(null);
+                    return;
+                }
+                String normalized = item.toUpperCase();
+                String display = normalized.contains("FLAGGED") ? "FLAGGED" : normalized;
+                badge.setText(display);
+                badge.getStyleClass().setAll(badgeClass(normalized));
+                setGraphic(badge);
+            }
+        };
+    }
+
+    private String badgeClass(String value) {
+        if (value.contains("FLAGGED")) return "badge-flagged";
+        return switch (value) {
+            case "ACTIVE" -> "badge-active";
+            case "SUBMITTED" -> "badge-submitted";
+            case "EXPIRED" -> "badge-expired";
+            case "CLEAN" -> "badge-clean";
+            case "INACTIVE", "ARCHIVED / INACTIVE" -> "badge-inactive";
+            default -> "badge-neutral";
+        };
     }
 }
