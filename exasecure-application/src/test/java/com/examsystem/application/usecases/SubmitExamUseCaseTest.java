@@ -112,7 +112,7 @@ class SubmitExamUseCaseTest {
     @Test
     void saveAnswer_savesCorrectly() {
         StubAnswerRepo answerRepo = new StubAnswerRepo();
-        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubClock());
         
         useCase.saveAnswer(100, 1, List.of(2), Duration.ofMinutes(60));
         
@@ -121,7 +121,7 @@ class SubmitExamUseCaseTest {
 
     @Test
     void saveAnswer_invalidQuestion_throws() {
-        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), new StubAttemptRepo(), new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), new StubAttemptRepo(), new StubQuestionRepo(), new StubClock());
         
         assertThatThrownBy(() -> useCase.saveAnswer(100, 999, List.of(1), Duration.ofMinutes(60)))
             .isInstanceOf(IllegalArgumentException.class)
@@ -133,7 +133,7 @@ class SubmitExamUseCaseTest {
         StubAttemptRepo attemptRepo = new StubAttemptRepo();
         attemptRepo.startTime = Instant.now().minus(Duration.ofMinutes(120)); // Expired
         
-        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), attemptRepo, new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(new StubAnswerRepo(), attemptRepo, new StubQuestionRepo(), new StubClock());
         
         assertThatThrownBy(() -> useCase.saveAnswer(100, 1, List.of(2), Duration.ofMinutes(60)))
             .isInstanceOf(IllegalStateException.class)
@@ -144,7 +144,7 @@ class SubmitExamUseCaseTest {
     void saveAnswer_unknownOptionNumber_throwsWithoutSaving() {
         StubAnswerRepo answerRepo = new StubAnswerRepo();
         SubmitExamUseCase useCase = new SubmitExamUseCase(
-                answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+                answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubClock());
 
         assertThatThrownBy(() -> useCase.saveAnswer(100, 1, List.of(502), Duration.ofMinutes(60)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -156,7 +156,7 @@ class SubmitExamUseCaseTest {
     void saveAnswer_duplicateOptionNumber_throwsWithoutSaving() {
         StubAnswerRepo answerRepo = new StubAnswerRepo();
         SubmitExamUseCase useCase = new SubmitExamUseCase(
-                answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+                answerRepo, new StubAttemptRepo(), new StubQuestionRepo(), new StubClock());
 
         assertThatThrownBy(() -> useCase.saveAnswer(100, 1, List.of(2, 2), Duration.ofMinutes(60)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -175,7 +175,7 @@ class SubmitExamUseCaseTest {
             }
         };
         SubmitExamUseCase useCase = new SubmitExamUseCase(
-                answerRepo, new StubAttemptRepo(), wrongExamQuestions, new StubProctorRepo(), new StubClock());
+                answerRepo, new StubAttemptRepo(), wrongExamQuestions, new StubClock());
 
         assertThatThrownBy(() -> useCase.saveAnswer(100, 2, List.of(1), Duration.ofMinutes(60)))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -189,7 +189,7 @@ class SubmitExamUseCaseTest {
         StubAnswerRepo answerRepo = new StubAnswerRepo();
         answerRepo.answers.put(1, List.of(2)); // Correct answer for Q1
         
-        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, attemptRepo, new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+        SubmitExamUseCase useCase = new SubmitExamUseCase(answerRepo, attemptRepo, new StubQuestionRepo(), new StubClock());
         
         int score = useCase.submitExam(100, Instant.now());
         
@@ -205,7 +205,7 @@ class SubmitExamUseCaseTest {
         StubAnswerRepo answerRepo = new StubAnswerRepo();
 
         SubmitExamUseCase useCase = new SubmitExamUseCase(
-                answerRepo, attemptRepo, new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+                answerRepo, attemptRepo, new StubQuestionRepo(), new StubClock());
 
         int score = useCase.submitExam(100, Instant.now());
 
@@ -220,7 +220,7 @@ class SubmitExamUseCaseTest {
         answerRepo.answers.put(1, List.of(2));
 
         SubmitExamUseCase useCase = new SubmitExamUseCase(
-                answerRepo, attemptRepo, new StubQuestionRepo(), new StubProctorRepo(), new StubClock());
+                answerRepo, attemptRepo, new StubQuestionRepo(), new StubClock());
 
         int score = useCase.submitExam(100, Instant.now());
 

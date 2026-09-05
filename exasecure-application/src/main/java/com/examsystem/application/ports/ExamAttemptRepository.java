@@ -8,20 +8,13 @@ public interface ExamAttemptRepository {
     void calculateAndSetScore(int attemptId, int focusLostCount, int score, java.time.Instant submittedAt);
     ExamAttempt startOrResumeAttempt(int studentId, int examId, java.time.Instant now, java.time.Duration timeLimit);
 
-    default int finalizeAndGradeAttempt(int attemptId, java.time.Instant submittedAt, int focusLostCount,
+    default int finalizeAndGradeAttempt(int attemptId, java.time.Instant submittedAt,
                                         java.util.function.ToIntFunction<java.util.Map<Integer, java.util.List<Integer>>> grader,
                                         AnswerRepository answerRepository) {
         var answers = answerRepository.getSelectedOptionsForAttempt(attemptId);
         int score = grader.applyAsInt(answers);
-        calculateAndSetScore(attemptId, focusLostCount, score, submittedAt);
+        calculateAndSetScore(attemptId, findById(attemptId).orElseThrow().focusLostCount(), score, submittedAt);
         return score;
-    }
-
-    default int incrementFocusLostCount(int attemptId) {
-        return 0;
-    }
-
-    default void flagAttempt(int attemptId) {
     }
 
     default boolean deleteAttempt(int attemptId) {

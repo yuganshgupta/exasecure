@@ -29,3 +29,18 @@ Recovery is a forward fix or a separately approved database restore from backup.
 Reverting application Git commits does not roll back database changes. Do not edit
 the historical V3–V10 SQL files, drop evidence to resolve collisions, or relabel
 already-successful V10 data to infer historical capture stages.
+
+V11 adds nullable `result_violation_count INT`, `result_flagged TINYINT(1)`, and
+`result_attempt_status VARCHAR(32)` to `proctor_events`. New incidents populate all
+three within the attempt transaction. Stable per-incident replay is guaranteed for
+V11+ incidents: an old key returns its stored response even after later strikes or
+server restart. Pre-V11 rows retain NULL snapshots; retries return current locked
+attempt state for compatibility and never write that state as historical fact.
+
+The incident transaction locks `exam_attempts WHERE id = ? FOR UPDATE`, validates
+Student ownership, checks the key, and only then checks new-incident lifecycle and
+deadline eligibility. It inserts the FOCUS_LOST event, updates the strike, grades
+normalized answers on the same connection at strike three, writes SUBMITTED and
+the server timestamp, stores the snapshot, and commits. Any failure before commit
+rolls back the entire unit. Submission shares the connection-scoped finalizer and
+does not assign any proctor fields, so it cannot overwrite a newer strike/flag.

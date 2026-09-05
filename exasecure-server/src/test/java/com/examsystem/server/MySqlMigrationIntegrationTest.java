@@ -74,8 +74,8 @@ class MySqlMigrationIntegrationTest {
         migrator.migrate();
 
         try (Connection conn = dataSource.getConnection()) {
-            assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 10);
-            assertSingleInt(conn, "SELECT COUNT(*) FROM schema_versions", 10);
+            assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 11);
+            assertSingleInt(conn, "SELECT COUNT(*) FROM schema_versions", 11);
             assertSingleInt(conn, "SELECT COUNT(*) FROM exam_attempts WHERE is_flagged = 0 AND proctoring_status = 'CLEAN'", 1);
             assertSingleInt(conn, "SELECT COUNT(*) FROM users", 2);
             assertSingleInt(conn, "SELECT COUNT(*) FROM exams", 1);
@@ -337,7 +337,7 @@ class MySqlMigrationIntegrationTest {
                 assertThat(rows.getString(3)).isEqualTo(key);
                 assertThat(admin.getEvidenceByEventId(rows.getInt(2), key).orElseThrow().data()).containsExactly(rows.getBytes(4));
             }
-            assertSingleInt(conn,"SELECT MAX(version) FROM schema_versions",10);
+            assertSingleInt(conn,"SELECT MAX(version) FROM schema_versions",11);
             assertThatThrownBy(() -> stmt.execute("INSERT INTO proctor_evidence_v2(event_id,evidence_type,recorded_at,screenshot_data) SELECT event_id,evidence_type,recorded_at,screenshot_data FROM proctor_evidence_v2 LIMIT 1")).isInstanceOf(java.sql.SQLException.class);
         }
     }

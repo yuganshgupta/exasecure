@@ -50,7 +50,7 @@ class MigrationIntegrationTest {
             // Check schema version
             try (ResultSet rs = stmt.executeQuery("SELECT MAX(version) FROM schema_versions")) {
                 assertThat(rs.next()).isTrue();
-                assertThat(rs.getInt(1)).isEqualTo(10);
+                assertThat(rs.getInt(1)).isEqualTo(11);
             }
 
             try (ResultSet rs = stmt.executeQuery(
@@ -128,7 +128,7 @@ class MigrationIntegrationTest {
         try (Connection conn = ds.getConnection(); Statement stmt = conn.createStatement()) {
             try (ResultSet rs = stmt.executeQuery("SELECT MAX(version) FROM schema_versions")) {
                 assertThat(rs.next()).isTrue();
-                assertThat(rs.getInt(1)).isEqualTo(10);
+                assertThat(rs.getInt(1)).isEqualTo(11);
             }
         }
 

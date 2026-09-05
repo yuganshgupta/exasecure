@@ -38,6 +38,7 @@ public class StudentExamController {
     private final StudentQueryPort studentQueryPort;
     private final AnswerRepository answerRepository;
     private final Clock clock;
+    private final com.examsystem.application.usecases.RecordProctorIncidentUseCase incidentUseCase;
 
     public StudentExamController(StartExamUseCase startUseCase,
                                  SubmitExamUseCase submitUseCase,
@@ -46,8 +47,9 @@ public class StudentExamController {
                                  ExamAttemptRepository attemptRepository,
                                  ProctorRepository proctorRepository,
                                  StudentQueryPort studentQueryPort,
-                                 AnswerRepository answerRepository) {
-        this(startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, studentQueryPort, answerRepository, Clock.systemUTC());
+                                 AnswerRepository answerRepository,
+                                 com.examsystem.application.usecases.RecordProctorIncidentUseCase incidentUseCase) {
+        this(startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, studentQueryPort, answerRepository, incidentUseCase, Clock.systemUTC());
     }
 
     public StudentExamController(StartExamUseCase startUseCase,
@@ -58,6 +60,7 @@ public class StudentExamController {
                                  ProctorRepository proctorRepository,
                                  StudentQueryPort studentQueryPort,
                                  AnswerRepository answerRepository,
+                                 com.examsystem.application.usecases.RecordProctorIncidentUseCase incidentUseCase,
                                  Clock clock) {
         this.startUseCase = startUseCase;
         this.submitUseCase = submitUseCase;
@@ -68,6 +71,7 @@ public class StudentExamController {
         this.studentQueryPort = studentQueryPort;
         this.answerRepository = answerRepository;
         this.clock = clock != null ? clock : Clock.systemUTC();
+        this.incidentUseCase = incidentUseCase;
     }
 
     public void listAvailableExams(Context ctx) {
@@ -169,7 +173,7 @@ public class StudentExamController {
     
     public void recordEvent(Context ctx) {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
-        enforceOwnership(ctx, attemptId);
+
 
         String eventType = null;
         String clientEventId = null;
@@ -189,54 +193,9 @@ public class StudentExamController {
             clientEventId = ctx.formParam("clientEventId");
         }
 
-        if (eventType == null || eventType.isBlank()) {
-            throw new BadRequestResponse("Missing eventType");
-        }
-
-        ExamAttempt attempt = attemptRepository.findById(attemptId)
-                .orElseThrow(() -> new NotFoundResponse("Attempt not found"));
-
-        // Save event atomically
-        var saveResult = proctorRepository.recordEvent(attemptId, eventType, java.time.Instant.now(clock), clientEventId);
-        int eventId = saveResult.eventId();
-
-        // Increment violation count on attempt ONLY if this request actually created the event
-        int newCount;
-        if (saveResult.createdNew()) {
-            newCount = attemptRepository.incrementFocusLostCount(attemptId);
-        } else {
-            ExamAttempt current = attemptRepository.findById(attemptId).orElse(attempt);
-            newCount = current.focusLostCount();
-            int tries = 0;
-            while (newCount == 0 && tries++ < 30) {
-                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
-                current = attemptRepository.findById(attemptId).orElse(attempt);
-                newCount = current.focusLostCount();
-            }
-        }
-
-        ExamAttempt updated = attemptRepository.findById(attemptId).orElse(attempt);
-        if (newCount == 0) {
-            newCount = updated.focusLostCount();
-        }
-
-        boolean flagged = updated.flagged() || newCount >= 3;
-        String status = updated.finalized() ? "SUBMITTED" : "ACTIVE";
-
-        if (saveResult.createdNew() && newCount >= 3) {
-            flagged = true;
-            attemptRepository.flagAttempt(attemptId);
-            if (!updated.finalized()) {
-                // Auto submit attempt
-                try {
-                    submitUseCase.submitExam(attemptId, java.time.Instant.now(clock));
-                    status = "SUBMITTED";
-                } catch (Exception ignored) {
-                }
-            }
-        }
-
-        ctx.json(new StudentProctorEventResponseDto(eventId, newCount, flagged, status));
+        User student = ctx.attribute("user");
+        var result = incidentUseCase.record(student, attemptId, eventType, clientEventId);
+        ctx.json(new StudentProctorEventResponseDto(result.eventId(), result.violationCount(), result.flagged(), result.attemptStatus()));
     }
 
     public void uploadEvidence(Context ctx) {

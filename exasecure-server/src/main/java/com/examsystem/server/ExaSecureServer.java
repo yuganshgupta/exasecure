@@ -57,7 +57,7 @@ public class ExaSecureServer {
         // Use Cases
         AuthenticateUserUseCase authUseCase = new AuthenticateUserUseCase(userRepository, passwordEncoder);
         StartExamUseCase startUseCase = new StartExamUseCase(attemptRepository, clockPort);
-        SubmitExamUseCase submitUseCase = new SubmitExamUseCase(answerRepository, attemptRepository, questionRepository, proctorRepository, clockPort);
+        SubmitExamUseCase submitUseCase = new SubmitExamUseCase(answerRepository, attemptRepository, questionRepository, clockPort);
         AdminUserMutationUseCase adminUserMutationUseCase =
                 new AdminUserMutationUseCase(adminUserMutationPort, passwordEncoder);
         AdminExamDefinitionUseCase adminExamDefinitionUseCase =
@@ -68,7 +68,7 @@ public class ExaSecureServer {
         com.examsystem.application.ports.StudentQueryPort studentQueryPort = new com.examsystem.server.adapters.jdbc.JdbcStudentQueryPort(dataSource);
         AuthController authController = new AuthController(authUseCase, sessionManager);
         StudentExamController studentController = new StudentExamController(
-                startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, studentQueryPort, answerRepository);
+                startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, studentQueryPort, answerRepository, new com.examsystem.application.usecases.RecordProctorIncidentUseCase(new JdbcProctorIncidentPort(dataSource, clockPort)));
         AdminController adminController = new AdminController(
                 adminQueryPort, adminUserMutationUseCase, adminExamDefinitionUseCase, questionRepository, attemptRepository);
         AuthMiddleware authMiddleware = new AuthMiddleware(sessionManager);

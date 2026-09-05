@@ -82,47 +82,13 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
     }
 
     @Override
-    public int incrementFocusLostCount(int attemptId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "UPDATE exam_attempts SET focus_lost_count = focus_lost_count + 1, "
-                             + "is_flagged = CASE WHEN focus_lost_count >= 3 THEN 1 ELSE is_flagged END, "
-                             + "proctoring_status = CASE WHEN focus_lost_count >= 3 THEN 'FLAGGED' ELSE proctoring_status END "
-                             + "WHERE id = ?")) {
-            ps.setInt(1, attemptId);
-            ps.executeUpdate();
-        } catch (Exception e) {
-            throw new RuntimeException("DB error", e);
-        }
-        return findById(attemptId).map(ExamAttempt::focusLostCount).orElse(0);
-    }
-
-    @Override
-    public void flagAttempt(int attemptId) {
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "UPDATE exam_attempts SET is_flagged = 1, proctoring_status = 'FLAGGED' WHERE id = ?")) {
-            ps.setInt(1, attemptId);
-            ps.executeUpdate();
-        } catch (Exception e) {
-            throw new RuntimeException("DB error", e);
-        }
-    }
-
-    @Override
     public void calculateAndSetScore(int attemptId, int focusLostCount, int score, Instant submittedAt) {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
-                     "UPDATE exam_attempts SET score = ?, end_time = ?, status = 'SUBMITTED', focus_lost_count = ?, "
-                             + "is_flagged = CASE WHEN ? >= 3 THEN 1 ELSE is_flagged END, "
-                             + "proctoring_status = CASE WHEN ? >= 3 THEN 'FLAGGED' ELSE proctoring_status END "
-                             + "WHERE id = ? AND status = 'ACTIVE'")) {
+                     "UPDATE exam_attempts SET score = ?, end_time = ?, status = 'SUBMITTED' WHERE id = ? AND status = 'ACTIVE'")) {
             ps.setInt(1, score);
             ps.setTimestamp(2, Timestamp.from(submittedAt));
-            ps.setInt(3, focusLostCount);
-            ps.setInt(4, focusLostCount);
-            ps.setInt(5, focusLostCount);
-            ps.setInt(6, attemptId);
+            ps.setInt(3, attemptId);
             int updated = ps.executeUpdate();
             if (updated == 0) {
                 throw new IllegalStateException("Attempt is not ACTIVE or does not exist");
@@ -210,7 +176,7 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
     }
 
     @Override
-    public int finalizeAndGradeAttempt(int attemptId, Instant submittedAt, int focusLostCount,
+    public int finalizeAndGradeAttempt(int attemptId, Instant submittedAt,
                                         java.util.function.ToIntFunction<java.util.Map<Integer, java.util.List<Integer>>> grader,
                                         com.examsystem.application.ports.AnswerRepository answerRepository) {
         try (Connection conn = dataSource.getConnection()) {
@@ -235,44 +201,7 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
                     }
                 }
 
-                // Read answers directly on the same connection under the lock
-                java.util.Map<Integer, java.util.List<Integer>> answers = new java.util.HashMap<>();
-                try (PreparedStatement psAnswers = conn.prepareStatement(
-                        "SELECT sa.question_id, sao.selected_option FROM student_answers sa " +
-                        "LEFT JOIN student_answer_options sao ON sa.id = sao.answer_id " +
-                        "WHERE sa.attempt_id = ?")) {
-                    psAnswers.setInt(1, attemptId);
-                    try (ResultSet rs = psAnswers.executeQuery()) {
-                        while (rs.next()) {
-                            int qId = rs.getInt("question_id");
-                            int opt = rs.getInt("selected_option");
-                            answers.computeIfAbsent(qId, k -> new java.util.ArrayList<>());
-                            if (!rs.wasNull()) {
-                                answers.get(qId).add(opt);
-                            }
-                        }
-                    }
-                }
-
-                int score = grader.applyAsInt(answers);
-
-                // Update attempt to SUBMITTED with score
-                try (PreparedStatement psUpdate = conn.prepareStatement(
-                        "UPDATE exam_attempts SET score = ?, end_time = ?, status = 'SUBMITTED', focus_lost_count = ?, "
-                                + "is_flagged = CASE WHEN ? >= 3 THEN 1 ELSE is_flagged END, "
-                                + "proctoring_status = CASE WHEN ? >= 3 THEN 'FLAGGED' ELSE proctoring_status END "
-                                + "WHERE id = ? AND status = 'ACTIVE'")) {
-                    psUpdate.setInt(1, score);
-                    psUpdate.setTimestamp(2, Timestamp.from(submittedAt));
-                    psUpdate.setInt(3, focusLostCount);
-                    psUpdate.setInt(4, focusLostCount);
-                    psUpdate.setInt(5, focusLostCount);
-                    psUpdate.setInt(6, attemptId);
-                    int updated = psUpdate.executeUpdate();
-                    if (updated == 0) {
-                        throw new IllegalStateException("Attempt was not updated to SUBMITTED");
-                    }
-                }
+                int score = JdbcAttemptFinalizer.finalizeLocked(conn, attemptId, submittedAt, grader);
 
                 conn.commit();
                 return score;

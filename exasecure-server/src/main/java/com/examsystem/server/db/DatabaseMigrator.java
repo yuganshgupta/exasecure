@@ -109,6 +109,10 @@ public class DatabaseMigrator {
                 log.info("Successfully migrated to v10");
                 currentVersion = 10;
             }
+            if (currentVersion < 11) {
+                executeScript(conn, "db/migration/schema-v11.sql");
+                log.info("Successfully migrated to v11");
+            }
     }
 
     private int getCurrentVersion(Connection conn) {

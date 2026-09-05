@@ -116,7 +116,7 @@ class StudentExamDurationThresholdTest {
                 null, null, null, null,
                 createAttemptRepository(),
                 createProctorRepository(BASE_TIME, null, markedLongAbsence),
-                null, null, clock
+                null, null, null, clock
         );
 
         Context ctx = createContext(ATTEMPT_ID, EVENT_ID, statusHolder);
@@ -141,7 +141,7 @@ class StudentExamDurationThresholdTest {
                 null, null, null, null,
                 createAttemptRepository(),
                 createProctorRepository(BASE_TIME, null, markedLongAbsence),
-                null, null, clock
+                null, null, null, clock
         );
 
         Context ctx = createContext(ATTEMPT_ID, EVENT_ID, statusHolder);
@@ -162,7 +162,7 @@ class StudentExamDurationThresholdTest {
                 null, null, null, null,
                 createAttemptRepository(),
                 createProctorRepository(BASE_TIME, null, markedLongAbsence),
-                null, null, clock
+                null, null, null, clock
         );
 
         Context ctx = createContext(ATTEMPT_ID, EVENT_ID, statusHolder);
@@ -184,7 +184,7 @@ class StudentExamDurationThresholdTest {
                 null, null, null, null,
                 createAttemptRepository(),
                 createProctorRepository(BASE_TIME, returnedAt, markedLongAbsence),
-                null, null, clock
+                null, null, null, clock
         );
 
         Context ctx = createContext(ATTEMPT_ID, EVENT_ID, statusHolder);
@@ -209,7 +209,7 @@ class StudentExamDurationThresholdTest {
                 null, null, null, null,
                 createAttemptRepository(),
                 createProctorRepository(BASE_TIME, returnedAt, markedLongAbsence),
-                null, null, clock
+                null, null, null, clock
         );
 
         Context ctx = createContext(ATTEMPT_ID, EVENT_ID, statusHolder);
@@ -231,7 +231,7 @@ class StudentExamDurationThresholdTest {
                 null, null, null, null,
                 createAttemptRepository(),
                 createProctorRepository(BASE_TIME, returnedAt, markedLongAbsence),
-                null, null, clock
+                null, null, null, clock
         );
 
         Context ctx = createContext(ATTEMPT_ID, EVENT_ID, statusHolder);

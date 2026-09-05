@@ -17,18 +17,15 @@ public class SubmitExamUseCase {
     private final AnswerRepository answerRepository;
     private final ExamAttemptRepository attemptRepository;
     private final QuestionRepository questionRepository;
-    private final com.examsystem.application.ports.ProctorRepository proctorRepository;
     private final ClockPort clockPort;
 
     public SubmitExamUseCase(AnswerRepository answerRepository, 
                              ExamAttemptRepository attemptRepository,
                              QuestionRepository questionRepository,
-                             com.examsystem.application.ports.ProctorRepository proctorRepository,
                              ClockPort clockPort) {
         this.answerRepository = answerRepository;
         this.attemptRepository = attemptRepository;
         this.questionRepository = questionRepository;
-        this.proctorRepository = proctorRepository;
         this.clockPort = clockPort;
     }
 
@@ -83,10 +80,9 @@ public class SubmitExamUseCase {
         }
             
         List<Question> questions = questionRepository.findByExamId(attempt.examId());
-        int focusLostCount = proctorRepository.countEvents(attemptId, "FOCUS_LOST");
         
         try {
-            return attemptRepository.finalizeAndGradeAttempt(attemptId, submittedAt, focusLostCount, answers -> {
+            return attemptRepository.finalizeAndGradeAttempt(attemptId, submittedAt, answers -> {
                 int correct = 0;
                 for (Question q : questions) {
                     List<Integer> selected = answers.getOrDefault(q.id(), java.util.Collections.emptyList());

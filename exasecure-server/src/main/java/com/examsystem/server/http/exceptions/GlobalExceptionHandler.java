@@ -11,6 +11,12 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     public static void register(io.javalin.config.JavalinConfig config) {
+        config.routes.exception(SecurityException.class, (e, ctx) -> {
+            ctx.status(403).json(new ErrorResponseDto(403, e.getMessage(), UUID.randomUUID().toString()));
+        });
+        config.routes.exception(java.util.NoSuchElementException.class, (e, ctx) -> {
+            ctx.status(404).json(new ErrorResponseDto(404, e.getMessage(), UUID.randomUUID().toString()));
+        });
         config.routes.exception(io.javalin.http.HttpResponseException.class, (e, ctx) -> {
             ctx.status(e.getStatus());
             ctx.json(new ErrorResponseDto(e.getStatus(), e.getMessage(), UUID.randomUUID().toString()));

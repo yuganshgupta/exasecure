@@ -25,6 +25,189 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIfEnvironmentVariable(named = "EXASECURE_MYSQL_TEST_URL", matches = ".+")
 class ServerIntegrationTest {
 
+    @Test void atomicSameKeyContentionStartingAtZero() throws Exception { atomicContention(0); }
+    @Test void atomicSameKeyContentionStartingAtOne() throws Exception { atomicContention(1); }
+    @Test void atomicSameKeyContentionStartingAtTwo() throws Exception { atomicContention(2); }
+
+    private void atomicContention(int count) throws Exception {
+        int attempt = atomicFixture(count);
+        String key = UUID.randomUUID().toString();
+        var start = new java.util.concurrent.CountDownLatch(1);
+        var ready = new java.util.concurrent.CountDownLatch(8);
+        var client = HttpClient.newHttpClient();
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(8)) {
+            var futures = new java.util.ArrayList<java.util.concurrent.Future<String>>();
+            for (int i = 0; i < 8; i++) futures.add(executor.submit(() -> {
+                ready.countDown(); start.await();
+                var response = incidentHttp(client, attempt, key, "FOCUS_LOST");
+                assertThat(response.statusCode()).isEqualTo(200);
+                assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt+" AND result_violation_count="+(count+1),1);
+                return response.body();
+            }));
+            assertThat(ready.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue(); start.countDown();
+            String first = futures.getFirst().get(15, java.util.concurrent.TimeUnit.SECONDS);
+            for (var future : futures) assertThat(future.get(15, java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(first);
+            var result = new ObjectMapper().readTree(first);
+            assertThat(result.required("violationCount").asInt()).isEqualTo(count+1);
+            assertThat(result.required("flagged").asBoolean()).isEqualTo(count==2);
+            assertThat(result.required("attemptStatus").asText()).isEqualTo(count==2?"SUBMITTED":"ACTIVE");
+        } finally { start.countDown(); }
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt,count+1);
+        assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE id="+attempt+" AND focus_lost_count="+(count+1),1);
+        if(count==2) assertAttemptSubmittedWithScore(attempt,1);
+    }
+
+    @Test void atomicFailureAfterInsertRollsBackAndSameKeyRetriesOnce() throws Exception { atomicFault("INSERT INTO proctor_events", true, 0); }
+    @Test void atomicFailureAfterCountUpdateRollsBackAndSameKeyRetriesOnce() throws Exception { atomicFault("UPDATE exam_attempts SET focus_lost_count", true, 1); }
+    @Test void atomicFailureBeforeCommitRollsBackFinalizationAndSnapshot() throws Exception { atomicFault("COMMIT", false, 2); }
+    @Test void atomicThirdStrikeFinalizationFailureRollsBackEverything() throws Exception { atomicFault("UPDATE exam_attempts SET score", true, 2); }
+
+    private void atomicFault(String target, boolean after, int count) throws Exception {
+        int attempt=atomicFixture(count); String key=UUID.randomUUID().toString();
+        var faulty=JdbcTestProbe.wrap(server.getDataSource(), (sql, completed) -> {
+            if(sql.startsWith(target) && completed==after) throw new java.sql.SQLException("injected transaction interruption");
+        });
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> recordIncident(faulty,attempt,key)).hasRootCauseMessage("injected transaction interruption");
+        assertAtomicUnchanged(attempt,count);
+        var first=recordIncident(server.getDataSource(),attempt,key);
+        assertThat(recordIncident(server.getDataSource(),attempt,key)).isEqualTo(first);
+        assertThat(first.violationCount()).isEqualTo(count+1);
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt+" AND result_violation_count="+(count+1),1);
+    }
+
+    @Test void atomicGraderExceptionRollsBackEventCountFlagAndSubmission() throws Exception {
+        int attempt=atomicFixture(2); String key=UUID.randomUUID().toString();
+        var port=new com.examsystem.server.adapters.jdbc.JdbcProctorIncidentPort(server.getDataSource(),Instant::now);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> port.recordIncident(101,attempt,"FOCUS_LOST",key,(questions,answers)->{
+            assertThat(answers.get(401)).containsExactly(1);
+            throw new IllegalStateException("injected grading failure");
+        })).hasMessage("injected grading failure");
+        assertAtomicUnchanged(attempt,2);
+        assertThat(recordIncident(server.getDataSource(),attempt,key).violationCount()).isEqualTo(3);
+        assertAttemptSubmittedWithScore(attempt,1);
+    }
+
+    @Test void oldKeyReplaySurvivesLaterIncidentsAndServerRestart() throws Exception {
+        int attempt=atomicFixture(0); var client=HttpClient.newHttpClient();
+        String a=UUID.randomUUID().toString(), b=UUID.randomUUID().toString(), c=UUID.randomUUID().toString();
+        var first=incidentHttp(client,attempt,a,"FOCUS_LOST");
+        assertThat(first.statusCode()).isEqualTo(200);
+        assertThat(incidentHttp(client,attempt,b,"FOCUS_LOST").statusCode()).isEqualTo(200);
+        var third=incidentHttp(client,attempt,c,"FOCUS_LOST"); assertThat(third.statusCode()).isEqualTo(200);
+        server.stop(); server=new ExaSecureServer(new AppConfig()); server.start();
+        assertThat(incidentHttp(client,attempt,a,"FOCUS_LOST").body()).isEqualTo(first.body());
+        assertThat(incidentHttp(client,attempt,c,"FOCUS_LOST").body()).isEqualTo(third.body());
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt,3);
+        assertAttemptSubmittedWithScore(attempt,1);
+    }
+
+    @Test void legacyReplayUsesCurrentStateWithoutWritingHistoricalSnapshot() throws Exception {
+        int attempt=atomicFixture(2); String key="legacy-"+attempt;
+        try(var conn=server.getDataSource().getConnection();var stmt=conn.createStatement()) {
+            stmt.execute("UPDATE proctor_events SET client_event_id='"+key+"' WHERE attempt_id="+attempt+" ORDER BY id LIMIT 1");
+        }
+        var result=recordIncident(server.getDataSource(),attempt,key);
+        assertThat(result.violationCount()).isEqualTo(2);
+        assertThat(result.attemptStatus()).isEqualTo("ACTIVE");
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt+" AND result_violation_count IS NULL AND result_flagged IS NULL AND result_attempt_status IS NULL",2);
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt,2);
+    }
+
+    @Test void incidentValidationRejectsUnsupportedConflictingAndInvalidCommands() throws Exception {
+        int attempt=atomicFixture(0); var client=HttpClient.newHttpClient(); String key=UUID.randomUUID().toString();
+        for(String type:java.util.List.of("OTHER","focus_lost","FOCUS_RETURNED","")) assertThat(incidentHttp(client,attempt,key,type).statusCode()).isEqualTo(400);
+        for(String invalid:java.util.List.of(""," ","x".repeat(65))) assertThat(incidentHttp(client,attempt,invalid,"FOCUS_LOST").statusCode()).isEqualTo(400);
+        assertThat(sendJson(client,"POST","/api/v1/student/attempts/"+attempt+"/events","token-stu1","{\"eventType\":\"FOCUS_LOST\"}").statusCode()).isEqualTo(400);
+        assertAtomicUnchanged(attempt,0);
+        assertThat(incidentHttp(client,attempt,key,"FOCUS_LOST").statusCode()).isEqualTo(200);
+        assertThat(incidentHttp(client,attempt,key,"OTHER").statusCode()).isEqualTo(400);
+        assertThat(sendJson(client,"POST","/api/v1/student/attempts/"+attempt+"/events","token-stu2","{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\""+key+"\"}").statusCode()).isEqualTo(403);
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt,1);
+    }
+
+    @Test void newIncidentAfterDeadlineOrSubmissionCreatesNothing() throws Exception {
+        int expired=atomicFixture(0), submitted=atomicFixture(0); var client=HttpClient.newHttpClient();
+        try(var conn=server.getDataSource().getConnection();var stmt=conn.createStatement()) {
+            stmt.execute("UPDATE exam_attempts SET start_time=DATE_SUB(UTC_TIMESTAMP(),INTERVAL 2 HOUR) WHERE id="+expired);
+            stmt.execute("UPDATE exam_attempts SET status='SUBMITTED',score=1,end_time=UTC_TIMESTAMP() WHERE id="+submitted);
+        }
+        for(int attempt:new int[]{expired,submitted}) {
+            assertThat(incidentHttp(client,attempt,UUID.randomUUID().toString(),"FOCUS_LOST").statusCode()).isEqualTo(409);
+            assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt,0);
+            assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE id="+attempt+" AND focus_lost_count=0",1);
+        }
+    }
+
+    @Test void ordinarySubmissionWaitingForIncidentPreservesNewestStrike() throws Exception {
+        for(int count:new int[]{0,1,2}) {
+            int attempt=atomicFixture(count);
+            var beforeLock=new java.util.concurrent.CountDownLatch(1); var release=new java.util.concurrent.CountDownLatch(1);
+            var waiting=JdbcTestProbe.wrap(server.getDataSource(),(sql,after)->{
+                if(!after && sql.contains("FOR UPDATE")) { beforeLock.countDown(); if(!release.await(10,java.util.concurrent.TimeUnit.SECONDS)) throw new java.sql.SQLException("barrier timeout"); }
+            });
+            try(var executor=java.util.concurrent.Executors.newSingleThreadExecutor()) {
+                var future=executor.submit(()->ordinarySubmit(waiting,attempt));
+                try {
+                    assertThat(beforeLock.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                    recordIncident(server.getDataSource(),attempt,UUID.randomUUID().toString());
+                    release.countDown(); assertThat(future.get(15,java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(1);
+                } finally { release.countDown(); }
+            }
+            assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE id="+attempt+" AND focus_lost_count="+(count+1)+" AND is_flagged="+(count==2?1:0)+" AND proctoring_status='"+(count==2?"FLAGGED":"CLEAN")+"'",1);
+        }
+    }
+
+    @Test void incidentWaitingForOrdinarySubmissionRejectsWithoutPartialState() throws Exception {
+        int attempt=atomicFixture(1);
+        var locked=new java.util.concurrent.CountDownLatch(1); var release=new java.util.concurrent.CountDownLatch(1); var incidentWaiting=new java.util.concurrent.CountDownLatch(1);
+        var submitSource=JdbcTestProbe.wrap(server.getDataSource(),(sql,after)->{
+            if(after && sql.contains("FOR UPDATE")) { locked.countDown(); if(!release.await(10,java.util.concurrent.TimeUnit.SECONDS)) throw new java.sql.SQLException("barrier timeout"); }
+        });
+        var incidentSource=JdbcTestProbe.wrap(server.getDataSource(),(sql,after)->{ if(!after && sql.contains("FOR UPDATE")) incidentWaiting.countDown(); });
+        try(var executor=java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var submit=executor.submit(()->ordinarySubmit(submitSource,attempt));
+            try {
+                assertThat(locked.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                var incident=executor.submit(()->recordIncident(incidentSource,attempt,UUID.randomUUID().toString()));
+                assertThat(incidentWaiting.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue(); assertThat(incident.isDone()).isFalse();
+                release.countDown(); assertThat(submit.get(15,java.util.concurrent.TimeUnit.SECONDS)).isEqualTo(1);
+                org.assertj.core.api.Assertions.assertThatThrownBy(()->incident.get(15,java.util.concurrent.TimeUnit.SECONDS)).hasCauseInstanceOf(IllegalStateException.class);
+            } finally { release.countDown(); }
+        }
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt,1);
+        assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE id="+attempt+" AND focus_lost_count=1 AND is_flagged=0 AND status='SUBMITTED'",1);
+    }
+
+    private static int atomicFixture(int count) throws Exception {
+        int id;
+        try(var conn=server.getDataSource().getConnection();var stmt=conn.createStatement()) {
+            try(var row=stmt.executeQuery("SELECT COALESCE(MAX(id),0)+10000 FROM exam_attempts")) { row.next(); id=row.getInt(1); }
+            stmt.execute("INSERT INTO exam_attempts(id,exam_id,student_id,start_time,status,focus_lost_count,score) VALUES("+id+",1,101,UTC_TIMESTAMP(),'ACTIVE',"+count+",NULL)");
+            for(int i=0;i<count;i++) stmt.execute("INSERT INTO proctor_events(attempt_id,event_type,recorded_at) VALUES("+id+",'FOCUS_LOST',UTC_TIMESTAMP())");
+        }
+        new com.examsystem.server.adapters.jdbc.JdbcAnswerRepository(server.getDataSource()).saveAnswer(id,401,java.util.List.of(1),Instant.now());
+        return id;
+    }
+
+    private static com.examsystem.application.ports.ProctorIncidentPort.Result recordIncident(javax.sql.DataSource source,int attempt,String key) {
+        var useCase=new com.examsystem.application.usecases.RecordProctorIncidentUseCase(new com.examsystem.server.adapters.jdbc.JdbcProctorIncidentPort(source,Instant::now));
+        return useCase.record(new com.examsystem.domain.models.User(101,"student1","Student One","EN101","A",com.examsystem.domain.models.User.Role.STUDENT),attempt,"FOCUS_LOST",key);
+    }
+
+    private static int ordinarySubmit(javax.sql.DataSource source,int attempt) {
+        return new com.examsystem.application.usecases.SubmitExamUseCase(new com.examsystem.server.adapters.jdbc.JdbcAnswerRepository(source),new com.examsystem.server.adapters.jdbc.JdbcExamAttemptRepository(source),new com.examsystem.server.adapters.jdbc.JdbcQuestionRepository(source),Instant::now).submitExam(attempt,Instant.now());
+    }
+
+    private static HttpResponse<String> incidentHttp(HttpClient client,int attempt,String key,String type) throws Exception {
+        return sendJson(client,"POST","/api/v1/student/attempts/"+attempt+"/events","token-stu1",new ObjectMapper().writeValueAsString(java.util.Map.of("eventType",type,"clientEventId",key)));
+    }
+
+    private static void assertAtomicUnchanged(int attempt,int count) throws Exception {
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt,count);
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id="+attempt+" AND result_violation_count IS NOT NULL",0);
+        assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE id="+attempt+" AND focus_lost_count="+count+" AND is_flagged=0 AND proctoring_status='CLEAN' AND score IS NULL AND end_time IS NULL AND status='ACTIVE'",1);
+    }
+
     private static ExaSecureServer server;
     private static final int PORT = 8089;
     private static String dbUrl;
@@ -148,7 +331,7 @@ class ServerIntegrationTest {
                 .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/attempts/201/events"))
                 .header("Authorization", "Bearer token-stu1")
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST"))
+                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST&clientEventId=" + UUID.randomUUID()))
                 .build();
         HttpResponse<String> eventResponse = client.send(eventRequest, HttpResponse.BodyHandlers.ofString());
 
@@ -1788,7 +1971,7 @@ class ServerIntegrationTest {
                 .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/attempts/" + attemptId + "/events"))
                 .header("Authorization", "Bearer token-stu1")
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST"))
+                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST&clientEventId=" + UUID.randomUUID()))
                 .build();
         HttpResponse<String> resp1 = client.send(ev1, HttpResponse.BodyHandlers.ofString());
         assertThat(resp1.statusCode()).isEqualTo(200);
@@ -1801,7 +1984,7 @@ class ServerIntegrationTest {
                 .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/attempts/" + attemptId + "/events"))
                 .header("Authorization", "Bearer token-stu1")
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST"))
+                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST&clientEventId=" + UUID.randomUUID()))
                 .build();
         HttpResponse<String> resp2 = client.send(ev2, HttpResponse.BodyHandlers.ofString());
         assertThat(resp2.statusCode()).isEqualTo(200);
@@ -1814,7 +1997,7 @@ class ServerIntegrationTest {
                 .uri(URI.create("http://localhost:" + PORT + "/api/v1/student/attempts/" + attemptId + "/events"))
                 .header("Authorization", "Bearer token-stu1")
                 .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST"))
+                .POST(HttpRequest.BodyPublishers.ofString("eventType=FOCUS_LOST&clientEventId=" + UUID.randomUUID()))
                 .build();
         HttpResponse<String> resp3 = client.send(ev3, HttpResponse.BodyHandlers.ofString());
         assertThat(resp3.statusCode()).isEqualTo(200);

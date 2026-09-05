@@ -60,9 +60,16 @@ public class JdbcQuestionRepository implements QuestionRepository {
 
     @Override
     public List<Question> findByExamId(int examId) {
+        try (Connection conn = dataSource.getConnection()) {
+            return findByExamId(conn, examId);
+        } catch (java.sql.SQLException e) {
+            throw new RuntimeException("DB error", e);
+        }
+    }
+
+    static List<Question> findByExamId(Connection conn, int examId) throws java.sql.SQLException {
         List<Question> questions = new ArrayList<>();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement psQuestion = conn.prepareStatement("SELECT id, exam_id, question_text, question_type, correct_option_number, is_active FROM questions WHERE exam_id = ? AND is_active = 1")) {
+        try (PreparedStatement psQuestion = conn.prepareStatement("SELECT id, exam_id, question_text, question_type, correct_option_number, is_active FROM questions WHERE exam_id = ? AND is_active = 1")) {
             psQuestion.setInt(1, examId);
             try (ResultSet rsQ = psQuestion.executeQuery()) {
                 while (rsQ.next()) {
