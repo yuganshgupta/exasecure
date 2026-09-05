@@ -21,6 +21,22 @@ class ContractMapperTest {
     private static final Instant STARTED_AT = Instant.parse("2026-09-02T12:30:00Z");
 
     @Test
+    void activeAttemptSuppressesDomainProctorFieldsAndUncalculatedScore() {
+        var attempt = new com.examsystem.domain.models.ExamAttempt(
+                3, 4, 5, STARTED_AT, null, 42, false, 2, true, "FLAGGED");
+        var dto = StudentContractMapper.toAttemptDto(attempt);
+        assertThat(dto).isEqualTo(new com.examsystem.contracts.StudentAttemptDto(
+                3, 4, 5, STARTED_AT, null, null, "ACTIVE"));
+        var json = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules().valueToTree(dto);
+        var fields = new java.util.HashSet<String>();
+        json.fieldNames().forEachRemaining(fields::add);
+        assertThat(fields).containsExactlyInAnyOrder(
+                "id", "examId", "studentId", "startTime", "endTime", "score", "status");
+        assertThat(json.required("score").isNull()).isTrue();
+        assertThat(json.required("endTime").isNull()).isTrue();
+    }
+
+    @Test
     void mapsAdminQueryResultsToNetworkDtos() {
         assertThat(AdminContractMapper.toUserDto(
                 new AdminUserResult(1, "admin", "Admin User", "ADMIN", true)))

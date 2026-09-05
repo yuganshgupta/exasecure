@@ -94,7 +94,7 @@ public class StudentExamController {
         if (!exam.isActive()) throw new ForbiddenResponse("Exam is not active");
 
         ExamAttempt attempt = startUseCase.startOrResume(user.id(), examId, exam.duration());
-        ctx.json(attempt);
+        ctx.json(StudentContractMapper.toAttemptDto(attempt));
     }
 
     public void getAttemptQuestions(Context ctx) {

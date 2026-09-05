@@ -44,6 +44,28 @@ class ApiClientTest {
     }
 
     @Test
+    void startAndResumeDeserializeActiveAttemptWithExplicitNullResultFields() {
+        sessionState.setSession("student", "Student", "STUDENT", "test-token");
+        var method = new AtomicReference<String>();
+        server.createContext("/api/v1/student/exams/7/attempts", exchange -> {
+            method.set(exchange.getRequestMethod());
+            byte[] bytes = """
+                    {"id":12,"examId":7,"studentId":9,"startTime":1788609600.123456789,
+                     "endTime":null,"score":null,"status":"ACTIVE"}
+                    """.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+        });
+        var created = client.startOrResumeAttempt(7);
+        var resumed = client.startOrResumeAttempt(7);
+        assertThat(method.get()).isEqualTo("POST");
+        assertThat(created).isEqualTo(new com.examsystem.contracts.StudentAttemptDto(
+                12, 7, 9, java.time.Instant.parse("2026-09-05T12:00:00.123456789Z"), null, null, "ACTIVE"));
+        assertThat(resumed).isEqualTo(created);
+    }
+
+    @Test
     void login_populatesSessionState_onSuccess() {
         server.createContext("/api/v1/auth/login", exchange -> {
             String json = """
