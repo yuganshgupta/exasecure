@@ -249,7 +249,9 @@ public class ProctorIncidentCoordinator {
         try {
             apiClient.recordProctorLongAbsence(attemptId, eventId);
         } catch (com.examsystem.client.api.ApiException e) {
-            if (e.getStatusCode() == 400 && retryCount < MAX_LONG_ABSENCE_RETRIES) {
+            if (e.getStatusCode() == 400
+                    && "PROCTOR_LONG_ABSENCE_TOO_EARLY".equals(e.getErrorCode())
+                    && retryCount < MAX_LONG_ABSENCE_RETRIES) {
                 // Server indicated threshold not yet reached (e.g. network latency on event creation).
                 // Schedule bounded retry while same incident generation remains active and unfocused.
                 ScheduledFuture<?> retryTask = scheduler.schedule(

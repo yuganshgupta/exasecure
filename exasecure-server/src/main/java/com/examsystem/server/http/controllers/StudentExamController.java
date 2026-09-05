@@ -299,7 +299,11 @@ public class StudentExamController {
 
         // Independent server-side authoritative check: incident must have actually existed for >= 5000 ms
         if (elapsedMs < LONG_ABSENCE_THRESHOLD_MS) {
-            throw new BadRequestResponse("Focus-loss incident duration (" + elapsedMs + "ms) has not existed for >= 5 seconds");
+            String errorCode = event.returnedAt() == null
+                    ? "PROCTOR_LONG_ABSENCE_TOO_EARLY"
+                    : "PROCTOR_LONG_ABSENCE_RETURNED_BELOW_THRESHOLD";
+            throw new com.examsystem.server.http.exceptions.CodedBadRequestException(errorCode,
+                    "Focus-loss incident duration (" + elapsedMs + "ms) has not existed for >= 5 seconds");
         }
 
         proctorRepository.markLongAbsence(eventId);

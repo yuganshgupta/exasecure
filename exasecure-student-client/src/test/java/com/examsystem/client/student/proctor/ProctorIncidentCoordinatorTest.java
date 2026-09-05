@@ -210,6 +210,123 @@ class ProctorIncidentCoordinatorTest {
         return new ApiClient(config, sessionState, null);
     }
 
+    private ProctorIncidentCoordinator retryCoordinator(int status, String errorCode) {
+        return createCoordinator(new ApiClient(new ServerConfig("http://localhost:8080"), new SessionState(), null) {
+            @Override public StudentProctorEventResponseDto recordProctorEvent(int attemptId, String type, String key) {
+                recordedEvents.add(new RecordedEventCall(attemptId, type, key));
+                return new StudentProctorEventResponseDto(nextEventId.getAndIncrement(), recordedEvents.size(), false, "ACTIVE");
+            }
+            @Override public void uploadProctorEvidence(int attemptId, int eventId, byte[] bytes, String contentType, String type) {
+                recordedEvidences.add(new RecordedEvidenceCall(attemptId, eventId, bytes, contentType, type));
+            }
+            @Override public void recordProctorReturn(int attemptId, int eventId, Instant returnedAt, long duration) {
+                recordedReturns.add(new RecordedReturnCall(attemptId, eventId, returnedAt, duration));
+            }
+            @Override public void recordProctorLongAbsence(int attemptId, int eventId) {
+                recordedLongAbsences.add(new RecordedLongAbsenceCall(attemptId, eventId));
+                // Deliberately identical message for every error: messages must not drive retries.
+                throw new com.examsystem.client.api.ApiException(status, "Threshold not yet met", errorCode);
+            }
+        });
+    }
+
+    private void advance(long millis) {
+        clock.advanceMs(millis);
+        scheduler.advanceTime(millis);
+    }
+
+    private void reachLongAbsence(ProctorIncidentCoordinator coordinator) {
+        coordinator.onFocusLost();
+        advance(800);
+        advance(4200);
+        assertThat(recordedLongAbsences).hasSize(1);
+    }
+
+    private void assertOneIncidentAndTwoCaptures() {
+        assertThat(recordedEvents).hasSize(1);
+        assertThat(violationCallbacks).hasSize(1);
+        assertThat(violationCallbacks.getFirst().violationCount()).isEqualTo(1);
+        assertThat(captureService.captureCount).isEqualTo(2);
+        assertThat(recordedEvidences).hasSize(2);
+    }
+
+    private void assertNoThresholdRetry(int status, String code) {
+        var coordinator = retryCoordinator(status, code);
+        reachLongAbsence(coordinator);
+        for (int i = 0; i < 10; i++) advance(250);
+        assertThat(recordedLongAbsences).hasSize(1);
+        assertOneIncidentAndTwoCaptures();
+        coordinator.shutdown();
+    }
+
+    @Test void unrelated400DoesNotRetry() { assertNoThresholdRetry(400, "INVALID_REQUEST"); }
+    @Test void returnedBelowThresholdDoesNotRetry() { assertNoThresholdRetry(400, "PROCTOR_LONG_ABSENCE_RETURNED_BELOW_THRESHOLD"); }
+    @Test void unknownErrorCodeDoesNotRetry() { assertNoThresholdRetry(400, "FUTURE_SERVER_CODE"); }
+    @Test void missingErrorCodeDoesNotRetry() { assertNoThresholdRetry(400, null); }
+    @Test void forbiddenDoesNotRetryEvenWithTooEarlyCode() { assertNoThresholdRetry(403, "PROCTOR_LONG_ABSENCE_TOO_EARLY"); }
+    @Test void notFoundDoesNotRetryEvenWithTooEarlyCode() { assertNoThresholdRetry(404, "PROCTOR_LONG_ABSENCE_TOO_EARLY"); }
+    @Test void conflictDoesNotRetryEvenWithTooEarlyCode() { assertNoThresholdRetry(409, "PROCTOR_LONG_ABSENCE_TOO_EARLY"); }
+
+    @Test void tooEarlyRetriesExactlyThreeTimesAt250msWithoutExtraIncidentOrCapture() {
+        var coordinator = retryCoordinator(400, "PROCTOR_LONG_ABSENCE_TOO_EARLY");
+        reachLongAbsence(coordinator);
+        for (int i = 1; i <= 3; i++) {
+            advance(249);
+            assertThat(recordedLongAbsences).hasSize(i);
+            advance(1);
+            assertThat(recordedLongAbsences).hasSize(i + 1);
+        }
+        advance(10000);
+        assertThat(recordedLongAbsences).hasSize(4).allSatisfy(call -> assertThat(call.eventId()).isEqualTo(100));
+        assertOneIncidentAndTwoCaptures();
+        coordinator.shutdown();
+    }
+
+    @Test void focusRegainCancelsThresholdRetryIncludingAlreadyDequeuedTask() {
+        var coordinator = retryCoordinator(400, "PROCTOR_LONG_ABSENCE_TOO_EARLY");
+        reachLongAbsence(coordinator);
+        var retry = scheduler.queue.peek();
+        coordinator.onFocusGained();
+        assertThat(retry.isCancelled()).isTrue();
+        retry.task.run(); // Simulate cancellation racing with a task already dequeued.
+        advance(10000);
+        assertThat(recordedLongAbsences).hasSize(1);
+        assertOneIncidentAndTwoCaptures();
+        coordinator.shutdown();
+    }
+
+    @Test void shutdownCancelsThresholdRetryIncludingAlreadyDequeuedTask() {
+        var coordinator = retryCoordinator(400, "PROCTOR_LONG_ABSENCE_TOO_EARLY");
+        reachLongAbsence(coordinator);
+        var retry = scheduler.queue.peek();
+        coordinator.shutdown();
+        assertThat(retry.isCancelled()).isTrue();
+        retry.task.run();
+        advance(10000);
+        assertThat(recordedLongAbsences).hasSize(1);
+        assertOneIncidentAndTwoCaptures();
+    }
+
+    @Test void oldGenerationRetryCannotAffectNewIncident() {
+        var coordinator = retryCoordinator(400, "PROCTOR_LONG_ABSENCE_TOO_EARLY");
+        reachLongAbsence(coordinator);
+        var retry = scheduler.queue.peek();
+        coordinator.onFocusGained();
+        coordinator.onFocusLost();
+        assertThat(coordinator.getCurrentIncidentGeneration()).isEqualTo(2);
+        retry.task.run();
+        assertThat(recordedLongAbsences).hasSize(1);
+        assertThat(captureService.captureCount).isEqualTo(2);
+        advance(800);
+        advance(4200);
+        assertThat(recordedLongAbsences).hasSize(2);
+        assertThat(recordedLongAbsences.getLast().eventId()).isEqualTo(101);
+        assertThat(recordedEvents).hasSize(2);
+        assertThat(violationCallbacks).hasSize(2);
+        assertThat(captureService.captureCount).isEqualTo(4);
+        coordinator.shutdown();
+    }
+
     @Test
     void quickReturn_recordsOneViolation_cancelsPendingScreenshots() {
         ApiClient mockApi = new ApiClient(new ServerConfig("http://localhost:8080"), new SessionState(), null) {
@@ -602,7 +719,7 @@ class ProctorIncidentCoordinatorTest {
                 recordedLongAbsences.add(new RecordedLongAbsenceCall(attemptId, eventId));
                 if (attempt == 1) {
                     // First call: server rejects with 400 Bad Request (e.g. server duration was 4980ms due to network delay on event creation)
-                    throw new com.examsystem.client.api.ApiException(400, "Threshold not yet met");
+                    throw new com.examsystem.client.api.ApiException(400, "Threshold not yet met", "PROCTOR_LONG_ABSENCE_TOO_EARLY");
                 }
                 // Second call: succeeds
             }
@@ -628,6 +745,8 @@ class ProctorIncidentCoordinatorTest {
 
         // Second attempt succeeded
         assertThat(longAbsenceAttempts.get()).isEqualTo(2);
+        assertThat(captureService.captureCount).isEqualTo(2);
+        assertThat(recordedEvidences).hasSize(2);
 
         // Crucial invariant: exactly 1 event recorded, 1 strike!
         assertThat(recordedEvents).hasSize(1);

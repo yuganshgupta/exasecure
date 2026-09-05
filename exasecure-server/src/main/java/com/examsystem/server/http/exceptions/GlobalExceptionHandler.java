@@ -11,6 +11,9 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     public static void register(io.javalin.config.JavalinConfig config) {
+        config.routes.exception(CodedBadRequestException.class, (e, ctx) -> {
+            ctx.status(400).json(new ErrorResponseDto(400, e.getMessage(), UUID.randomUUID().toString(), e.getErrorCode()));
+        });
         config.routes.exception(SecurityException.class, (e, ctx) -> {
             ctx.status(403).json(new ErrorResponseDto(403, e.getMessage(), UUID.randomUUID().toString()));
         });

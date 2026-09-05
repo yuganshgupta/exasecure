@@ -6,7 +6,6 @@ import com.examsystem.application.ports.ProctorRepository.ProctorEventRecord;
 import com.examsystem.domain.models.ExamAttempt;
 import com.examsystem.domain.models.User;
 import com.examsystem.server.http.controllers.StudentExamController;
-import io.javalin.http.BadRequestResponse;
 import io.javalin.http.Context;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,6 +23,43 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class StudentExamDurationThresholdTest {
+
+    @Test void ongoingTooEarlyHasRetryableCodeOverHttp() throws Exception {
+        assertWireError(null, "PROCTOR_LONG_ABSENCE_TOO_EARLY");
+    }
+
+    @Test void returnedBelowThresholdHasNonRetryableCodeOverHttp() throws Exception {
+        assertWireError(BASE_TIME.plusMillis(4999), "PROCTOR_LONG_ABSENCE_RETURNED_BELOW_THRESHOLD");
+    }
+
+    private void assertWireError(Instant returnedAt, String code) throws Exception {
+        AtomicBoolean marked = new AtomicBoolean();
+        var controller = new StudentExamController(null, null, null, null, createAttemptRepository(),
+                createProctorRepository(BASE_TIME, returnedAt, marked), null, null, null,
+                Clock.fixed(BASE_TIME.plusMillis(4999), ZoneOffset.UTC));
+        var app = io.javalin.Javalin.create(config -> {
+            com.examsystem.server.http.exceptions.GlobalExceptionHandler.register(config);
+            config.routes.post("/attempts/{attemptId}/events/{eventId}/long-absence", ctx -> {
+                ctx.attribute("user", new User(STUDENT_ID, "student1", "Student One", "EN101", "A", User.Role.STUDENT));
+                controller.recordLongAbsence(ctx);
+            });
+        });
+        try {
+            app.start(0);
+            var client = java.net.http.HttpClient.newHttpClient();
+            var request = java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost:" + app.port()
+                    + "/attempts/" + ATTEMPT_ID + "/events/" + EVENT_ID + "/long-absence"))
+                    .POST(java.net.http.HttpRequest.BodyPublishers.noBody()).build();
+            var response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+            assertThat(response.statusCode()).isEqualTo(400);
+            var json = new com.fasterxml.jackson.databind.ObjectMapper().readTree(response.body());
+            assertThat(json.required("code").asInt()).isEqualTo(400);
+            assertThat(json.required("errorCode").asText()).isEqualTo(code);
+            assertThat(json.required("message").asText()).contains("4999ms");
+            assertThat(json.required("requestId").asText()).isNotBlank();
+            assertThat(marked.get()).isFalse();
+        } finally { app.stop(); }
+    }
 
     private static final Instant BASE_TIME = Instant.parse("2026-09-05T12:00:00.000Z");
     private static final int ATTEMPT_ID = 1001;
@@ -122,7 +158,9 @@ class StudentExamDurationThresholdTest {
         Context ctx = createContext(ATTEMPT_ID, EVENT_ID, statusHolder);
 
         assertThatThrownBy(() -> controller.recordLongAbsence(ctx))
-                .isInstanceOf(BadRequestResponse.class)
+                .isInstanceOf(com.examsystem.server.http.exceptions.CodedBadRequestException.class)
+                .satisfies(e -> assertThat(((com.examsystem.server.http.exceptions.CodedBadRequestException) e).getErrorCode())
+                        .isEqualTo("PROCTOR_LONG_ABSENCE_TOO_EARLY"))
                 .hasMessageContaining("4999ms")
                 .hasMessageContaining("not existed for >= 5 seconds");
 
@@ -190,7 +228,9 @@ class StudentExamDurationThresholdTest {
         Context ctx = createContext(ATTEMPT_ID, EVENT_ID, statusHolder);
 
         assertThatThrownBy(() -> controller.recordLongAbsence(ctx))
-                .isInstanceOf(BadRequestResponse.class)
+                .isInstanceOf(com.examsystem.server.http.exceptions.CodedBadRequestException.class)
+                .satisfies(e -> assertThat(((com.examsystem.server.http.exceptions.CodedBadRequestException) e).getErrorCode())
+                        .isEqualTo("PROCTOR_LONG_ABSENCE_RETURNED_BELOW_THRESHOLD"))
                 .hasMessageContaining("4999ms")
                 .hasMessageContaining("not existed for >= 5 seconds");
 

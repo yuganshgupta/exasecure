@@ -147,4 +147,46 @@ class ApiClientTest {
                 .isInstanceOf(ApiException.class)
                 .hasMessageContaining("Server unavailable");
     }
+
+    @Test
+    void structuredErrorCodeSurvivesHttpParsingWithOriginalStatusAndMessage() {
+        assertErrorContract(400, "PROCTOR_LONG_ABSENCE_TOO_EARLY");
+    }
+
+    @Test
+    void legacyErrorWithoutCodeRemainsReadable() {
+        assertErrorContract(400, null);
+    }
+
+    @Test
+    void unknownErrorCodeRemainsOpaque() {
+        assertErrorContract(400, "FUTURE_SERVER_CODE");
+    }
+
+    @Test
+    void errorCodeDoesNotChangeForbiddenNotFoundOrConflictStatus() {
+        for (int status : new int[]{403, 404, 409}) {
+            assertErrorContract(status, "PROCTOR_LONG_ABSENCE_TOO_EARLY");
+            server.removeContext("/api/v1/student/attempts/1/events/2/long-absence");
+        }
+    }
+
+    private void assertErrorContract(int status, String errorCode) {
+        server.createContext("/api/v1/student/attempts/1/events/2/long-absence", exchange -> {
+            String json = "{\"code\":" + status + ",\"message\":\"Threshold not yet met\",\"requestId\":\"request-1\""
+                    + (errorCode == null ? "" : ",\"errorCode\":\"" + errorCode + "\"") + "}";
+            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(status, bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+        });
+        assertThatThrownBy(() -> client.recordProctorLongAbsence(1, 2))
+                .isInstanceOf(ApiException.class)
+                .satisfies(e -> {
+                    var api = (ApiException) e;
+                    assertThat(api.getStatusCode()).isEqualTo(status);
+                    assertThat(api.getErrorCode()).isEqualTo(errorCode);
+                    assertThat(api.getServerMessage()).isEqualTo("Threshold not yet met");
+                });
+    }
 }

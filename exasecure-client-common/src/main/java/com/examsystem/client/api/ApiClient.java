@@ -435,10 +435,12 @@ public class ApiClient {
         }
 
         String message = null;
+        String errorCode = null;
         if (responseBody != null && !responseBody.isBlank()) {
             try {
                 ErrorResponseDto err = mapper.readValue(responseBody, ErrorResponseDto.class);
                 message = err.message();
+                errorCode = err.errorCode();
             } catch (Exception ignored) {
                 try {
                     JsonNode node = mapper.readTree(responseBody);
@@ -455,19 +457,19 @@ public class ApiClient {
 
         if (statusCode == 401) {
             sessionState.clear();
-            throw new ApiException(401, message != null ? message : "Session expired or invalid credentials");
+            throw new ApiException(401, message != null ? message : "Session expired or invalid credentials", errorCode);
         }
         if (statusCode == 403) {
-            throw new ApiException(403, message != null ? message : "Access forbidden for current user role");
+            throw new ApiException(403, message != null ? message : "Access forbidden for current user role", errorCode);
         }
         if (statusCode == 404) {
-            throw new ApiException(404, message != null ? message : "Requested resource not found");
+            throw new ApiException(404, message != null ? message : "Requested resource not found", errorCode);
         }
         if (statusCode == 409) {
-            throw new ApiException(409, message != null ? message : "Conflict: exam attempt already finalized or expired");
+            throw new ApiException(409, message != null ? message : "Conflict: exam attempt already finalized or expired", errorCode);
         }
 
-        throw new ApiException(statusCode, message != null ? message : "Server error (" + statusCode + ")");
+        throw new ApiException(statusCode, message != null ? message : "Server error (" + statusCode + ")", errorCode);
     }
 
     private <T> T parse(String body, Class<T> clazz) {
