@@ -1,141 +1,93 @@
-# ExaSecure 1.0
+# ExaSecure
 
-ExaSecure is a desktop examination system built with Java 17, Swing/AWT, JDBC,
-and MySQL. Version 1.0 provides separate administrator and student interfaces,
-timed examinations, automatic scoring, result review, CSV export, and basic
-focus-loss proctoring.
+A Java client-server examination platform with separate Student and Admin desktop applications.
 
-## Requirements
+## Overview
 
-- Windows 10 or 11 for the supported automated setup
-- JDK 17 or newer (a JDK is required, not only a JRE)
-- MySQL Server 8.x
-- PowerShell 5.1 or newer
-- Maven 3.9+ only when building through `pom.xml`
+ExaSecure V2 brings exam delivery, administration, and proctoring review together around a central server. The repository also preserves the earlier Swing generation to show the project's evolution.
 
-The application is compiled for Java 17. Its UI uses Java Swing; no browser or
-web server is required.
+## Tech Stack
 
-## Install and run on Windows
+Java 25, JavaFX 25.0.2, Javalin, MySQL, and Maven Wrapper.
 
-1. Download `ExaSecure-1.0.0-windows.zip` from the GitHub Release and extract it.
-2. Open PowerShell in the extracted directory.
-3. Run the setup:
+## Applications / Modules
 
-   ```powershell
-   .\setup.ps1
-   ```
+| Module | Responsibility |
+| --- | --- |
+| `exasecure-domain` | Exam models and grading rules |
+| `exasecure-application` | Use cases and persistence ports |
+| `exasecure-contracts` | HTTP request and response DTOs |
+| `exasecure-server` | HTTP API, authentication, MySQL persistence, and migrations |
+| `exasecure-client-common` | Shared API client, session state, and JavaFX utilities |
+| `exasecure-student-client` | Student exam and history workflows |
+| `exasecure-admin-client` | Exam, question, user, result, and evidence management |
+| `exasecure-launcher` | Control Center for development launching |
 
-4. Save the generated `demo_admin` and `demo_student` passwords shown at the
-   end of setup.
-5. Start the application:
+## Architecture
 
-   ```powershell
-   java -jar .\ExaSecure.jar
-   ```
+Student and Admin clients communicate with the Server through HTTP/JSON. Only the Server accesses MySQL and holds database credentials. Attempt timing, grading, submission, and proctor incident decisions are server-authoritative; Student clients have no direct database access or database credentials.
 
-The setup script installs or upgrades the local schema, creates a restricted
-application database account, writes an ignored `db.properties` file, creates
-demo users with BCrypt password hashes, and validates the connection and login
-path. It does not store database or demo-user passwords in Git.
+## Core Features
 
-For setup options and troubleshooting, run:
-
-```powershell
-Get-Help .\setup.ps1 -Detailed
-```
-
-## Run from a source checkout
-
-The repository includes the two runtime libraries in `lib/` only in local
-development environments; JAR files are intentionally ignored by Git. Run
-`setup.ps1` to validate or download the pinned dependencies, configure MySQL,
-and build the source before launching:
-
-```powershell
-.\setup.ps1
-.\run_onwindows.bat
-```
-
-`db.properties.example` documents the required configuration keys. Never
-commit the generated `db.properties` file.
+- Exam authoring, question management, and Admin user management.
+- Answer autosave, exam resume, server-authoritative grading, and submission.
+- Focus-loss proctoring, supporting screenshots, and Admin evidence review.
+- Attempt history, results, statistics, and database migrations.
+- Control Center development launching and Light/Dark/System themes.
 
 ## Build
 
-The reproducible Maven build downloads dependencies and creates one executable
-JAR containing the application, MySQL Connector/J, and BCrypt:
-
-```bash
-mvn clean package
-java -jar target/exasecure-1.0.0.jar
-```
-
-Verify the packaged version and database readiness without opening Swing:
-
-```bash
-java -jar target/exasecure-1.0.0.jar --version
-java -jar target/exasecure-1.0.0.jar --check
-```
-
-The resulting bytecode targets Java 17. On a prepared local checkout, the
-platform scripts provide a Maven-free alternative:
+Install JDK 25 and run the Maven Wrapper from the repository root:
 
 ```powershell
-.\build_jar.bat
+.\mvnw.cmd clean verify
 ```
 
-```bash
-./build_jar.sh
+On macOS/Linux, use `./mvnw` in place of `.\mvnw.cmd`. The active reactor contains the parent and eight V2 modules.
+
+## Configuration
+
+For the Server, provision a local MySQL database and account, copy `db.properties.example` to the ignored root `db.properties`, and set `db.url`, `db.user`, and `db.password` locally. The example contains placeholders; keep real credentials out of Git. The Server also accepts `DB_URL`, `DB_USER`, `DB_PASSWORD`, and `SERVER_PORT` overrides.
+
+Clients default to `http://localhost:8089`. Set `EXASECURE_SERVER_URL` to use another server. Student and Admin machines do not need `db.properties` or MySQL. The archived V1 setup automation is not a V2 provisioning command.
+
+## Development Run
+
+Install the reactor locally first after source changes so module execution resolves current sibling artifacts:
+
+```powershell
+.\mvnw.cmd install -DskipTests
 ```
 
-Both scripts write `dist/exasecure-1.0.0.jar` and require the dependency JARs
-under `lib/`.
+Run each application from the repository root in a separate terminal:
 
-## Main features
-
-- BCrypt-backed login and role-specific administrator/student screens
-- User, exam, question, and option management
-- Single-choice and multiple-choice questions
-- Timed attempts with automatic submission and scoring
-- Previous/next navigation with answer persistence
-- Student attempt history and detailed answer review
-- Administrator result review, statistics, and CSV export
-- Focus-loss counting, timestamps, and optional screenshot evidence
-- Background database operations through `SwingWorker` to keep the UI responsive
-
-## Project layout
-
-```text
-src/com/examsystem/
-  dao/            JDBC data access
-  db/             connection and schema verification
-  gui/            Swing windows, dialogs, and panels
-  models/         domain models
-  services/       application services
-  setup/          setup-only verification helpers
-  Main.java       application entry point
-setup/sql/        canonical MySQL schema
-setup.ps1         supported Windows setup
-pom.xml           reproducible release build
+```powershell
+.\mvnw.cmd exec:java -pl exasecure-server
+.\mvnw.cmd exec:java -pl exasecure-student-client
+.\mvnw.cmd exec:java -pl exasecure-admin-client
+.\mvnw.cmd exec:java -pl exasecure-launcher
 ```
 
-## Database notes
+Start the Server before the clients; `http://localhost:8089/health` returns HTTP 200 when ready. The Control Center can start and stop its own development application processes.
 
-The runtime application verifies schema version 3 and deliberately performs no
-DDL with its restricted database account. Use `setup.ps1` for installation,
-upgrade, repair, credential rotation, or reset operations. `database.sql` is a
-non-destructive MySQL CLI convenience entry point for the canonical schema; the
-PowerShell setup remains the supported complete installation path.
+## Testing
 
-## Security scope
+`clean verify` runs unit, HTTP, migration, and architecture tests. Real MySQL tests require `EXASECURE_MYSQL_TEST_URL`, `EXASECURE_MYSQL_TEST_USER`, and `EXASECURE_MYSQL_TEST_PASSWORD`; without the URL, those tests are skipped.
 
-ExaSecure 1.0 is a security-aware educational desktop application, not a
-production or high-stakes remote-exam platform. The Java client connects
-directly to a local MySQL database, and proctoring is limited to desktop focus
-events and screenshots. Production deployment would require a trusted server
-API, server-side authorization and grading, transport security, audit controls,
-identity recovery, rate limiting, privacy controls, and a formal threat model.
+Use only the disposable database `exasecure_test` at `localhost:3306` for destructive MySQL fixtures. Construct the test URL explicitly, verify its database name before running, and supply credentials privately. Never point these tests at the application database or data you need to retain. A complete verification run includes the real MySQL tests with no skips.
 
-## License
+## Database Migrations
 
-Licensed under the Apache License 2.0. See [LICENSE](LICENSE).
+The Server applies versioned migrations from its resources at startup. See [R3 migration and recovery guidance](docs/database/r3-migrations.md) for backup, compatibility, transaction, and forward-recovery details. Git rollback does not roll back a database.
+
+## Legacy
+
+[legacy/](legacy/README.md) contains historical Swing V1 source, scripts, documentation, and release automation. It is outside the active V2 reactor. Git tag `v1.0.0` preserves the canonical buildable V1 release and its original working layout.
+
+## Current Development Limitation
+
+Native packaging and installers are planned for R4. Current launch commands are for development; native installers are not yet provided.
+
+## License / Academic Context
+
+Licensed under the [Apache License 2.0](LICENSE). ExaSecure is an academic project demonstrating desktop application development, client-server boundaries, database evolution, and automated verification.

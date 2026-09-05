@@ -15,17 +15,6 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.examsystem</groupId>
-            <artifactId>exasecure-domain</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>com.examsystem</groupId>
-            <artifactId>exasecure-application</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-
-        <dependency>
             <groupId>com.mysql</groupId>
             <artifactId>mysql-connector-j</artifactId>
             <version>9.5.0</version>

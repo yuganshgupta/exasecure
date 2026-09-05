@@ -89,6 +89,9 @@ debug.log
 *.log
 
 # Private project coordination
+/.ai/
+/plan.md
+/uplan.md
 AGENTS.md
 PLAN.md
 HANDOFF.md
