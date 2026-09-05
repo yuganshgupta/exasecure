@@ -14,10 +14,6 @@
     <name>ExaSecure Launcher</name>
     <description>Cross-platform JavaFX desktop development and presentation launcher for ExaSecure</description>
 
-    <properties>
-        <javafx.version>25.0.2</javafx.version>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>org.openjfx</groupId>

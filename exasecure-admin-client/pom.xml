@@ -14,10 +14,6 @@
     <name>ExaSecure Admin Client</name>
     <description>JavaFX desktop client for administrators managing exams, users, and proctoring</description>
 
-    <properties>
-        <javafx.version>25.0.2</javafx.version>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>com.examsystem</groupId>

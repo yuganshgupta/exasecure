@@ -14,10 +14,6 @@
     <name>ExaSecure Student Client</name>
     <description>JavaFX desktop client for students taking examinations</description>
 
-    <properties>
-        <javafx.version>25.0.2</javafx.version>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>com.examsystem</groupId>

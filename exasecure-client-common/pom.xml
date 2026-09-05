@@ -15,7 +15,6 @@
     <description>Shared HTTP API client, session, and UI foundation for desktop clients</description>
 
     <properties>
-        <javafx.version>25.0.2</javafx.version>
         <jackson.version>2.18.2</jackson.version>
     </properties>
 
