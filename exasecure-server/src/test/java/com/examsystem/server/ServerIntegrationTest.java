@@ -36,7 +36,7 @@ class ServerIntegrationTest {
         dbUrl = System.getenv("EXASECURE_MYSQL_TEST_URL");
         dbUser = System.getenv().getOrDefault("EXASECURE_MYSQL_TEST_USER", "root");
         dbPassword = System.getenv().getOrDefault("EXASECURE_MYSQL_TEST_PASSWORD", "");
-        if (!dbUrl.matches("(?i)^jdbc:mysql://[^/]+/exasecure_test(?:_[a-z0-9]+)?(?:\\?.*)?$")) {
+        if (!dbUrl.matches("^jdbc:mysql://localhost:3306/exasecure_test(?:\\?.*)?$")) {
             throw new IllegalArgumentException(
                     "EXASECURE_MYSQL_TEST_URL must target a disposable exasecure_test database");
         }

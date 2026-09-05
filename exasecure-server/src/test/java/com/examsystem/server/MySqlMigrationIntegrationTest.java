@@ -22,6 +22,7 @@ import java.util.HexFormat;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @EnabledIfEnvironmentVariable(named = "EXASECURE_MYSQL_TEST_URL", matches = ".+")
 class MySqlMigrationIntegrationTest {
@@ -42,7 +43,7 @@ class MySqlMigrationIntegrationTest {
         dbUrl = System.getenv("EXASECURE_MYSQL_TEST_URL");
         dbUser = System.getenv().getOrDefault("EXASECURE_MYSQL_TEST_USER", "root");
         dbPassword = System.getenv().getOrDefault("EXASECURE_MYSQL_TEST_PASSWORD", "");
-        if (!dbUrl.matches("(?i)^jdbc:mysql://[^/]+/exasecure_test(?:_[a-z0-9]+)?(?:\\?.*)?$")) {
+        if (!dbUrl.matches("^jdbc:mysql://localhost:3306/exasecure_test(?:\\?.*)?$")) {
             throw new IllegalArgumentException(
                     "EXASECURE_MYSQL_TEST_URL must target a disposable exasecure_test database");
         }
@@ -101,7 +102,7 @@ class MySqlMigrationIntegrationTest {
                 assertThat(evidence.getString("content_type")).isEqualTo("image/jpeg");
                 assertThat(evidence.getInt("byte_size")).isEqualTo(SCREENSHOT.length);
                 assertThat(evidence.getBytes("screenshot_data")).containsExactly(SCREENSHOT);
-                assertThat(evidence.getString("evidence_type")).isEqualTo("INITIAL");
+                assertThat(evidence.getString("evidence_type")).isEqualTo("L1");
             }
 
             try (Statement stmt = conn.createStatement();
@@ -126,6 +127,218 @@ class MySqlMigrationIntegrationTest {
             assertSingleInt(conn,
                     "SELECT COUNT(*) FROM student_answer_options sao JOIN student_answers sa ON sa.id = sao.answer_id WHERE sa.question_id = 2 AND sao.selected_option = 1",
                     1);
+        }
+    }
+
+    @Test void populatedV9WithOneTwoAndFourEvidenceRows() throws Exception { resumeHistorical(0, false); }
+    @Test void partialV10ReturnedAtColumn() throws Exception { resumeHistorical(1, false); }
+    @Test void partialV10DurationColumn() throws Exception { resumeHistorical(2, false); }
+    @Test void partialV10LongAbsenceColumn() throws Exception { resumeHistorical(3, false); }
+    @Test void partialV10EvidenceTypeColumn() throws Exception { resumeHistorical(4, false); }
+    @Test void previousUniqueIndexCreationFailed() throws Exception { resumeHistorical(4, true); }
+
+    @Test void crashAfterLegacyRelabelingResumes() throws Exception {
+        historicalV9();
+        var before = evidenceRows();
+        dataSource = dataSource();
+        var faulty = JdbcTestProbe.wrap(dataSource, (sql, after) -> {
+            if (!after && sql.startsWith("CREATE UNIQUE INDEX uq_evidence_event_type")) throw new java.sql.SQLException("injected index-step interruption");
+        });
+        assertThatThrownBy(() -> new DatabaseMigrator(faulty).migrate()).hasRootCauseMessage("injected index-step interruption");
+        try (var conn = connection()) { assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 9); }
+        new DatabaseMigrator(dataSource).migrate();
+        assertPreserved(before);
+    }
+
+    @Test void indexCreatedButVersionMarkerMissingResumes() throws Exception {
+        historicalV9();
+        var before = evidenceRows();
+        dataSource = dataSource();
+        var faulty = JdbcTestProbe.wrap(dataSource, (sql, after) -> {
+            if (!after && sql.contains("VALUES (10, CURRENT_TIMESTAMP)")) throw new java.sql.SQLException("injected version-step interruption");
+        });
+        assertThatThrownBy(() -> new DatabaseMigrator(faulty).migrate()).hasRootCauseMessage("injected version-step interruption");
+        new DatabaseMigrator(dataSource).migrate();
+        new DatabaseMigrator(dataSource).migrate();
+        assertPreserved(before);
+    }
+
+    @Test void historicalV10IndexWithoutMarkerResumes() throws Exception {
+        historicalV9();
+        // V10 could historically finish its index when there was one row per event.
+        try (var conn = connection(); var stmt = conn.createStatement()) {
+            stmt.execute("DELETE FROM proctor_evidence_v2 WHERE id NOT IN (1, 2, 4)");
+            addV10Columns(conn, 4);
+            stmt.execute("CREATE UNIQUE INDEX uq_evidence_event_type ON proctor_evidence_v2(event_id,evidence_type)");
+        }
+        var before = evidenceRows();
+        dataSource = dataSource(); new DatabaseMigrator(dataSource).migrate();
+        assertPreserved(before);
+    }
+
+    @Test void alreadySuccessfulV10LabelsAreNeverReinterpreted() throws Exception {
+        historicalV9();
+        try (var conn = connection(); var stmt = conn.createStatement()) {
+            stmt.execute("DELETE FROM proctor_evidence_v2 WHERE id NOT IN (1, 2, 4)");
+            executeScript(conn, new String(readResource("db/migration/schema-v10.sql"), StandardCharsets.UTF_8));
+            stmt.execute("UPDATE proctor_evidence_v2 SET evidence_type='LONG_ABSENCE' WHERE id=2");
+        }
+        var before = evidenceRows();
+        dataSource = dataSource(); new DatabaseMigrator(dataSource).migrate(); new DatabaseMigrator(dataSource).migrate();
+        assertThat(evidenceRows()).isEqualTo(before);
+        try (var conn = connection(); var stmt = conn.createStatement(); var rows = stmt.executeQuery("SELECT evidence_type FROM proctor_evidence_v2 ORDER BY id")) {
+            rows.next(); assertThat(rows.getString(1)).isEqualTo("INITIAL");
+            rows.next(); assertThat(rows.getString(1)).isEqualTo("LONG_ABSENCE");
+        }
+    }
+
+    @Test void incorrectColumnDefinitionStopsBeforeRelabeling() throws Exception {
+        historicalV9(); var before = evidenceRows();
+        try (var conn = connection(); var stmt = conn.createStatement()) { stmt.execute("ALTER TABLE proctor_events ADD returned_at VARCHAR(20) NULL"); }
+        dataSource = dataSource();
+        assertThatThrownBy(() -> new DatabaseMigrator(dataSource).migrate()).hasRootCauseMessage(
+                "V10 compatibility stopped: Incorrect definition of proctor_events.returned_at; expected DATETIME NULL. Back up the database and repair the schema to the documented V9/V10 definition before restarting.");
+        assertThat(evidenceRows()).isEqualTo(before);
+        try (var conn = connection()) { assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 9); }
+    }
+
+    @Test void incorrectIndexDefinitionStops() throws Exception {
+        historicalV9(); var before = evidenceRows();
+        try (var conn = connection(); var stmt = conn.createStatement()) {
+            addV10Columns(conn, 4);
+            stmt.execute("CREATE INDEX uq_evidence_event_type ON proctor_evidence_v2(event_id,evidence_type)");
+        }
+        dataSource = dataSource();
+        assertThatThrownBy(() -> new DatabaseMigrator(dataSource).migrate()).hasRootCauseInstanceOf(java.sql.SQLException.class);
+        assertThat(evidenceRows()).isEqualTo(before);
+        try (var conn = connection()) { assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 9); }
+    }
+
+    @Test void unknownPreV10LabelsStopWithoutInventingProvenance() throws Exception {
+        historicalV9();
+        try (var conn = connection(); var stmt = conn.createStatement()) {
+            addV10Columns(conn, 4); stmt.execute("UPDATE proctor_evidence_v2 SET evidence_type='LONG_ABSENCE' WHERE id=1");
+        }
+        dataSource = dataSource();
+        assertThatThrownBy(() -> new DatabaseMigrator(dataSource).migrate()).hasRootCauseInstanceOf(java.sql.SQLException.class);
+        try (var conn = connection()) { assertSingleInt(conn, "SELECT COUNT(*) FROM proctor_evidence_v2 WHERE evidence_type='INITIAL'", 6); }
+    }
+
+    @Test void competingMigratorsSerializeAcrossDdlAndVersionMarker() throws Exception {
+        historicalV9(); var before = evidenceRows(); dataSource = dataSource();
+        var entered = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var secondLock = new java.util.concurrent.CountDownLatch(1);
+        var first = JdbcTestProbe.wrap(dataSource, (sql, after) -> {
+            if (after && sql.startsWith("ALTER TABLE proctor_events ADD COLUMN returned_at")) {
+                entered.countDown();
+                if (!release.await(10, java.util.concurrent.TimeUnit.SECONDS)) throw new java.sql.SQLException("barrier timeout");
+            }
+        });
+        var second = JdbcTestProbe.wrap(dataSource, (sql, after) -> { if (!after && sql.contains("GET_LOCK")) secondLock.countDown(); });
+        try (var executor = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var a = executor.submit(() -> new DatabaseMigrator(first).migrate());
+            try {
+                assertThat(entered.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                var b = executor.submit(() -> new DatabaseMigrator(second).migrate());
+                assertThat(secondLock.await(10, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                assertThat(b.isDone()).isFalse();
+                release.countDown(); a.get(15, java.util.concurrent.TimeUnit.SECONDS); b.get(15, java.util.concurrent.TimeUnit.SECONDS);
+            } finally { release.countDown(); }
+        }
+        assertPreserved(before);
+    }
+
+    @Test void everyMigratedArtifactIsListedAndRetrievedThroughAdminHttp() throws Exception {
+        historicalV9(); dataSource = dataSource(); new DatabaseMigrator(dataSource).migrate();
+        try (var conn = connection(); var stmt = conn.createStatement()) {
+            stmt.execute("INSERT INTO server_sessions(token,user_id,expires_at) VALUES('migration-admin',1,DATE_ADD(UTC_TIMESTAMP(),INTERVAL 1 HOUR))");
+        }
+        System.setProperty("SERVER_PORT", "8089"); System.setProperty("DB_URL", dbUrl);
+        System.setProperty("DB_USER", dbUser); System.setProperty("DB_PASSWORD", dbPassword);
+        ExaSecureServer app = null;
+        try {
+            app = new ExaSecureServer(new com.examsystem.server.config.AppConfig()); app.start();
+            var client = java.net.http.HttpClient.newHttpClient();
+            var listing = client.send(java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost:8089/api/v1/admin/attempts/1/events"))
+                    .header("Authorization","Bearer migration-admin").GET().build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+            assertThat(listing.statusCode()).isEqualTo(200);
+            var events = new com.fasterxml.jackson.databind.ObjectMapper().readTree(listing.body());
+            int retrieved = 0;
+            for (var event : events) for (var type : event.required("evidenceTypes")) {
+                String key=type.asText();
+                int evidenceId=Integer.parseInt(key.substring(1),36);
+                var response=client.send(java.net.http.HttpRequest.newBuilder(java.net.URI.create("http://localhost:8089/api/v1/admin/events/"+event.required("id").asInt()+"/evidence?type="+key))
+                        .header("Authorization","Bearer migration-admin").GET().build(),java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+                assertThat(response.statusCode()).isEqualTo(200);
+                assertThat(response.body()).containsExactly((byte)evidenceId,(byte)0,(byte)255,(byte)42);
+                retrieved++;
+            }
+            assertThat(retrieved).isEqualTo(7);
+        } finally {
+            if(app!=null) app.stop();
+            for(String key:List.of("SERVER_PORT","DB_URL","DB_USER","DB_PASSWORD")) System.clearProperty(key);
+        }
+    }
+
+    private void resumeHistorical(int columns, boolean failedIndex) throws Exception {
+        historicalV9(); var before = evidenceRows();
+        try (var conn = connection()) {
+            addV10Columns(conn, columns);
+            if (failedIndex) assertThatThrownBy(() -> conn.createStatement().execute("CREATE UNIQUE INDEX uq_evidence_event_type ON proctor_evidence_v2(event_id,evidence_type)"))
+                    .isInstanceOf(java.sql.SQLException.class);
+        }
+        dataSource = dataSource(); new DatabaseMigrator(dataSource).migrate(); new DatabaseMigrator(dataSource).migrate();
+        assertPreserved(before);
+    }
+
+    private void historicalV9() throws Exception {
+        // Exact historical scripts through V9; populated before invoking the current migrator.
+        try (var conn = connection()) {
+            executeScript(conn, new String(readResource("db/migration/schema-v3.sql"), StandardCharsets.UTF_8));
+            seedV3Data(conn);
+            for (int v = 4; v <= 9; v++) executeScript(conn, new String(readResource("db/migration/schema-v" + v + ".sql"), StandardCharsets.UTF_8));
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("INSERT INTO schema_versions(version) VALUES(7)");
+                stmt.execute("INSERT INTO proctor_events(id,attempt_id,event_type,recorded_at) VALUES(101,1,'FOCUS_LOST','2026-09-02 10:06:00'),(102,1,'FOCUS_LOST','2026-09-02 10:06:00'),(103,1,'FOCUS_LOST','2026-09-02 10:07:00')");
+            }
+            try (var stmt = conn.prepareStatement("INSERT INTO proctor_evidence_v2(id,event_id,content_type,byte_size,screenshot_data,recorded_at) VALUES(?,?,?,? ,?,'2026-09-02 10:06:00')")) {
+                for (int id=1; id<=7; id++) {
+                    byte[] payload = new byte[]{(byte) id, 0, (byte) 255, 42};
+                    stmt.setInt(1,id); stmt.setInt(2,id==1?101:id<=3?102:103); stmt.setString(3,id%2==0?"image/png":"image/jpeg");
+                    stmt.setInt(4,payload.length); stmt.setBytes(5,payload); stmt.executeUpdate();
+                }
+            }
+            assertSingleInt(conn,"SELECT MAX(version) FROM schema_versions",9);
+        }
+    }
+
+    private void addV10Columns(Connection conn, int count) throws Exception {
+        String[] ddl = {"ALTER TABLE proctor_events ADD returned_at DATETIME NULL", "ALTER TABLE proctor_events ADD away_duration_ms BIGINT NULL",
+                "ALTER TABLE proctor_events ADD is_long_absence TINYINT(1) NOT NULL DEFAULT 0", "ALTER TABLE proctor_evidence_v2 ADD evidence_type VARCHAR(32) NOT NULL DEFAULT 'INITIAL'"};
+        try (var stmt=conn.createStatement()) { for(int i=0;i<count;i++) stmt.execute(ddl[i]); }
+    }
+
+    private List<String> evidenceRows() throws Exception {
+        var result = new java.util.ArrayList<String>();
+        try(var conn=connection(); var stmt=conn.createStatement(); var rows=stmt.executeQuery(
+                "SELECT p.id,p.event_id,p.recorded_at,p.content_type,p.byte_size,p.screenshot_data,e.attempt_id,a.student_id FROM proctor_evidence_v2 p JOIN proctor_events e ON e.id=p.event_id JOIN exam_attempts a ON a.id=e.attempt_id ORDER BY p.id")) {
+            while(rows.next()) result.add(rows.getLong(1)+"|"+rows.getInt(2)+"|"+rows.getTimestamp(3)+"|"+rows.getString(4)+"|"+rows.getInt(5)+"|"+HexFormat.of().formatHex(rows.getBytes(6))+"|"+rows.getInt(7)+"|"+rows.getInt(8));
+        }
+        return result;
+    }
+
+    private void assertPreserved(List<String> before) throws Exception {
+        assertThat(evidenceRows()).containsExactlyElementsOf(before);
+        var admin = new com.examsystem.server.adapters.jdbc.JdbcAdminQueryPort(dataSource);
+        try(var conn=connection(); var stmt=conn.createStatement(); var rows=stmt.executeQuery("SELECT id,event_id,evidence_type,screenshot_data FROM proctor_evidence_v2 ORDER BY id")) {
+            while(rows.next()) {
+                String key="L"+Long.toString(rows.getLong(1),36).toUpperCase(java.util.Locale.ROOT);
+                assertThat(rows.getString(3)).isEqualTo(key);
+                assertThat(admin.getEvidenceByEventId(rows.getInt(2), key).orElseThrow().data()).containsExactly(rows.getBytes(4));
+            }
+            assertSingleInt(conn,"SELECT MAX(version) FROM schema_versions",10);
+            assertThatThrownBy(() -> stmt.execute("INSERT INTO proctor_evidence_v2(event_id,evidence_type,recorded_at,screenshot_data) SELECT event_id,evidence_type,recorded_at,screenshot_data FROM proctor_evidence_v2 LIMIT 1")).isInstanceOf(java.sql.SQLException.class);
         }
     }
 

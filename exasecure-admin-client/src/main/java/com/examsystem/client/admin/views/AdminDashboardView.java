@@ -79,7 +79,8 @@ public class AdminDashboardView {
     private double evidenceZoom = 1.0;
     private boolean evidenceFitMode = true;
     private final Map<String, byte[]> evidenceCache = new HashMap<>();
-    private final ComboBox<String> evidenceTypeCombo = new ComboBox<>();
+    private final ComboBox<EvidenceChoice> evidenceTypeCombo = new ComboBox<>();
+    private boolean updatingEvidenceChoices;
     private String currentEvidenceType = "INITIAL";
     private byte[] currentEvidenceBytes = null;
     private int currentEvidenceEventId = -1;
@@ -1470,9 +1471,8 @@ public class AdminDashboardView {
         Label evTypeLabel = new Label("Evidence:");
         evTypeLabel.getStyleClass().add("theme-label-bold");
 
-        evidenceTypeCombo.getItems().setAll("INITIAL (~0.8s)", "LONG_ABSENCE (~5.0s)");
-        evidenceTypeCombo.setValue("INITIAL (~0.8s)");
         evidenceTypeCombo.setOnAction(e -> {
+            if (updatingEvidenceChoices) return;
             AdminProctorEventDto sel = proctorEventsTable.getSelectionModel().getSelectedItem();
             if (sel != null) {
                 loadEvidenceImage(sel);
@@ -1643,9 +1643,9 @@ public class AdminDashboardView {
         evCol.setCellValueFactory(d -> {
             List<String> types = d.getValue().evidenceTypes();
             if (types == null || types.isEmpty()) {
-                return new SimpleStringProperty(d.getValue().hasEvidence() ? "INITIAL" : "NONE");
+                return new SimpleStringProperty("NONE");
             }
-            return new SimpleStringProperty(String.join(" + ", types));
+            return new SimpleStringProperty(EvidenceChoice.forTypes(types).stream().map(Object::toString).collect(java.util.stream.Collectors.joining(" + ")));
         });
         evCol.setCellFactory(col -> new TableCell<>() {
             private final Label badge = new Label();
@@ -1805,31 +1805,28 @@ public class AdminDashboardView {
         long reqId = ++currentEvidenceReqId;
         updateEvidenceContext(event);
 
-        String comboVal = evidenceTypeCombo.getValue();
-        String selectedType = (comboVal != null && comboVal.contains("LONG")) ? "LONG_ABSENCE" : "INITIAL";
+        List<EvidenceChoice> choices = EvidenceChoice.forTypes(event.evidenceTypes());
+        if (!evidenceTypeCombo.getItems().equals(choices)) {
+            updatingEvidenceChoices = true;
+            try {
+                evidenceTypeCombo.getItems().setAll(choices);
+                evidenceTypeCombo.getSelectionModel().selectFirst();
+            } finally {
+                updatingEvidenceChoices = false;
+            }
+        }
+        EvidenceChoice choice = evidenceTypeCombo.getValue();
+        String selectedType = choice == null ? null : choice.storageType();
         currentEvidenceType = selectedType;
-
         List<String> availableTypes = event.evidenceTypes() != null ? event.evidenceTypes() : List.of();
 
-        if (!event.hasEvidence() && availableTypes.isEmpty()) {
+        if (selectedType == null || availableTypes.isEmpty()) {
             clearEvidenceViewer();
             Long dur = event.awayDurationMs();
             if (dur != null && dur < 800) {
                 evidenceStatusLabel.setText("No screenshot captured — student returned before evidence delay (" + dur + "ms).");
             } else {
                 evidenceStatusLabel.setText("No screenshot evidence attached to this incident.");
-            }
-            return;
-        }
-
-        if (!availableTypes.isEmpty() && !availableTypes.contains(selectedType)) {
-            clearEvidenceViewer();
-            if ("LONG_ABSENCE".equals(selectedType)) {
-                Long dur = event.awayDurationMs();
-                String durStr = dur != null ? String.format(java.util.Locale.ROOT, "%.1fs", dur / 1000.0) : "under threshold";
-                evidenceStatusLabel.setText("Long-absence screenshot not captured (student was away " + durStr + ", threshold is 5.0s).");
-            } else {
-                evidenceStatusLabel.setText("Initial screenshot not available for this incident.");
             }
             return;
         }
@@ -1841,7 +1838,7 @@ public class AdminDashboardView {
             return;
         }
 
-        evidenceStatusLabel.setText("Loading " + selectedType + " screenshot evidence...");
+        evidenceStatusLabel.setText("Loading " + choice + "...");
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetEvidence(eventId, selectedType),
                 (byte[] imageBytes) -> {
@@ -1851,7 +1848,7 @@ public class AdminDashboardView {
 
                     if (imageBytes == null || imageBytes.length == 0) {
                         clearEvidenceViewer();
-                        evidenceStatusLabel.setText("The attached " + selectedType + " evidence file is empty.");
+                        evidenceStatusLabel.setText("The attached evidence file is empty.");
                         return;
                     }
 
@@ -1860,7 +1857,7 @@ public class AdminDashboardView {
                 },
                 (Throwable err) -> {
                     if (reqId != currentEvidenceReqId) return;
-                    evidenceStatusLabel.setText("Failed to retrieve " + selectedType + " screenshot: " + err.getMessage());
+                    evidenceStatusLabel.setText("Failed to retrieve evidence: " + err.getMessage());
                 }
         );
     }
@@ -1878,7 +1875,7 @@ public class AdminDashboardView {
             evidenceImageView.setImage(img);
             evidenceFitMode = true;
             Platform.runLater(this::fitEvidenceToWindow);
-            evidenceStatusLabel.setText("Screenshot evidence loaded (" + evidenceType + ").");
+            evidenceStatusLabel.setText("Screenshot evidence loaded (" + evidenceTypeCombo.getValue() + ").");
         } catch (Exception e) {
             evidenceStatusLabel.setText("Failed to decode screenshot image: " + e.getMessage());
         }

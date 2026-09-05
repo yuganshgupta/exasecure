@@ -96,7 +96,7 @@ class MigrationIntegrationTest {
             try (ResultSet rs = stmt.executeQuery(
                     "SELECT evidence_type FROM proctor_evidence_v2 WHERE event_id = 1")) {
                 assertThat(rs.next()).isTrue();
-                assertThat(rs.getString("evidence_type")).isEqualTo("INITIAL");
+                assertThat(rs.getString("evidence_type")).isEqualTo("L1");
             }
         }
         

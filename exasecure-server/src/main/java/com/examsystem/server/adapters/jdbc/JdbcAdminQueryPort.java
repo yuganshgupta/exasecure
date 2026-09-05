@@ -385,7 +385,6 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
                     while (rs.next()) {
                         int evId = rs.getInt("event_id");
                         String evType = rs.getString("evidence_type");
-                        if (evType == null || evType.isBlank()) evType = "INITIAL";
                         evidenceTypesMap.computeIfAbsent(evId, k -> new ArrayList<>()).add(evType);
                     }
                 }
@@ -429,7 +428,7 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
     public Optional<AdminEvidenceResult> getEvidenceByEventId(int eventId, String evidenceType) {
         try (Connection conn = dataSource.getConnection()) {
             if (evidenceType != null && !evidenceType.isBlank()) {
-                String targetType = evidenceType.trim().toUpperCase(Locale.ROOT);
+                String targetType = evidenceType;
                 try (PreparedStatement ps = conn.prepareStatement(
                         "SELECT id, content_type, screenshot_data, evidence_type FROM proctor_evidence_v2 "
                                 + "WHERE event_id = ? AND evidence_type = ? ORDER BY id ASC LIMIT 1")) {
@@ -451,7 +450,7 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
             }
 
             try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT id, content_type, screenshot_data FROM proctor_evidence_v2 WHERE event_id = ? ORDER BY id ASC LIMIT 1")) {
+                    "SELECT id, content_type, screenshot_data, evidence_type FROM proctor_evidence_v2 WHERE event_id = ? ORDER BY id ASC LIMIT 1")) {
                 ps.setInt(1, eventId);
                 try (ResultSet rs = ps.executeQuery()) {
                     if (rs.next()) {
@@ -460,7 +459,7 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
                                 eventId,
                                 rs.getString("content_type"),
                                 rs.getBytes("screenshot_data"),
-                                "INITIAL"));
+                                rs.getString("evidence_type")));
                     }
                 }
             }

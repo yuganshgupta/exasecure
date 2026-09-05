@@ -27,6 +27,30 @@ public class DatabaseMigrator {
 
     public void migrate() {
         try (Connection conn = dataSource.getConnection()) {
+            boolean mysql = conn.getMetaData().getDatabaseProductName().equals("MySQL");
+            String lockName = "exasecure-migrate:" + conn.getCatalog();
+            if (mysql) {
+                try (PreparedStatement lock = conn.prepareStatement("SELECT GET_LOCK(?, 60)")) {
+                    lock.setString(1, lockName);
+                    try (ResultSet row = lock.executeQuery()) {
+                        if (!row.next() || row.getInt(1) != 1) throw new IllegalStateException("Could not acquire schema migration lock; retry after the other migrator finishes");
+                    }
+                }
+            }
+            try {
+                migrateLocked(conn);
+            } finally {
+                if (mysql) try (PreparedStatement unlock = conn.prepareStatement("SELECT RELEASE_LOCK(?)")) {
+                    unlock.setString(1, lockName);
+                    unlock.execute();
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Database migration failed", e);
+        }
+    }
+
+    private void migrateLocked(Connection conn) throws Exception {
             int currentVersion = getCurrentVersion(conn);
             log.info("Current schema version: {}", currentVersion);
 
@@ -81,13 +105,10 @@ public class DatabaseMigrator {
             }
             if (currentVersion < 10) {
                 log.info("Migrating schema to v10...");
-                executeScript(conn, "db/migration/schema-v10.sql");
+                new V10CompatibilityMigration().migrate(conn);
                 log.info("Successfully migrated to v10");
                 currentVersion = 10;
             }
-        } catch (Exception e) {
-            throw new RuntimeException("Database migration failed", e);
-        }
     }
 
     private int getCurrentVersion(Connection conn) {
