@@ -17,36 +17,27 @@ public class ScreenCaptureService implements ScreenCapturer {
 
     public static byte[] captureScreenAsJpeg() {
         try {
+            if (java.awt.GraphicsEnvironment.isHeadless()) {
+                return null;
+            }
             Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
             Rectangle screenRect = new Rectangle(screenSize);
             Robot robot = new Robot();
             BufferedImage image = robot.createScreenCapture(screenRect);
+            if (image == null) {
+                return null;
+            }
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ImageIO.write(image, "jpeg", baos);
-            byte[] bytes = baos.toByteArray();
-            if (bytes.length > 0) {
-                return bytes;
+            if (ImageIO.write(image, "jpeg", baos)) {
+                byte[] bytes = baos.toByteArray();
+                if (bytes.length > 0) {
+                    return bytes;
+                }
             }
         } catch (Throwable ignored) {
-            // In headless/container/test environments without display, fallback
+            // In headless/container/permission-restricted/Robot-failure environments, capture returns null.
+            // Never fabricate fake screenshot evidence.
         }
-        return generateFallbackJpeg();
-    }
-
-    public static byte[] generateFallbackJpeg() {
-        try {
-            BufferedImage image = new BufferedImage(320, 240, BufferedImage.TYPE_INT_RGB);
-            var g = image.createGraphics();
-            g.setColor(java.awt.Color.DARK_GRAY);
-            g.fillRect(0, 0, 320, 240);
-            g.setColor(java.awt.Color.WHITE);
-            g.drawString("ExaSecure Proctor Evidence", 20, 120);
-            g.dispose();
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            ImageIO.write(image, "jpeg", baos);
-            return baos.toByteArray();
-        } catch (Exception e) {
-            return new byte[] { (byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xD9 };
-        }
+        return null;
     }
 }

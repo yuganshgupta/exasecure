@@ -23,6 +23,7 @@ import io.javalin.http.Context;
 import io.javalin.http.ForbiddenResponse;
 import io.javalin.http.NotFoundResponse;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -36,15 +37,28 @@ public class StudentExamController {
     private final ProctorRepository proctorRepository;
     private final StudentQueryPort studentQueryPort;
     private final AnswerRepository answerRepository;
+    private final Clock clock;
 
-    public StudentExamController(StartExamUseCase startUseCase, 
-                                 SubmitExamUseCase submitUseCase, 
-                                 ExamRepository examRepository, 
-                                 QuestionRepository questionRepository, 
+    public StudentExamController(StartExamUseCase startUseCase,
+                                 SubmitExamUseCase submitUseCase,
+                                 ExamRepository examRepository,
+                                 QuestionRepository questionRepository,
                                  ExamAttemptRepository attemptRepository,
                                  ProctorRepository proctorRepository,
                                  StudentQueryPort studentQueryPort,
                                  AnswerRepository answerRepository) {
+        this(startUseCase, submitUseCase, examRepository, questionRepository, attemptRepository, proctorRepository, studentQueryPort, answerRepository, Clock.systemUTC());
+    }
+
+    public StudentExamController(StartExamUseCase startUseCase,
+                                 SubmitExamUseCase submitUseCase,
+                                 ExamRepository examRepository,
+                                 QuestionRepository questionRepository,
+                                 ExamAttemptRepository attemptRepository,
+                                 ProctorRepository proctorRepository,
+                                 StudentQueryPort studentQueryPort,
+                                 AnswerRepository answerRepository,
+                                 Clock clock) {
         this.startUseCase = startUseCase;
         this.submitUseCase = submitUseCase;
         this.examRepository = examRepository;
@@ -53,6 +67,7 @@ public class StudentExamController {
         this.proctorRepository = proctorRepository;
         this.studentQueryPort = studentQueryPort;
         this.answerRepository = answerRepository;
+        this.clock = clock != null ? clock : Clock.systemUTC();
     }
 
     public void listAvailableExams(Context ctx) {
@@ -148,7 +163,7 @@ public class StudentExamController {
     public void submitExam(Context ctx) {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
         enforceOwnership(ctx, attemptId);
-        int score = submitUseCase.submitExam(attemptId, java.time.Instant.now());
+        int score = submitUseCase.submitExam(attemptId, java.time.Instant.now(clock));
         ctx.json(score);
     }
     
@@ -181,25 +196,25 @@ public class StudentExamController {
         ExamAttempt attempt = attemptRepository.findById(attemptId)
                 .orElseThrow(() -> new NotFoundResponse("Attempt not found"));
 
-        // Idempotency check: if clientEventId was provided and already exists, return existing status
-        if (clientEventId != null && !clientEventId.isBlank()) {
-            var existing = proctorRepository.findEventByClientEventId(attemptId, clientEventId);
-            if (existing.isPresent()) {
-                ctx.json(new StudentProctorEventResponseDto(
-                        existing.get(),
-                        attempt.focusLostCount(),
-                        attempt.flagged(),
-                        attempt.finalized() ? "SUBMITTED" : "ACTIVE"
-                ));
-                return;
+        // Save event atomically
+        var saveResult = proctorRepository.recordEvent(attemptId, eventType, java.time.Instant.now(clock), clientEventId);
+        int eventId = saveResult.eventId();
+
+        // Increment violation count on attempt ONLY if this request actually created the event
+        int newCount;
+        if (saveResult.createdNew()) {
+            newCount = attemptRepository.incrementFocusLostCount(attemptId);
+        } else {
+            ExamAttempt current = attemptRepository.findById(attemptId).orElse(attempt);
+            newCount = current.focusLostCount();
+            int tries = 0;
+            while (newCount == 0 && tries++ < 30) {
+                try { Thread.sleep(10); } catch (InterruptedException ignored) {}
+                current = attemptRepository.findById(attemptId).orElse(attempt);
+                newCount = current.focusLostCount();
             }
         }
 
-        // Save event
-        int eventId = proctorRepository.saveEvent(attemptId, eventType, java.time.Instant.now(), clientEventId);
-
-        // Increment violation count on attempt
-        int newCount = attemptRepository.incrementFocusLostCount(attemptId);
         ExamAttempt updated = attemptRepository.findById(attemptId).orElse(attempt);
         if (newCount == 0) {
             newCount = updated.focusLostCount();
@@ -208,13 +223,13 @@ public class StudentExamController {
         boolean flagged = updated.flagged() || newCount >= 3;
         String status = updated.finalized() ? "SUBMITTED" : "ACTIVE";
 
-        if (newCount >= 3) {
+        if (saveResult.createdNew() && newCount >= 3) {
             flagged = true;
             attemptRepository.flagAttempt(attemptId);
             if (!updated.finalized()) {
                 // Auto submit attempt
                 try {
-                    submitUseCase.submitExam(attemptId, java.time.Instant.now());
+                    submitUseCase.submitExam(attemptId, java.time.Instant.now(clock));
                     status = "SUBMITTED";
                 } catch (Exception ignored) {
                 }
@@ -230,6 +245,15 @@ public class StudentExamController {
         int eventId = Integer.parseInt(ctx.pathParam("eventId"));
         if (!proctorRepository.eventBelongsToAttempt(eventId, attemptId)) {
             throw new NotFoundResponse("Event not found for this attempt");
+        }
+
+        var eventOpt = proctorRepository.findEventById(eventId);
+        if (eventOpt.isEmpty()) {
+            throw new NotFoundResponse("Event not found");
+        }
+        var event = eventOpt.get();
+        if (!"FOCUS_LOST".equalsIgnoreCase(event.eventType())) {
+            throw new BadRequestResponse("Evidence can only be attached to FOCUS_LOST events");
         }
 
         String evidenceType = ctx.formParam("evidenceType");
@@ -272,36 +296,26 @@ public class StudentExamController {
         }
         var event = eventOpt.get();
 
-        java.time.Instant serverNow = java.time.Instant.now();
+        if (!"FOCUS_LOST".equalsIgnoreCase(event.eventType())) {
+            throw new BadRequestResponse("Event is not a FOCUS_LOST event");
+        }
+
+        // Idempotent: if already returned, do not overwrite original return timestamp and duration
+        if (event.returnedAt() != null) {
+            ctx.status(200);
+            return;
+        }
+
+        java.time.Instant serverNow = java.time.Instant.now(clock);
         long serverDurationMs = Math.max(0, java.time.Duration.between(event.recordedAt(), serverNow).toMillis());
 
-        Long clientDurationMs = null;
-        String ct = ctx.contentType();
-        if (ct != null && ct.toLowerCase(java.util.Locale.ROOT).contains("application/json") && !ctx.body().isBlank()) {
-            try {
-                com.fasterxml.jackson.databind.JsonNode node = new com.fasterxml.jackson.databind.ObjectMapper().readTree(ctx.body());
-                if (node.has("awayDurationMs") && !node.get("awayDurationMs").isNull()) {
-                    clientDurationMs = node.get("awayDurationMs").asLong();
-                }
-            } catch (Exception ignored) {}
-        } else {
-            String p = ctx.formParam("awayDurationMs");
-            if (p != null && !p.isBlank()) {
-                try { clientDurationMs = Long.parseLong(p); } catch (Exception ignored) {}
-            }
-        }
-
-        // Authoritative duration: use client telemetry only if valid and within tolerance, otherwise server duration
-        long effectiveDurationMs = serverDurationMs;
-        if (clientDurationMs != null && clientDurationMs >= 0 && clientDurationMs <= serverDurationMs + 3000) {
-            effectiveDurationMs = clientDurationMs;
-        }
-
-        proctorRepository.recordReturn(eventId, serverNow, effectiveDurationMs);
+        // Authoritative duration: strictly derived from server timestamps.
+        // Client telemetry is ignored for durable duration and long-absence determination.
+        proctorRepository.recordReturn(eventId, serverNow, serverDurationMs);
         ctx.status(200);
     }
 
-    private static final long LONG_ABSENCE_MIN_DURATION_MS = 4800; // ~5 seconds (with 200ms grace for network/clock resolution)
+    private static final long LONG_ABSENCE_THRESHOLD_MS = 5000;
 
     public void recordLongAbsence(Context ctx) {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
@@ -316,13 +330,16 @@ public class StudentExamController {
             throw new NotFoundResponse("Event not found");
         }
         var event = eventOpt.get();
+        if (!"FOCUS_LOST".equalsIgnoreCase(event.eventType())) {
+            throw new BadRequestResponse("Event is not a FOCUS_LOST event");
+        }
 
-        java.time.Instant serverNow = java.time.Instant.now();
+        java.time.Instant serverNow = java.time.Instant.now(clock);
         java.time.Instant endTime = event.returnedAt() != null ? event.returnedAt() : serverNow;
         long elapsedMs = Math.max(0, java.time.Duration.between(event.recordedAt(), endTime).toMillis());
 
-        // Independent server-side authoritative check: incident must have actually existed for >= 5 seconds
-        if (elapsedMs < LONG_ABSENCE_MIN_DURATION_MS) {
+        // Independent server-side authoritative check: incident must have actually existed for >= 5000 ms
+        if (elapsedMs < LONG_ABSENCE_THRESHOLD_MS) {
             throw new BadRequestResponse("Focus-loss incident duration (" + elapsedMs + "ms) has not existed for >= 5 seconds");
         }
 

@@ -13,6 +13,13 @@ public interface ProctorRepository {
         return saveEvent(attemptId, eventType, timestamp);
     }
 
+    record ProctorEventSaveResult(int eventId, boolean createdNew) {}
+
+    default ProctorEventSaveResult recordEvent(int attemptId, String eventType, Instant timestamp, String clientEventId) {
+        int id = saveEvent(attemptId, eventType, timestamp, clientEventId);
+        return new ProctorEventSaveResult(id, true);
+    }
+
     default Optional<Integer> findEventByClientEventId(int attemptId, String clientEventId) {
         return Optional.empty();
     }

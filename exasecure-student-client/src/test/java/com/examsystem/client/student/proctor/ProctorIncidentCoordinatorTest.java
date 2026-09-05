@@ -533,4 +533,105 @@ class ProctorIncidentCoordinatorTest {
         assertThat(captureService.captureCount).isEqualTo(0);
         assertThat(recordedEvidences).isEmpty();
     }
+
+    @Test
+    void captureFailure_doesNotUploadFabricatedEvidence_incidentAndStrikesRemainIntact() {
+        ApiClient mockApi = new ApiClient(new ServerConfig("http://localhost:8080"), new SessionState(), null) {
+            @Override
+            public StudentProctorEventResponseDto recordProctorEvent(int attemptId, String eventType, String clientEventId) {
+                recordedEvents.add(new RecordedEventCall(attemptId, eventType, clientEventId));
+                return new StudentProctorEventResponseDto(401, 1, false, "ACTIVE");
+            }
+
+            @Override
+            public void uploadProctorEvidence(int attemptId, int eventId, byte[] screenshotBytes, String contentType, String evidenceType) {
+                recordedEvidences.add(new RecordedEvidenceCall(attemptId, eventId, screenshotBytes, contentType, evidenceType));
+            }
+
+            @Override
+            public void recordProctorLongAbsence(int attemptId, int eventId) {
+                recordedLongAbsences.add(new RecordedLongAbsenceCall(attemptId, eventId));
+            }
+        };
+
+        // Screen capture returns null (simulating headless / Robot / OS display failure)
+        captureService.payload = null;
+
+        ProctorIncidentCoordinator coordinator = createCoordinator(mockApi);
+
+        coordinator.onFocusLost();
+
+        // Advance past initial deadline (800ms) and long absence deadline (5000ms)
+        clock.advanceMs(800);
+        scheduler.advanceTime(800);
+        clock.advanceMs(4200);
+        scheduler.advanceTime(4200);
+
+        // Verification:
+        // 1. Incident and strike are valid
+        assertThat(recordedEvents).hasSize(1);
+        assertThat(violationCallbacks).hasSize(1);
+        assertThat(violationCallbacks.get(0).violationCount()).isEqualTo(1);
+
+        // 2. Long absence metadata established
+        assertThat(recordedLongAbsences).hasSize(1);
+
+        // 3. NO fabricated evidence uploaded
+        assertThat(recordedEvidences).isEmpty();
+    }
+
+    @Test
+    void longAbsence_retriesSafelyWhenServerRejectsEarly_andSucceedsWithoutDuplicateStrike() {
+        AtomicInteger longAbsenceAttempts = new AtomicInteger(0);
+
+        ApiClient mockApi = new ApiClient(new ServerConfig("http://localhost:8080"), new SessionState(), null) {
+            @Override
+            public StudentProctorEventResponseDto recordProctorEvent(int attemptId, String eventType, String clientEventId) {
+                recordedEvents.add(new RecordedEventCall(attemptId, eventType, clientEventId));
+                return new StudentProctorEventResponseDto(501, 1, false, "ACTIVE");
+            }
+
+            @Override
+            public void uploadProctorEvidence(int attemptId, int eventId, byte[] screenshotBytes, String contentType, String evidenceType) {
+                recordedEvidences.add(new RecordedEvidenceCall(attemptId, eventId, screenshotBytes, contentType, evidenceType));
+            }
+
+            @Override
+            public void recordProctorLongAbsence(int attemptId, int eventId) {
+                int attempt = longAbsenceAttempts.incrementAndGet();
+                recordedLongAbsences.add(new RecordedLongAbsenceCall(attemptId, eventId));
+                if (attempt == 1) {
+                    // First call: server rejects with 400 Bad Request (e.g. server duration was 4980ms due to network delay on event creation)
+                    throw new com.examsystem.client.api.ApiException(400, "Threshold not yet met");
+                }
+                // Second call: succeeds
+            }
+        };
+
+        ProctorIncidentCoordinator coordinator = createCoordinator(mockApi);
+
+        coordinator.onFocusLost();
+
+        // Advance to 800ms
+        clock.advanceMs(800);
+        scheduler.advanceTime(800);
+
+        // Advance to 5000ms: first attempt runs and fails with 400
+        clock.advanceMs(4200);
+        scheduler.advanceTime(4200);
+
+        assertThat(longAbsenceAttempts.get()).isEqualTo(1);
+
+        // Advance 250ms (the retry delay)
+        clock.advanceMs(250);
+        scheduler.advanceTime(250);
+
+        // Second attempt succeeded
+        assertThat(longAbsenceAttempts.get()).isEqualTo(2);
+
+        // Crucial invariant: exactly 1 event recorded, 1 strike!
+        assertThat(recordedEvents).hasSize(1);
+        assertThat(violationCallbacks).hasSize(1);
+        assertThat(violationCallbacks.get(0).violationCount()).isEqualTo(1);
+    }
 }

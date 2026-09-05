@@ -443,10 +443,11 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
                                     eventId,
                                     rs.getString("content_type"),
                                     rs.getBytes("screenshot_data"),
-                                    type != null ? type : "INITIAL"));
+                                    type != null ? type : targetType));
                         }
                     }
                 } catch (Exception ignored) {}
+                return Optional.empty(); // Strict: when specific type requested and not found, return empty!
             }
 
             try (PreparedStatement ps = conn.prepareStatement(

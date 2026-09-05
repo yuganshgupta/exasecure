@@ -1104,23 +1104,47 @@ class ServerIntegrationTest {
         int eventId = new ObjectMapper().readTree(eventRes.body()).get("eventId").asInt();
 
         // Send negative client duration: -99999
+        // Simulate authoritative server interval ~2500 ms
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE proctor_events SET recorded_at = ? WHERE id = ?")) {
+            ps.setTimestamp(1, java.sql.Timestamp.from(Instant.now().minusMillis(2500)));
+            ps.setInt(2, eventId);
+            ps.executeUpdate();
+        }
+
+        // Client claims awayDurationMs = 5100
         HttpResponse<String> ret1 = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/return", "token-stu1",
-                "{\"returnedAt\":\"" + Instant.now().toString() + "\",\"awayDurationMs\":-99999}");
+                "{\"returnedAt\":\"" + Instant.now().toString() + "\",\"awayDurationMs\":5100}");
         assertThat(ret1.statusCode()).isEqualTo(200);
 
         try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              PreparedStatement ps = conn.prepareStatement(
-                     "SELECT away_duration_ms FROM proctor_events WHERE id = ?")) {
+                     "SELECT away_duration_ms, is_long_absence FROM proctor_events WHERE id = ?")) {
             ps.setInt(1, eventId);
             try (ResultSet rs = ps.executeQuery()) {
                 assertThat(rs.next()).isTrue();
-                assertThat(rs.getLong("away_duration_ms")).isGreaterThanOrEqualTo(0); // Validated to non-negative
+                long storedDuration = rs.getLong("away_duration_ms");
+                // Durable duration is based on authoritative server interval (~2500 ms), NOT client-claimed 5100 ms
+                assertThat(storedDuration).isBetween(1500L, 3500L);
+                assertThat(rs.getBoolean("is_long_absence")).isFalse();
+            }
+        }
+
+        // Verify strikes remain unchanged (exactly 1 strike)
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT focus_lost_count FROM exam_attempts WHERE id = ?")) {
+            ps.setInt(1, attemptId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt("focus_lost_count")).isEqualTo(1);
             }
         }
     }
 
     @Test
-    void longAbsence_rejectedWhenCalledTooEarly_andAcceptedWhenThresholdMet() throws Exception {
+    void longAbsence_exactThresholdBoundary_4999msRejected_5000msAccepted() throws Exception {
         HttpClient client = HttpClient.newHttpClient();
 
         int attemptId = 9803;
@@ -1144,8 +1168,19 @@ class ServerIntegrationTest {
         // 1. Malicious/early call after ~10-100ms -> MUST BE REJECTED (HTTP 400)
         HttpResponse<String> earlyRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", "token-stu1", null);
         assertThat(earlyRes.statusCode()).isEqualTo(400);
+        // 1. Boundary: < 5000 ms -> NOT eligible (HTTP 400)
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "UPDATE proctor_events SET recorded_at = ? WHERE id = ?")) {
+            ps.setTimestamp(1, java.sql.Timestamp.from(Instant.now().minusSeconds(2)));
+            ps.setInt(2, eventId);
+            ps.executeUpdate();
+        }
 
         // Invariant: is_long_absence remains false (0) and strikes remain exactly 1
+        HttpResponse<String> rejected4999 = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", "token-stu1", null);
+        assertThat(rejected4999.statusCode()).isEqualTo(400);
+
         try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT is_long_absence FROM proctor_events WHERE id = ?")) {
@@ -1166,6 +1201,7 @@ class ServerIntegrationTest {
         }
 
         // 2. Fast-forward event recorded_at to 6 seconds ago -> eligible (HTTP 200)
+        // 2. Boundary: >= 5000 ms -> eligible (HTTP 200)
         try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              PreparedStatement ps = conn.prepareStatement(
                      "UPDATE proctor_events SET recorded_at = ? WHERE id = ?")) {
@@ -1176,6 +1212,8 @@ class ServerIntegrationTest {
 
         HttpResponse<String> validRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", "token-stu1", null);
         assertThat(validRes.statusCode()).isEqualTo(200);
+        HttpResponse<String> accepted5000 = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", "token-stu1", null);
+        assertThat(accepted5000.statusCode()).isEqualTo(200);
 
         try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              PreparedStatement ps = conn.prepareStatement(
@@ -1186,6 +1224,181 @@ class ServerIntegrationTest {
                 assertThat(rs.getBoolean("is_long_absence")).isTrue();
             }
         }
+    }
+
+    @Test
+    void duplicateEvent_concurrentSubmissions_resultsInExactlyOneEventAndOneStrike() throws Exception {
+        int attemptId = 9804;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM exam_attempts WHERE id = " + attemptId);
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status, focus_lost_count, is_flagged, proctoring_status) "
+                            + "VALUES (?, 1, 101, NOW(), 'ACTIVE', 0, 0, 'CLEAN')")) {
+                ps.setInt(1, attemptId);
+                ps.executeUpdate();
+            }
+        }
+
+        int concurrency = 10;
+        String duplicateClientEventId = UUID.randomUUID().toString();
+        java.util.concurrent.ExecutorService executor = java.util.concurrent.Executors.newFixedThreadPool(concurrency);
+        java.util.concurrent.CountDownLatch readyLatch = new java.util.concurrent.CountDownLatch(concurrency);
+        java.util.concurrent.CountDownLatch startLatch = new java.util.concurrent.CountDownLatch(1);
+        java.util.List<java.util.concurrent.Future<HttpResponse<String>>> futures = new java.util.ArrayList<>();
+
+        for (int i = 0; i < concurrency; i++) {
+            futures.add(executor.submit(() -> {
+                HttpClient cl = HttpClient.newHttpClient();
+                readyLatch.countDown();
+                startLatch.await();
+                return sendJson(cl, "POST", "/api/v1/student/attempts/" + attemptId + "/events", "token-stu1",
+                        "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + duplicateClientEventId + "\"}");
+            }));
+        }
+
+        readyLatch.await();
+        startLatch.countDown();
+
+        int firstEventId = -1;
+        for (var f : futures) {
+            HttpResponse<String> res = f.get();
+            assertThat(res.statusCode()).isEqualTo(200);
+            com.fasterxml.jackson.databind.JsonNode node = new ObjectMapper().readTree(res.body());
+            int evId = node.get("eventId").asInt();
+            int count = node.get("violationCount").asInt();
+            if (firstEventId == -1) {
+                firstEventId = evId;
+            } else {
+                assertThat(evId).isEqualTo(firstEventId);
+            }
+            assertThat(count).isEqualTo(1);
+        }
+        executor.shutdown();
+
+        // Database assertions: exactly ONE proctor event and exactly ONE strike
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT COUNT(*) FROM proctor_events WHERE attempt_id = ?")) {
+            ps.setInt(1, attemptId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(1);
+            }
+        }
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT focus_lost_count FROM exam_attempts WHERE id = ?")) {
+            ps.setInt(1, attemptId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt("focus_lost_count")).isEqualTo(1);
+            }
+        }
+
+        // Now a DIFFERENT clientEventId -> second event, second strike
+        HttpClient client = HttpClient.newHttpClient();
+        String differentClientEventId = UUID.randomUUID().toString();
+        HttpResponse<String> secondRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events", "token-stu1",
+                "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + differentClientEventId + "\"}");
+        assertThat(secondRes.statusCode()).isEqualTo(200);
+        com.fasterxml.jackson.databind.JsonNode secondNode = new ObjectMapper().readTree(secondRes.body());
+        assertThat(secondNode.get("eventId").asInt()).isNotEqualTo(firstEventId);
+        assertThat(secondNode.get("violationCount").asInt()).isEqualTo(2);
+
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             PreparedStatement ps = conn.prepareStatement(
+                     "SELECT focus_lost_count FROM exam_attempts WHERE id = ?")) {
+            ps.setInt(1, attemptId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt("focus_lost_count")).isEqualTo(2);
+            }
+        }
+    }
+
+    @Test
+    void adminEvidenceRetrieval_exactType_returnsNotFoundWhenOnlyOtherTypeExists() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        int attemptId = 9805;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM exam_attempts WHERE id = " + attemptId);
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status, focus_lost_count, is_flagged, proctoring_status) "
+                            + "VALUES (?, 1, 101, NOW(), 'ACTIVE', 0, 0, 'CLEAN')")) {
+                ps.setInt(1, attemptId);
+                ps.executeUpdate();
+            }
+        }
+
+        String clientEventId = UUID.randomUUID().toString();
+        HttpResponse<String> eventRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events", "token-stu1",
+                "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + clientEventId + "\"}");
+        int eventId = new ObjectMapper().readTree(eventRes.body()).get("eventId").asInt();
+
+        byte[] initialBytes = new byte[]{1, 2, 3, 4};
+        HttpResponse<String> initUploadRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", initialBytes, "INITIAL");
+        assertThat(initUploadRes.statusCode()).isEqualTo(200);
+
+        // Request LONG_ABSENCE when only INITIAL exists -> MUST return 404, NOT INITIAL!
+        HttpRequest reqLong = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + PORT + "/api/v1/admin/events/" + eventId + "/evidence?type=LONG_ABSENCE"))
+                .header("Authorization", "Bearer token-admin1")
+                .GET()
+                .build();
+        HttpResponse<byte[]> resLong = client.send(reqLong, HttpResponse.BodyHandlers.ofByteArray());
+        assertThat(resLong.statusCode()).isEqualTo(404);
+
+        // Request INITIAL -> 200 with initialBytes
+        HttpRequest reqInit = HttpRequest.newBuilder()
+                .uri(URI.create("http://localhost:" + PORT + "/api/v1/admin/events/" + eventId + "/evidence?type=INITIAL"))
+                .header("Authorization", "Bearer token-admin1")
+                .GET()
+                .build();
+        HttpResponse<byte[]> resInit = client.send(reqInit, HttpResponse.BodyHandlers.ofByteArray());
+        assertThat(resInit.statusCode()).isEqualTo(200);
+        assertThat(resInit.body()).containsExactly(initialBytes);
+    }
+
+    @Test
+    void invalidEventType_cannotBeReturnedOrMarkedLongAbsence() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+
+        int attemptId = 9806;
+        int eventId = 98061;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword)) {
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("DELETE FROM exam_attempts WHERE id = " + attemptId);
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO exam_attempts (id, exam_id, student_id, start_time, status, focus_lost_count, is_flagged, proctoring_status) "
+                            + "VALUES (?, 1, 101, NOW(), 'ACTIVE', 0, 0, 'CLEAN')")) {
+                ps.setInt(1, attemptId);
+                ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO proctor_events (id, attempt_id, event_type, recorded_at) VALUES (?, ?, 'UNAUTHORIZED_APP', NOW())")) {
+                ps.setInt(1, eventId);
+                ps.setInt(2, attemptId);
+                ps.executeUpdate();
+            }
+        }
+
+        // Return on non-FOCUS_LOST event -> 400 Bad Request
+        HttpResponse<String> retRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/return", "token-stu1", "{}");
+        assertThat(retRes.statusCode()).isEqualTo(400);
+
+        // Long absence on non-FOCUS_LOST event -> 400 Bad Request
+        HttpResponse<String> longRes = sendJson(client, "POST", "/api/v1/student/attempts/" + attemptId + "/events/" + eventId + "/long-absence", "token-stu1", null);
+        assertThat(longRes.statusCode()).isEqualTo(400);
+
+        // Proctor evidence on non-FOCUS_LOST event -> 400 Bad Request
+        HttpResponse<String> evRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", new byte[]{10, 20}, "INITIAL");
+        assertThat(evRes.statusCode()).isEqualTo(400);
     }
 
     private static HttpResponse<String> sendMultipartEvidence(

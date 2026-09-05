@@ -96,11 +96,19 @@ class MySqlMigrationIntegrationTest {
 
             try (Statement stmt = conn.createStatement();
                  ResultSet evidence = stmt.executeQuery(
-                         "SELECT content_type, byte_size, screenshot_data FROM proctor_evidence_v2")) {
+                         "SELECT content_type, byte_size, screenshot_data, evidence_type FROM proctor_evidence_v2")) {
                 assertThat(evidence.next()).isTrue();
                 assertThat(evidence.getString("content_type")).isEqualTo("image/jpeg");
                 assertThat(evidence.getInt("byte_size")).isEqualTo(SCREENSHOT.length);
                 assertThat(evidence.getBytes("screenshot_data")).containsExactly(SCREENSHOT);
+                assertThat(evidence.getString("evidence_type")).isEqualTo("INITIAL");
+            }
+
+            try (Statement stmt = conn.createStatement();
+                 ResultSet event = stmt.executeQuery(
+                         "SELECT returned_at, away_duration_ms, is_long_absence FROM proctor_events WHERE id = 1")) {
+                assertThat(event.next()).isTrue();
+                assertThat(event.getBoolean("is_long_absence")).isFalse();
             }
 
             assertColumnNullable(conn, "selected_options");

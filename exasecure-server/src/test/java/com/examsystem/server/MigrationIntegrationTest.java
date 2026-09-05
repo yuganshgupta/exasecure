@@ -85,8 +85,53 @@ class MigrationIntegrationTest {
                 assertThat(rs.getString("content_type")).isEqualTo("image/jpeg");
                 assertThat(rs.getBytes("screenshot_data")).isNotNull();
             }
+
+            // Check v10 proctoring enhancements
+            try (ResultSet rs = stmt.executeQuery(
+                    "SELECT returned_at, away_duration_ms, is_long_absence FROM proctor_events WHERE attempt_id = 1")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getBoolean("is_long_absence")).isFalse();
+            }
+
+            try (ResultSet rs = stmt.executeQuery(
+                    "SELECT evidence_type FROM proctor_evidence_v2 WHERE event_id = 1")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getString("evidence_type")).isEqualTo("INITIAL");
+            }
         }
         
+        ds.close();
+    }
+
+    @Test
+    void testV9ProctorDataConformingToV9InvariantMigratesCleanlyToV10() throws Exception {
+        String url = "jdbc:h2:mem:v9tov10db;MODE=MySQL;DB_CLOSE_DELAY=-1";
+
+        com.zaxxer.hikari.HikariConfig config = new com.zaxxer.hikari.HikariConfig();
+        config.setJdbcUrl(url);
+        config.setUsername("sa");
+        config.setPassword("");
+        com.zaxxer.hikari.HikariDataSource ds = new com.zaxxer.hikari.HikariDataSource(config);
+
+        // Migrate to base v9 first
+        DatabaseMigrator migrator = new DatabaseMigrator(ds);
+        try (Connection conn = ds.getConnection(); Statement stmt = conn.createStatement()) {
+            String v3Sql = new String(getClass().getClassLoader().getResourceAsStream("db/migration/schema-v3.sql").readAllBytes());
+            for (String s : v3Sql.split(";")) {
+                if (!s.trim().isEmpty()) stmt.execute(s);
+            }
+        }
+        // Run migration to v10
+        migrator.migrate();
+
+        // Verify v10 schema state and unique constraint
+        try (Connection conn = ds.getConnection(); Statement stmt = conn.createStatement()) {
+            try (ResultSet rs = stmt.executeQuery("SELECT MAX(version) FROM schema_versions")) {
+                assertThat(rs.next()).isTrue();
+                assertThat(rs.getInt(1)).isEqualTo(10);
+            }
+        }
+
         ds.close();
     }
 }

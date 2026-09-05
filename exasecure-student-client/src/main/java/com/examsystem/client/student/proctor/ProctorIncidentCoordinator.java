@@ -42,6 +42,10 @@ public class ProctorIncidentCoordinator {
     private CompletableFuture<Integer> activeEventIdFuture = null;
     private ScheduledFuture<?> initialTask = null;
     private ScheduledFuture<?> longAbsenceTask = null;
+    private ScheduledFuture<?> longAbsenceRetryTask = null;
+
+    private static final int MAX_LONG_ABSENCE_RETRIES = 3;
+    private static final long LONG_ABSENCE_RETRY_DELAY_MS = 250;
 
     public ProctorIncidentCoordinator(
             int attemptId,
@@ -210,12 +214,10 @@ public class ProctorIncidentCoordinator {
             }
         }
 
-        // Authoritative LONG_ABSENCE metadata decoupled from screenshot
+        // Authoritative LONG_ABSENCE metadata decoupled from screenshot with bounded retry
         eventIdFuture.thenAccept(eventId -> {
             if (eventId != null && eventId > 0 && isActive) {
-                try {
-                    apiClient.recordProctorLongAbsence(attemptId, eventId);
-                } catch (Exception ignored) {}
+                requestLongAbsenceWithRetry(generation, eventId, 0);
             }
         });
 
@@ -237,6 +239,35 @@ public class ProctorIncidentCoordinator {
         }
     }
 
+    private void requestLongAbsenceWithRetry(long generation, int eventId, int retryCount) {
+        synchronized (this) {
+            if (generation != currentIncidentGeneration || isFocused || !isActive) {
+                return;
+            }
+        }
+
+        try {
+            apiClient.recordProctorLongAbsence(attemptId, eventId);
+        } catch (com.examsystem.client.api.ApiException e) {
+            if (e.getStatusCode() == 400 && retryCount < MAX_LONG_ABSENCE_RETRIES) {
+                // Server indicated threshold not yet reached (e.g. network latency on event creation).
+                // Schedule bounded retry while same incident generation remains active and unfocused.
+                ScheduledFuture<?> retryTask = scheduler.schedule(
+                        () -> requestLongAbsenceWithRetry(generation, eventId, retryCount + 1),
+                        LONG_ABSENCE_RETRY_DELAY_MS,
+                        TimeUnit.MILLISECONDS
+                );
+                synchronized (this) {
+                    if (generation == currentIncidentGeneration && !isFocused && isActive) {
+                        this.longAbsenceRetryTask = retryTask;
+                    } else {
+                        retryTask.cancel(false);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
     private synchronized void cancelPendingTasks() {
         if (initialTask != null) {
             initialTask.cancel(false);
@@ -245,6 +276,10 @@ public class ProctorIncidentCoordinator {
         if (longAbsenceTask != null) {
             longAbsenceTask.cancel(false);
             longAbsenceTask = null;
+        }
+        if (longAbsenceRetryTask != null) {
+            longAbsenceRetryTask.cancel(false);
+            longAbsenceRetryTask = null;
         }
     }
 
