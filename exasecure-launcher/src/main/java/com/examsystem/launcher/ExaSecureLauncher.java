@@ -20,7 +20,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -162,7 +161,7 @@ public class ExaSecureLauncher {
                         infoStatusLabel.setText("Starting ExaSecure Server...");
                     });
 
-                    Process server = launchModule("exasecure-server");
+                    Process server = launchModule(LaunchTarget.SERVER);
                     trackProcess(server);
 
                     boolean healthy = waitForServerHealth();
@@ -192,7 +191,7 @@ public class ExaSecureLauncher {
                             infoStatusLabel.setText("Starting ExaSecure Server...");
                         });
 
-                        Process server = launchModule("exasecure-server");
+                        Process server = launchModule(LaunchTarget.SERVER);
                         trackProcess(server);
 
                         boolean healthy = waitForServerHealth();
@@ -211,7 +210,7 @@ public class ExaSecureLauncher {
                         infoStatusLabel.setText("Server ready. Launching Admin Console...");
                     });
 
-                    Process admin = launchModule("exasecure-admin-client");
+                    Process admin = launchModule(LaunchTarget.ADMIN);
                     trackProcess(admin);
 
                     Platform.runLater(() -> {
@@ -247,7 +246,7 @@ public class ExaSecureLauncher {
                         infoStatusLabel.setText("Launching Admin Console...");
                     });
 
-                    Process admin = launchModule("exasecure-admin-client");
+                    Process admin = launchModule(LaunchTarget.ADMIN);
                     trackProcess(admin);
 
                     Platform.runLater(() -> {
@@ -315,22 +314,13 @@ public class ExaSecureLauncher {
         }
 
         public static Path findRepoRoot() {
-            Path dir = Path.of("").toAbsolutePath();
-            if (Files.exists(dir.resolve("mvnw")) || Files.exists(dir.resolve("mvnw.cmd"))) {
-                return dir;
-            }
-            if (Files.exists(dir.resolve("..").resolve("mvnw")) || Files.exists(dir.resolve("..").resolve("mvnw.cmd"))) {
-                return dir.resolve("..").normalize().toAbsolutePath();
-            }
-            return dir;
+            return DevelopmentCommandFactory.findRepoRoot(Path.of(""));
         }
 
-        public static Process launchModule(String moduleName) throws IOException {
-            Path root = findRepoRoot();
-            boolean isWin = System.getProperty("os.name").toLowerCase().contains("win");
-            String mvnw = root.resolve(isWin ? "mvnw.cmd" : "mvnw").toString();
-            ProcessBuilder pb = new ProcessBuilder(mvnw, "exec:java", "-pl", moduleName);
-            pb.directory(root.toFile());
+        static Process launchModule(LaunchTarget target) throws IOException {
+            LaunchSpec spec = DevelopmentCommandFactory.create(target);
+            ProcessBuilder pb = new ProcessBuilder(spec.command());
+            pb.directory(spec.workingDirectory().toFile());
             pb.inheritIO();
             return pb.start();
         }
