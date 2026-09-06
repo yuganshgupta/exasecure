@@ -91,6 +91,7 @@ public class UiFeedback {
         alert.getDialogPane().setMinHeight(Region.USE_PREF_SIZE);
         alert.getDialogPane().setPrefWidth(480);
         alert.getDialogPane().getStyleClass().add("product-dialog");
+        AppIcon.applyTo(alert);
         if (alert.getDialogPane().getContent() instanceof javafx.scene.control.Label label) {
             label.setWrapText(true);
             label.setMaxWidth(430);

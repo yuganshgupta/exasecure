@@ -1,5 +1,6 @@
 package com.examsystem.client.theme;
 
+import com.examsystem.client.ui.AppIcon;
 import javafx.application.ColorScheme;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
@@ -59,6 +60,7 @@ public class ThemeManager {
     public void applyTheme(javafx.scene.control.Dialog<?> dialog) {
         if (dialog == null) return;
         applyTheme(dialog.getDialogPane());
+        AppIcon.applyTo(dialog);
     }
 
     public void applyTheme(javafx.scene.control.DialogPane pane) {

@@ -1,6 +1,7 @@
 package com.examsystem.launcher;
 
 import com.examsystem.client.theme.ThemeManager;
+import com.examsystem.client.ui.AppIcon;
 import javafx.application.Application;
 import javafx.application.Platform;
 import javafx.geometry.Insets;
@@ -105,6 +106,7 @@ public class ExaSecureLauncher {
             ThemeManager.getInstance().applyTheme(scene);
 
             stage.setTitle("ExaSecure Control Center");
+            AppIcon.applyTo(stage);
             stage.setScene(scene);
             stage.setMinWidth(420);
             stage.setMinHeight(380);

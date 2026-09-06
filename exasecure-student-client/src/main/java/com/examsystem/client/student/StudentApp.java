@@ -1,6 +1,7 @@
 package com.examsystem.client.student;
 
 import com.examsystem.client.api.ApiClient;
+import com.examsystem.client.ui.AppIcon;
 import com.examsystem.client.student.views.ExamTakingView;
 import com.examsystem.client.student.views.StudentDashboardView;
 import com.examsystem.client.student.views.StudentHistoryView;
@@ -30,6 +31,7 @@ public class StudentApp extends Application {
         Scene scene = new Scene(rootLayout, 1080, 720);
         com.examsystem.client.theme.ThemeManager.getInstance().applyTheme(scene);
         stage.setTitle("ExaSecure — Student Examination");
+        AppIcon.applyTo(stage);
         stage.setScene(scene);
         stage.setMinWidth(900);
         stage.setMinHeight(600);

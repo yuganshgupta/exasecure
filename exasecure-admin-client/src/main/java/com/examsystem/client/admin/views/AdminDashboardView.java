@@ -4,6 +4,7 @@ import com.examsystem.client.admin.AdminApp;
 import com.examsystem.client.api.ApiClient;
 import com.examsystem.client.api.ApiException;
 import com.examsystem.client.async.AsyncRunner;
+import com.examsystem.client.ui.AppIcon;
 import com.examsystem.client.ui.UiFeedback;
 import com.examsystem.contracts.AdminAttemptDetailDto;
 import com.examsystem.contracts.AdminExamStatisticsDto;
@@ -1892,6 +1893,7 @@ public class AdminDashboardView {
         viewerStage.initOwner(primaryStage);
         viewerStage.initModality(Modality.NONE);
         viewerStage.setTitle("ExaSecure Evidence Inspector");
+        AppIcon.applyTo(viewerStage);
 
         BorderPane modalRoot = new BorderPane();
         modalRoot.getStyleClass().add("app-root");

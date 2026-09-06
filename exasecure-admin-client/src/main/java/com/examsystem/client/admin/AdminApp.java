@@ -1,6 +1,7 @@
 package com.examsystem.client.admin;
 
 import com.examsystem.client.api.ApiClient;
+import com.examsystem.client.ui.AppIcon;
 import com.examsystem.client.admin.views.AdminDashboardView;
 import com.examsystem.client.admin.views.AdminLoginView;
 import javafx.application.Application;
@@ -22,6 +23,7 @@ public class AdminApp extends Application {
         Scene scene = new Scene(rootLayout, 1180, 760);
         com.examsystem.client.theme.ThemeManager.getInstance().applyTheme(scene);
         stage.setTitle("ExaSecure — Administrative Console");
+        AppIcon.applyTo(stage);
         stage.setScene(scene);
         stage.setMinWidth(960);
         stage.setMinHeight(640);
