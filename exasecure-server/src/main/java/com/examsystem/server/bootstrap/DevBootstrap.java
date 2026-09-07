@@ -13,6 +13,7 @@ import java.sql.Statement;
 public class DevBootstrap {
 
     public static void run(AppConfig config) {
+        config.requireDevelopmentBootstrap();
         System.out.println("[bootstrap] connecting to database");
         DataSource ds = config.createDataSource();
 

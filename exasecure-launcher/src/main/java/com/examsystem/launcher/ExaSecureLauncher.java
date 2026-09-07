@@ -87,12 +87,16 @@ public class ExaSecureLauncher {
             stopBtn.getStyleClass().add("btn-danger");
             stopBtn.setOnAction(e -> onStopExaSecure());
 
+            Button configureServer = new Button("Configure Installed Server");
+            configureServer.setMaxWidth(Double.MAX_VALUE);
+            configureServer.setOnAction(e -> OperatorSetupDialog.show(stage, new OperatorSettings()));
+
             infoStatusLabel = new Label("Ready.");
             infoStatusLabel.getStyleClass().addAll("secondary-text", "small-text");
             infoStatusLabel.setWrapText(true);
             infoStatusLabel.setAlignment(Pos.CENTER);
 
-            VBox card = new VBox(12, headerBox, serverStatusLabel, startServerBtn, startServerAndAdminBtn, openAdminBtn, stopBtn, infoStatusLabel);
+            VBox card = new VBox(12, headerBox, serverStatusLabel, startServerBtn, startServerAndAdminBtn, openAdminBtn, stopBtn, configureServer, infoStatusLabel);
             card.getStyleClass().addAll("theme-card", "login-card");
             card.setAlignment(Pos.CENTER);
 
@@ -101,14 +105,14 @@ public class ExaSecureLauncher {
             root.setPadding(new Insets(20));
             root.getStyleClass().add("app-root");
 
-            Scene scene = new Scene(root, 440, 380);
+            Scene scene = new Scene(root, 440, 430);
             ThemeManager.getInstance().applyTheme(scene);
 
             stage.setTitle("ExaSecure Control Center");
             AppIcon.applyTo(stage);
             stage.setScene(scene);
             stage.setMinWidth(420);
-            stage.setMinHeight(380);
+            stage.setMinHeight(430);
 
             stage.setOnCloseRequest(e -> onStopExaSecure());
             stage.show();

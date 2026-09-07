@@ -17,7 +17,9 @@ public class NoDatabaseAccessInClientTest {
                             "javax.sql..",
                             "com.mysql..",
                             "org.h2..",
-                            "com.zaxxer.hikari.."
+                            "com.zaxxer.hikari..",
+                            "com.examsystem.server..",
+                            "com.examsystem.launcher.."
                     )
                     .allowEmptyShould(true)
                     .because("Client modules must be presentation adapters with NO direct database access");

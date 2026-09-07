@@ -21,11 +21,14 @@ public class StudentApp extends Application {
     private Stage primaryStage;
     private ApiClient apiClient;
     private StackPane rootLayout;
+    private StudentConnection connection;
+    private boolean loginVisible;
 
     @Override
     public void start(Stage stage) {
         this.primaryStage = stage;
-        this.apiClient = new ApiClient();
+        this.connection = new StudentConnection();
+        this.apiClient = connection.client();
         this.rootLayout = new StackPane();
 
         Scene scene = new Scene(rootLayout, 1080, 720);
@@ -41,6 +44,12 @@ public class StudentApp extends Application {
     }
 
     public void showLogin() {
+        connection.loggedOut();
+        loginVisible = true;
+        if (apiClient == null) {
+            showServerSetup();
+            return;
+        }
         if (primaryStage != null && primaryStage.isFullScreen()) {
             primaryStage.setFullScreen(false);
         }
@@ -49,6 +58,8 @@ public class StudentApp extends Application {
     }
 
     public void showDashboard() {
+        loginVisible = false;
+        connection.lock();
         if (primaryStage != null && primaryStage.isFullScreen()) {
             primaryStage.setFullScreen(false);
         }
@@ -77,6 +88,23 @@ public class StudentApp extends Application {
 
     public Stage getPrimaryStage() {
         return primaryStage;
+    }
+
+    public boolean canConfigureServer() { return loginVisible && connection.canConfigure(); }
+
+    public void authenticationStarted() { connection.lock(); }
+    public void authenticationFailed() { connection.loggedOut(); }
+
+    public void showServerSetup() {
+        if (!loginVisible) return;
+        rootLayout.getChildren().setAll(new com.examsystem.client.student.views.StudentServerSetupView(this, connection).getView());
+    }
+
+    public void saveServer(String address) throws java.io.IOException {
+        if (!loginVisible) throw new IllegalStateException("Log out before changing Server.");
+        connection.save(address);
+        apiClient = connection.client();
+        showLogin();
     }
 
     public static void main(String[] args) {

@@ -1,6 +1,7 @@
 # Copy to db.properties only for a manually provisioned local database.
-# The supported Windows setup writes this file automatically with a generated,
-# restricted database account. Never commit the real db.properties file.
+# Use a restricted database account. Never commit the real db.properties file.
+# Development reads this file from the working directory or its parent.
+# Installed configuration uses Control Center; see exasecure-launcher/CONFIGURATION.md.
 db.url=jdbc:mysql://localhost:3306/secure_exam_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
 db.user=exasecure_app
 db.password=replace_with_local_password

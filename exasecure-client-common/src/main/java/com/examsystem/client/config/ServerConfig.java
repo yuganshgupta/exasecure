@@ -2,6 +2,7 @@ package com.examsystem.client.config;
 
 import java.net.URI;
 import java.util.Objects;
+import java.util.Locale;
 
 public class ServerConfig {
     public static final String DEFAULT_SERVER_URL = "http://localhost:8089";
@@ -30,21 +31,24 @@ public class ServerConfig {
         return DEFAULT_SERVER_URL;
     }
 
+    /** Preserves an optional reverse-proxy base path; strips trailing slashes and folds scheme/host case. */
     private static String normalizeUrl(String raw) {
-        String url = (raw == null || raw.isBlank()) ? DEFAULT_SERVER_URL : raw.trim();
-        while (url.endsWith("/")) {
-            url = url.substring(0, url.length() - 1);
-        }
         try {
-            URI uri = URI.create(url);
+            if (raw == null || raw.isBlank()) throw new IllegalArgumentException();
+            URI uri = URI.create(raw.trim()).parseServerAuthority();
             String scheme = uri.getScheme();
-            if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
-                throw new IllegalArgumentException("Server URL must use http or https scheme: " + raw);
-            }
+            if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))
+                    || uri.getHost() == null || uri.getUserInfo() != null || uri.getRawQuery() != null
+                    || uri.getRawFragment() != null || uri.getPort() == 0 || uri.getPort() > 65535
+                    || uri.getRawAuthority().endsWith(":")) throw new IllegalArgumentException();
+            String path = uri.getRawPath();
+            while (path.endsWith("/")) path = path.substring(0, path.length() - 1);
+            return scheme.toLowerCase(Locale.ROOT) + "://" + uri.getHost().toLowerCase(Locale.ROOT)
+                    + (uri.getPort() == -1 ? "" : ":" + uri.getPort()) + path;
         } catch (Exception e) {
-            throw new IllegalArgumentException("Invalid server URL: " + raw, e);
+            // Never echo rejected input: it may contain credentials.
+            throw new IllegalArgumentException("Enter an absolute HTTP or HTTPS URL with a host and valid port (1-65535), without credentials, query, or fragment.");
         }
-        return url;
     }
 
     public String baseUrl() {

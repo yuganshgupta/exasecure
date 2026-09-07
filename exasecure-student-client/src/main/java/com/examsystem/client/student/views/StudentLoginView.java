@@ -48,7 +48,11 @@ public class StudentLoginView {
         serverInfoBox.setAlignment(Pos.CENTER);
         Label serverLabel = new Label("Server: " + apiClient.getConfig().baseUrl());
         serverLabel.getStyleClass().addAll("secondary-text", "small-text");
-        serverInfoBox.getChildren().add(serverLabel);
+        serverLabel.setWrapText(true);
+        Button changeServer = new Button("Change Server");
+        changeServer.setDisable(!app.canConfigureServer());
+        changeServer.setOnAction(e -> app.showServerSetup());
+        serverInfoBox.getChildren().addAll(serverLabel, changeServer);
 
         VBox form = new VBox(12);
         form.setAlignment(Pos.CENTER_LEFT);
@@ -81,6 +85,7 @@ public class StudentLoginView {
         spinner.managedProperty().bind(spinner.visibleProperty());
 
         Runnable performLogin = () -> {
+            if (loginBtn.isDisabled()) return;
             String u = usernameField.getText().trim();
             String p = passwordField.getText();
             if (u.isEmpty() || p.isEmpty()) {
@@ -90,6 +95,8 @@ public class StudentLoginView {
             }
 
             errorLabel.setVisible(false);
+            app.authenticationStarted();
+            changeServer.setDisable(true);
             loginBtn.setDisable(true);
             usernameField.setDisable(true);
             passwordField.setDisable(true);
@@ -105,6 +112,8 @@ public class StudentLoginView {
 
                         if (!"STUDENT".equalsIgnoreCase(res.role())) {
                             apiClient.logout();
+                            app.authenticationFailed();
+                            changeServer.setDisable(!app.canConfigureServer());
                             errorLabel.setText("Access denied: This account has the " + res.role() + " role. Please use the Admin Console.");
                             errorLabel.setVisible(true);
                             return;
@@ -113,6 +122,8 @@ public class StudentLoginView {
                         app.showDashboard();
                     },
                     (Throwable err) -> {
+                        app.authenticationFailed();
+                        changeServer.setDisable(!app.canConfigureServer());
                         spinner.setVisible(false);
                         loginBtn.setDisable(false);
                         usernameField.setDisable(false);

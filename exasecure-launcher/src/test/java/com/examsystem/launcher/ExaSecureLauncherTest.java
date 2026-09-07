@@ -22,7 +22,8 @@ public class ExaSecureLauncherTest {
                             "javax.sql..",
                             "com.mysql..",
                             "org.h2..",
-                            "com.zaxxer.hikari.."
+                            "com.zaxxer.hikari..",
+                            "com.examsystem.server.."
                     )
                     .allowEmptyShould(true)
                     .because("Launcher must not contain any database access or business logic");
@@ -35,4 +36,3 @@ public class ExaSecureLauncherTest {
         assertThat(Files.exists(root.resolve("mvnw")) || Files.exists(root.resolve("mvnw.cmd"))).isTrue();
     }
 }
-

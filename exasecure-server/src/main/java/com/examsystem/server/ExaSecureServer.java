@@ -154,6 +154,7 @@ public class ExaSecureServer {
     public static void main(String[] args) {
         AppConfig config = new AppConfig();
         if ((args.length > 0 && "--bootstrap".equalsIgnoreCase(args[0])) || Boolean.getBoolean("exasecure.bootstrap")) {
+            config.requireDevelopmentBootstrap();
             com.examsystem.server.bootstrap.DevBootstrap.run(config);
         }
         new ExaSecureServer(config).start();

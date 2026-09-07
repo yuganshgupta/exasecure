@@ -17,7 +17,9 @@ public class NoDatabaseAccessInStudentClientTest {
                             "javax.sql..",
                             "com.mysql..",
                             "org.h2..",
-                            "com.zaxxer.hikari.."
+                            "com.zaxxer.hikari..",
+                            "com.examsystem.server..",
+                            "com.examsystem.launcher.."
                     )
                     .allowEmptyShould(true)
                     .because("Student client must be a presentation adapter with NO database access");
