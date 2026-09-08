@@ -157,6 +157,10 @@ public class ExaSecureServer {
             config.requireDevelopmentBootstrap();
             com.examsystem.server.bootstrap.DevBootstrap.run(config);
         }
-        new ExaSecureServer(config).start();
+        if ("1".equals(System.getenv("EXASECURE_PROCESS_CONTROL"))) {
+            com.examsystem.server.bootstrap.ManagedServerControl.run(config);
+        } else {
+            new ExaSecureServer(config).start();
+        }
     }
 }
