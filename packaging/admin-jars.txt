@@ -1,0 +1,13 @@
+exasecure-admin-client-2.0.0-SNAPSHOT.jar
+exasecure-client-common-2.0.0-SNAPSHOT.jar
+exasecure-contracts-2.0.0-SNAPSHOT.jar
+jackson-annotations-2.18.2.jar
+jackson-core-2.18.2.jar
+jackson-databind-2.18.2.jar
+jackson-datatype-jsr310-2.18.2.jar
+javafx-base-25.0.2.jar
+javafx-base-25.0.2-{platform}.jar
+javafx-controls-25.0.2.jar
+javafx-controls-25.0.2-{platform}.jar
+javafx-graphics-25.0.2.jar
+javafx-graphics-25.0.2-{platform}.jar
