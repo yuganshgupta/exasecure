@@ -202,7 +202,8 @@ class ProctorIncidentCoordinatorTest {
                 () -> terminationCallbackFired.set(true),
                 800L,
                 5000L,
-                false
+                false,
+                scheduler, scheduler, scheduler, false
         );
     }
 
@@ -521,7 +522,8 @@ class ProctorIncidentCoordinatorTest {
                     null,
                     800L,
                     5000L,
-                    false
+                    false,
+                    networkExecutor, scheduler, scheduler, false
             );
 
             // Trigger focus loss in background so mockApi's blocking network future doesn't block caller

@@ -9,6 +9,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -27,6 +28,12 @@ public class ProctorIncidentCoordinator {
     private final ApiClient apiClient;
     private final ScreenCapturer captureService;
     private final ScheduledExecutorService scheduler;
+    // Fixed, separate lanes: ordered incident/telemetry HTTP, screen capture, and uploads.
+    // No blocking work or future completion may run on the deadline scheduler.
+    private final ExecutorService networkExecutor;
+    private final ExecutorService captureExecutor;
+    private final ExecutorService evidenceExecutor;
+    private final boolean ownsWorkers;
     private final Clock clock;
     private final Consumer<StudentProctorEventResponseDto> onViolationCallback;
     private final Runnable onTerminationCallback;
@@ -35,6 +42,7 @@ public class ProctorIncidentCoordinator {
     private final boolean ownsScheduler;
 
     private boolean isActive = true;
+    private boolean closed;
     private boolean isFocused = true;
     private long currentIncidentGeneration = 0;
 
@@ -59,6 +67,21 @@ public class ProctorIncidentCoordinator {
             long longAbsenceDelayMs,
             boolean ownsScheduler
     ) {
+        this(attemptId, apiClient, captureService, scheduler, clock, onViolationCallback,
+                onTerminationCallback, initialDelayMs, longAbsenceDelayMs, ownsScheduler,
+                newWorker("proctor-network"), newWorker("proctor-capture"),
+                newWorker("proctor-evidence"), true);
+    }
+
+    // Tests can supply deterministic workers independently of the deadline scheduler.
+    ProctorIncidentCoordinator(
+            int attemptId, ApiClient apiClient, ScreenCapturer captureService,
+            ScheduledExecutorService scheduler, Clock clock,
+            Consumer<StudentProctorEventResponseDto> onViolationCallback, Runnable onTerminationCallback,
+            long initialDelayMs, long longAbsenceDelayMs, boolean ownsScheduler,
+            ExecutorService networkExecutor, ExecutorService captureExecutor,
+            ExecutorService evidenceExecutor, boolean ownsWorkers
+    ) {
         this.attemptId = attemptId;
         this.apiClient = apiClient;
         this.captureService = captureService != null ? captureService : new ScreenCaptureService();
@@ -69,6 +92,33 @@ public class ProctorIncidentCoordinator {
         this.initialDelayMs = initialDelayMs;
         this.longAbsenceDelayMs = longAbsenceDelayMs;
         this.ownsScheduler = ownsScheduler;
+        this.networkExecutor = networkExecutor;
+        this.captureExecutor = captureExecutor;
+        this.evidenceExecutor = evidenceExecutor;
+        this.ownsWorkers = ownsWorkers;
+    }
+
+    private static ExecutorService newWorker(String name) {
+        return Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, name);
+            t.setDaemon(true);
+            return t;
+        });
+    }
+
+    private synchronized void dispatch(ExecutorService executor, Runnable work) {
+        if (!closed) {
+            executor.execute(() -> {
+                synchronized (this) {
+                    if (closed) return;
+                }
+                work.run();
+            });
+        }
+    }
+
+    private synchronized boolean isEligible(long generation) {
+        return generation == currentIncidentGeneration && !isFocused && isActive;
     }
 
     public ProctorIncidentCoordinator(
@@ -121,33 +171,32 @@ public class ProctorIncidentCoordinator {
             longAbsenceTask = scheduler.schedule(() -> {
                 handleLongAbsenceDeadline(generation, lostAt, eventIdFuture);
             }, longAbsenceDelayMs, TimeUnit.MILLISECONDS);
-        }
-
-        // 3. Dispatch authoritative FOCUS_LOST event at T = 0 outside synchronization
-        String clientEventId = "focus-" + attemptId + "-" + generation + "-" + lostAt.toEpochMilli();
-        scheduler.execute(() -> {
-            try {
-                StudentProctorEventResponseDto response = apiClient.recordProctorEvent(attemptId, "FOCUS_LOST", clientEventId);
-                eventIdFuture.complete(response.eventId());
-
-                synchronized (ProctorIncidentCoordinator.this) {
-                    if (generation == currentIncidentGeneration && isActive) {
-                        if (onViolationCallback != null) {
-                            onViolationCallback.accept(response);
-                        }
-                        if (response.flagged() || response.violationCount() >= 3) {
-                            cancelPendingTasks();
-                            isActive = false;
-                            if (onTerminationCallback != null) {
-                                onTerminationCallback.run();
+            // 3. Enqueue under the state lock to preserve departure order, even across callers.
+            String clientEventId = "focus-" + attemptId + "-" + generation + "-" + lostAt.toEpochMilli();
+            dispatch(networkExecutor, () -> {
+                try {
+                    StudentProctorEventResponseDto response = apiClient.recordProctorEvent(attemptId, "FOCUS_LOST", clientEventId);
+                    synchronized (ProctorIncidentCoordinator.this) {
+                        if (generation == currentIncidentGeneration && isActive) {
+                            if (onViolationCallback != null) {
+                                onViolationCallback.accept(response);
+                            }
+                            if (response.flagged() || response.violationCount() >= 3) {
+                                cancelPendingTasks();
+                                isActive = false;
+                                if (onTerminationCallback != null) {
+                                    onTerminationCallback.run();
+                                }
                             }
                         }
                     }
+                    // Continuations only enqueue work; a slow upload cannot delay the strike callback.
+                    eventIdFuture.complete(response.eventId());
+                } catch (Exception e) {
+                    eventIdFuture.completeExceptionally(e);
                 }
-            } catch (Exception e) {
-                eventIdFuture.completeExceptionally(e);
-            }
-        });
+            });
+        }
     }
 
     public void onFocusGained() {
@@ -172,70 +221,53 @@ public class ProctorIncidentCoordinator {
         }
 
         if (eventIdFuture != null) {
-            eventIdFuture.thenAccept(eventId -> {
+            eventIdFuture.thenAccept(eventId -> dispatch(networkExecutor, () -> {
+                // Return belongs to its original event even if a newer departure has started.
                 if (eventId != null && eventId > 0) {
                     try {
                         apiClient.recordProctorReturn(attemptId, eventId, returnedAt, durationMs);
                     } catch (Exception ignored) {}
                 }
-            });
+            }));
         }
     }
 
     private void handleInitialDeadline(long generation, Instant lostAt, CompletableFuture<Integer> eventIdFuture) {
-        synchronized (this) {
-            if (generation != currentIncidentGeneration || isFocused || !isActive) {
-                return;
-            }
-        }
-
-        // Capture physical screen at T ≈ 800ms
-        byte[] screenshot = null;
-        try {
-            screenshot = captureService.capture();
-        } catch (Exception ignored) {}
-
-        if (screenshot != null && screenshot.length > 0) {
-            final byte[] data = screenshot;
-            eventIdFuture.thenAccept(eventId -> {
-                if (eventId != null && eventId > 0 && isActive) {
-                    try {
-                        apiClient.uploadProctorEvidence(attemptId, eventId, data, "image/jpeg", "INITIAL");
-                    } catch (Exception ignored) {}
-                }
-            });
+        if (isEligible(generation)) {
+            dispatch(captureExecutor, () -> captureEvidence(generation, eventIdFuture, "INITIAL"));
         }
     }
 
     private void handleLongAbsenceDeadline(long generation, Instant lostAt, CompletableFuture<Integer> eventIdFuture) {
-        synchronized (this) {
-            if (generation != currentIncidentGeneration || isFocused || !isActive) {
-                return;
-            }
-        }
+        if (!isEligible(generation)) return;
 
         // Authoritative LONG_ABSENCE metadata decoupled from screenshot with bounded retry
         eventIdFuture.thenAccept(eventId -> {
-            if (eventId != null && eventId > 0 && isActive) {
-                requestLongAbsenceWithRetry(generation, eventId, 0);
+            if (eventId != null && eventId > 0) {
+                dispatch(networkExecutor, () -> requestLongAbsenceWithRetry(generation, eventId, 0));
             }
         });
+        dispatch(captureExecutor, () -> captureEvidence(generation, eventIdFuture, "LONG_ABSENCE"));
+    }
 
-        // Capture supporting long-absence screenshot
+    private void captureEvidence(long generation, CompletableFuture<Integer> eventIdFuture, String type) {
+        if (!isEligible(generation)) return;
         byte[] screenshot = null;
         try {
             screenshot = captureService.capture();
         } catch (Exception ignored) {}
 
-        if (screenshot != null && screenshot.length > 0) {
+        // A return/new incident during physical capture invalidates those bytes.
+        if (screenshot != null && screenshot.length > 0 && isEligible(generation)) {
             final byte[] data = screenshot;
-            eventIdFuture.thenAccept(eventId -> {
-                if (eventId != null && eventId > 0 && isActive) {
+            eventIdFuture.thenAccept(eventId -> dispatch(evidenceExecutor, () -> {
+                // Cancellation also covers time waiting for an ID or behind an older upload.
+                if (eventId != null && eventId > 0 && isEligible(generation)) {
                     try {
-                        apiClient.uploadProctorEvidence(attemptId, eventId, data, "image/jpeg", "LONG_ABSENCE");
+                        apiClient.uploadProctorEvidence(attemptId, eventId, data, "image/jpeg", type);
                     } catch (Exception ignored) {}
                 }
-            });
+            }));
         }
     }
 
@@ -254,16 +286,12 @@ public class ProctorIncidentCoordinator {
                     && retryCount < MAX_LONG_ABSENCE_RETRIES) {
                 // Server indicated threshold not yet reached (e.g. network latency on event creation).
                 // Schedule bounded retry while same incident generation remains active and unfocused.
-                ScheduledFuture<?> retryTask = scheduler.schedule(
-                        () -> requestLongAbsenceWithRetry(generation, eventId, retryCount + 1),
-                        LONG_ABSENCE_RETRY_DELAY_MS,
-                        TimeUnit.MILLISECONDS
-                );
                 synchronized (this) {
-                    if (generation == currentIncidentGeneration && !isFocused && isActive) {
-                        this.longAbsenceRetryTask = retryTask;
-                    } else {
-                        retryTask.cancel(false);
+                    if (isEligible(generation)) {
+                        longAbsenceRetryTask = scheduler.schedule(
+                                () -> dispatch(networkExecutor,
+                                        () -> requestLongAbsenceWithRetry(generation, eventId, retryCount + 1)),
+                                LONG_ABSENCE_RETRY_DELAY_MS, TimeUnit.MILLISECONDS);
                     }
                 }
             }
@@ -286,10 +314,16 @@ public class ProctorIncidentCoordinator {
     }
 
     public synchronized void shutdown() {
+        closed = true;
         isActive = false;
         cancelPendingTasks();
         if (ownsScheduler && scheduler != null) {
             scheduler.shutdownNow();
+        }
+        if (ownsWorkers) {
+            networkExecutor.shutdownNow();
+            captureExecutor.shutdownNow();
+            evidenceExecutor.shutdownNow();
         }
     }
 

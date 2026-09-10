@@ -15,12 +15,14 @@ import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
+import javafx.event.EventHandler;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
 import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 import javafx.stage.Stage;
+import javafx.stage.WindowEvent;
 import javafx.util.Duration;
 
 import java.time.Instant;
@@ -78,6 +80,7 @@ public class ExamTakingView {
     private ChangeListener<Boolean> focusListener;
     private ChangeListener<Boolean> iconifiedListener;
     private ChangeListener<Boolean> fullScreenListener;
+    private EventHandler<WindowEvent> proctorWindowHiddenHandler;
     private boolean isDialogActive = false;
     private boolean isSubmitted = false;
     private boolean isSubmissionPending = false;
@@ -402,6 +405,8 @@ public class ExamTakingView {
                 this::handleProctorResponseOnFxThread,
                 this::handleProctorTerminationOnFxThread
         );
+        proctorWindowHiddenHandler = event -> cleanupListeners();
+        stage.addEventHandler(WindowEvent.WINDOW_HIDDEN, proctorWindowHiddenHandler);
 
         focusListener = (obs, oldVal, newVal) -> {
             if (!newVal && !isDialogActive && !isSubmitted && !isSubmissionPending) {
@@ -858,6 +863,9 @@ public class ExamTakingView {
             proctorCoordinator.shutdown();
         }
         if (stage != null) {
+            if (proctorWindowHiddenHandler != null) {
+                stage.removeEventHandler(WindowEvent.WINDOW_HIDDEN, proctorWindowHiddenHandler);
+            }
             if (focusListener != null) {
                 stage.focusedProperty().removeListener(focusListener);
             }
