@@ -13,6 +13,7 @@ import javax.imageio.ImageIO;
 /** Java 25 source launcher: run from repository root. No third-party build-driver libraries. */
 public class BuildImages {
     static final String VERSION = "2.0.0-SNAPSHOT";
+    static final String NATIVE_VERSION = VERSION.replaceFirst("-SNAPSHOT$", "");
     static final String MODULES = "java.se,jdk.unsupported,jdk.crypto.ec,jdk.localedata,jdk.charsets,"
             + "jdk.zipfs,jdk.management,jdk.security.auth,jdk.security.jgss,jdk.httpserver";
     record Role(String id, String module, String name, String main) {
@@ -159,7 +160,7 @@ public class BuildImages {
         }
         Role main = roles.getFirst();
         var command = new ArrayList<>(List.of(tool("jpackage").toString(), "--type", "app-image", "--name", main.name,
-                "--app-version", "2.0.0", "--vendor", "ExaSecure", "--input", input.toString(), "--dest", output.resolve("images").toString(),
+                "--app-version", NATIVE_VERSION, "--vendor", "ExaSecure", "--input", input.toString(), "--dest", output.resolve("images").toString(),
                 "--runtime-image", runtime.toString(), "--main-jar", "lib/" + main.jar(), "--main-class", main.main, "--icon", icon.toString()));
         // Separate java-options arguments avoid platform shell quoting entirely.
         for (String option : options(main, artifacts.get(main.id).keySet(), target).split(" ")) command.addAll(List.of("--java-options", option));
@@ -167,7 +168,7 @@ public class BuildImages {
             Path properties = output.resolve(role.id + "-launcher.properties");
             String text = "main-jar=lib/" + role.jar() + "\nmain-class=" + role.main + "\njava-options="
                     + options(role, artifacts.get(role.id).keySet(), target) + "\n";
-            if (target.windows) text += "win-console=" + role.id.equals("server") + "\n";
+            if (target.windows) text += "win-console=" + role.id.equals("server") + "\nwin-menu=false\nwin-shortcut=false\n";
             Files.writeString(properties, text, StandardCharsets.ISO_8859_1);
             command.addAll(List.of("--add-launcher", role.name + "=" + properties));
         }

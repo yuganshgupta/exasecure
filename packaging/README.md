@@ -3,8 +3,12 @@
 Build on the target platform with **Oracle JDK 25.0.1**: Windows x64 or macOS
 Apple Silicon. The driver uses only Java standard libraries and the repository
 Maven Wrapper. Recipients need neither tool: each image includes its runtime.
-This recipe creates **app-images only**, without installers, WiX, DMGs, signing,
+This C04 recipe creates **app-images only**, without installers, WiX, DMGs, signing,
 notarization, services, database provisioning, or publication.
+
+For the Windows EXE installer wrapper and its build prerequisites, see
+[Windows installers](windows-installers.md). It invokes this same fresh-image
+recipe before wrapping the two products. macOS behavior remains app-image only.
 
 From the repository root on Windows:
 
