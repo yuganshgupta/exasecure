@@ -1,14 +1,15 @@
 # Native application images (R4-C04)
 
-Build on the target platform with **Oracle JDK 25.0.1**: Windows x64 or macOS
-Apple Silicon. The driver uses only Java standard libraries and the repository
-Maven Wrapper. Recipients need neither tool: each image includes its runtime.
-This C04 recipe creates **app-images only**, without installers, WiX, DMGs, signing,
+Build on the target platform: **Oracle JDK 25.0.1 on Windows x64**, or
+**Oracle JDK 25 on macOS Apple Silicon**. The driver uses only Java standard
+libraries and the repository Maven Wrapper. Recipients need neither tool: each image includes its runtime.
+This C04 recipe creates **app-images only**, without installers, WiX, DMGs, Developer ID signing,
 notarization, services, database provisioning, or publication.
 
 For the Windows EXE installer wrapper and its build prerequisites, see
 [Windows installers](windows-installers.md). It invokes this same fresh-image
-recipe before wrapping the two products. macOS behavior remains app-image only.
+recipe before wrapping the two products. For Apple Silicon DMGs, see
+[macOS DMGs](macos-dmgs.md); that wrapper also builds fresh images first.
 
 From the repository root on Windows:
 
@@ -16,10 +17,11 @@ From the repository root on Windows:
 & 'C:/Program Files/Java/jdk-25/bin/java.exe' packaging/BuildImages.java
 ```
 
-On Apple Silicon, use the installed Oracle JDK 25.0.1 `bin/java` with the same
+On Apple Silicon, use the installed Oracle JDK 25 `bin/java` with the same
 source file. The driver rejects unsupported OS/architecture pairs and uses the
 current JDK's `jlink`, `jdeps`, and `jpackage`; it does not cross-compile.
-**macOS app-image physical generation required on Apple Silicon before C06.**
+The macOS builder invokes the tracked Maven Wrapper through `/bin/sh` at build
+time; this does not introduce a shell into native application launches.
 
 The output is `target/r4-package/`, already covered by `target/` in `.gitignore`.
 The driver refuses an existing output directory. Preserve or move an earlier

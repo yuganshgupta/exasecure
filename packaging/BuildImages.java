@@ -50,8 +50,8 @@ public class BuildImages {
         new BuildImages(Path.of(""), Target.current()).build();
     }
     void build() throws Exception {
-        require(Runtime.version().version().equals(List.of(25, 0, 1))
-                && System.getProperty("java.vendor").equals("Oracle Corporation"), "Pinned Oracle JDK 25.0.1 required");
+        require(supportedJdk(target, Runtime.version(), System.getProperty("java.vendor")),
+                target.windows ? "Pinned Oracle JDK 25.0.1 required" : "Oracle JDK 25 required on Apple Silicon");
         require(Files.isRegularFile(root.resolve("pom.xml")) && Files.isDirectory(root.resolve("packaging")), "Run from repository root");
         for (String tool : List.of("java", "jpackage", "jlink", "jdeps")) require(Files.isRegularFile(tool(tool)), "Missing JDK tool " + tool);
         // Never delete an existing tree. Each invocation owns a fresh generated directory.
@@ -63,7 +63,9 @@ public class BuildImages {
                 "org.apache.maven.plugins:maven-dependency-plugin:3.7.0:build-classpath", "-DskipTests", "-DincludeScope=runtime",
                 "-Dmdep.regenerateFile=true", "-Dproject.build.outputTimestamp=2026-09-01T00:00:00Z");
         // The profile uses fresh output/maven/<artifactId> targets, leaving development outputs alone.
-        var command = new ArrayList<>(maven);
+        var command = new ArrayList<String>();
+        if (!target.windows) command.add("/bin/sh"); // Build-time wrapper only; native apps never invoke a shell.
+        command.addAll(maven);
         command.addAll(List.of("-pl", "exasecure-domain,exasecure-application,exasecure-contracts,exasecure-server,exasecure-client-common,exasecure-student-client,exasecure-admin-client,exasecure-launcher"));
         run(command, output.resolve("maven-build.log"));
         for (Role role : ROLES) artifacts.put(role.id, resolve(role));
@@ -79,6 +81,10 @@ public class BuildImages {
         for (String product : List.of("student", "operator")) image(product, runtime, icon);
         System.out.println("App-images built and structurally audited: " + output.resolve("images"));
         System.out.println("Native lifecycle and UI acceptance must be performed separately before C04 acceptance.");
+    }
+    static boolean supportedJdk(Target target, Runtime.Version version, String vendor) {
+        return vendor.equals("Oracle Corporation") && (target.windows
+                ? version.version().equals(List.of(25, 0, 1)) : version.feature() == 25);
     }
     SortedMap<String, Path> resolve(Role role) throws Exception {
         var found = new TreeMap<String, Path>();
