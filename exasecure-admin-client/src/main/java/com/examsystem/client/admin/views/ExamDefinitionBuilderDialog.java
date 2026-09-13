@@ -157,7 +157,6 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
     // ==========================================
 
     public static class QuestionCard extends VBox {
-        private final ExamDefinitionBuilderDialog parent;
         private final Label numberLabel;
         private final TextField textField = new TextField();
         private final ComboBox<String> typeCombo = new ComboBox<>();
@@ -165,7 +164,6 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
         private final List<OptionRow> optionRows = new ArrayList<>();
 
         public QuestionCard(ExamDefinitionBuilderDialog parent, int index, AdminQuestionDefinitionDto existing) {
-            this.parent = parent;
             setSpacing(10);
             setPadding(new Insets(12));
             getStyleClass().add("theme-card");

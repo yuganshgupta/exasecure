@@ -2,7 +2,6 @@ package com.examsystem.client.ui;
 
 import com.examsystem.client.async.AsyncRunner;
 import com.examsystem.client.theme.ThemeManager;
-import javafx.application.Platform;
 import javafx.scene.control.Alert;
 import javafx.scene.control.ButtonType;
 import javafx.scene.layout.Region;

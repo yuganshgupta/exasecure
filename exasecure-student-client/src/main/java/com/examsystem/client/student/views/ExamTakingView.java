@@ -4,7 +4,6 @@ import com.examsystem.client.api.ApiClient;
 import com.examsystem.client.api.ApiException;
 import com.examsystem.client.async.AsyncRunner;
 import com.examsystem.client.exam.ExamTimer;
-import com.examsystem.client.proctor.ScreenCaptureService;
 import com.examsystem.client.student.StudentApp;
 import com.examsystem.client.ui.UiFeedback;
 import com.examsystem.contracts.StudentAttemptDto;

@@ -200,7 +200,6 @@ public class ProctorIncidentCoordinator {
     }
 
     public void onFocusGained() {
-        long generation;
         Instant lostAt;
         Instant returnedAt;
         long durationMs;
@@ -213,7 +212,6 @@ public class ProctorIncidentCoordinator {
             isFocused = true;
             cancelPendingTasks();
 
-            generation = currentIncidentGeneration;
             lostAt = activeLostAt;
             returnedAt = clock.instant();
             durationMs = lostAt != null ? Math.max(0, Duration.between(lostAt, returnedAt).toMillis()) : 0;

@@ -2,7 +2,6 @@ package com.examsystem.server;
 
 import com.examsystem.application.ports.ExamAttemptRepository;
 import com.examsystem.application.ports.ProctorRepository;
-import com.examsystem.application.ports.ProctorRepository.ProctorEventRecord;
 import com.examsystem.domain.models.ExamAttempt;
 import com.examsystem.domain.models.User;
 import com.examsystem.server.http.controllers.StudentExamController;

@@ -140,7 +140,7 @@ public class AttemptDetailsDialog extends Dialog<Void> {
         marksCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().marksAwarded() + " / " + d.getValue().marks()));
         marksCol.setMaxWidth(65);
 
-        table.getColumns().addAll(numCol, qTextCol, typeCol, studentAnsCol, correctAnsCol, resultCol, marksCol);
+        table.getColumns().addAll(List.of(numCol, qTextCol, typeCol, studentAnsCol, correctAnsCol, resultCol, marksCol));
         if (details != null) {
             table.getItems().addAll(details);
         }

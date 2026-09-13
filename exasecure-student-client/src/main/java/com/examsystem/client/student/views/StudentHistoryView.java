@@ -12,8 +12,6 @@ import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.layout.*;
 
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 
 public class StudentHistoryView {
@@ -23,9 +21,6 @@ public class StudentHistoryView {
     private final TableView<StudentAttemptHistoryDto> table;
     private final Label statusLabel;
     private final Button refreshBtn;
-
-    private static final DateTimeFormatter FORMATTER =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
 
     public StudentHistoryView(StudentApp app, ApiClient apiClient) {
         this.app = app;
@@ -133,7 +128,7 @@ public class StudentHistoryView {
         integrityCol.setPrefWidth(170);
         integrityCol.setCellFactory(col -> createBadgeCell());
 
-        table.getColumns().addAll(examCol, startCol, endCol, statusCol, scoreCol, integrityCol);
+        table.getColumns().addAll(List.of(examCol, startCol, endCol, statusCol, scoreCol, integrityCol));
     }
 
     private void loadHistory() {

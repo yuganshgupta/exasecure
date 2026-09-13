@@ -2,7 +2,6 @@ package com.examsystem.client.admin.views;
 
 import com.examsystem.client.admin.AdminApp;
 import com.examsystem.client.api.ApiClient;
-import com.examsystem.client.api.ApiException;
 import com.examsystem.client.async.AsyncRunner;
 import com.examsystem.client.ui.AppIcon;
 import com.examsystem.client.ui.UiFeedback;
@@ -27,7 +26,6 @@ import javafx.stage.Stage;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileWriter;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -323,7 +321,7 @@ public class AdminDashboardView {
         statusCol.setPrefWidth(100);
         statusCol.setCellFactory(col -> createBadgeCell());
 
-        usersTable.getColumns().addAll(nameCol, usernameCol, enrollCol, secCol, roleCol, statusCol);
+        usersTable.getColumns().addAll(List.of(nameCol, usernameCol, enrollCol, secCol, roleCol, statusCol));
     }
 
     private void loadUsers() {
@@ -683,7 +681,7 @@ public class AdminDashboardView {
         activeCol.setCellValueFactory(d -> new SimpleStringProperty(d.getValue().isActive() ? "ACTIVE" : "INACTIVE"));
         activeCol.setCellFactory(col -> createBadgeCell());
 
-        examsTable.getColumns().addAll(titleCol, durCol, verCol, activeCol);
+        examsTable.getColumns().addAll(List.of(titleCol, durCol, verCol, activeCol));
     }
 
     private void loadExams() {
@@ -960,7 +958,7 @@ public class AdminDashboardView {
         optCountCol.setCellValueFactory(d -> new SimpleStringProperty(String.valueOf(d.getValue().options().size())));
         optCountCol.setMaxWidth(65);
 
-        qbQuestionsTable.getColumns().addAll(numCol, textCol, typeCol, optCountCol);
+        qbQuestionsTable.getColumns().addAll(List.of(numCol, textCol, typeCol, optCountCol));
 
         qbQuestionsTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
@@ -1192,7 +1190,7 @@ public class AdminDashboardView {
         proctoringCol.setPrefWidth(120);
         proctoringCol.setCellFactory(col -> createBadgeCell());
 
-        attemptsTable.getColumns().addAll(nameCol, enrollCol, startCol, statusCol, scoreCol, violationsCol, proctoringCol);
+        attemptsTable.getColumns().addAll(List.of(nameCol, enrollCol, startCol, statusCol, scoreCol, violationsCol, proctoringCol));
 
         attemptsTable.setRowFactory(tv -> {
             TableRow<AdminAttemptDto> row = new TableRow<>();
@@ -1583,7 +1581,7 @@ public class AdminDashboardView {
                 d.getValue().score() != null ? String.valueOf(d.getValue().score()) : "Pending"));
         scoreCol.setMaxWidth(80);
 
-        proctorAttemptsTable.getColumns().addAll(studentCol, enrollCol, timeCol, statusCol, violCol, procCol, scoreCol);
+        proctorAttemptsTable.getColumns().addAll(List.of(studentCol, enrollCol, timeCol, statusCol, violCol, procCol, scoreCol));
 
         proctorAttemptsTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, sel) -> {
             if (sel != null) {
@@ -1667,7 +1665,7 @@ public class AdminDashboardView {
         });
         evCol.setPrefWidth(140);
 
-        proctorEventsTable.getColumns().addAll(typeCol, timeCol, durationCol, longAbsenceCol, evCol);
+        proctorEventsTable.getColumns().addAll(List.of(typeCol, timeCol, durationCol, longAbsenceCol, evCol));
 
         proctorEventsTable.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, sel) -> {
             if (sel != null) {
@@ -1861,10 +1859,6 @@ public class AdminDashboardView {
                     evidenceStatusLabel.setText("Failed to retrieve evidence: " + err.getMessage());
                 }
         );
-    }
-
-    private void displayEvidenceBytes(int eventId, byte[] imageBytes) {
-        displayEvidenceBytes(eventId, imageBytes, currentEvidenceType);
     }
 
     private void displayEvidenceBytes(int eventId, byte[] imageBytes, String evidenceType) {

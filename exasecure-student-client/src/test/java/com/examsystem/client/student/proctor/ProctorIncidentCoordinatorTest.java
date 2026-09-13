@@ -207,10 +207,6 @@ class ProctorIncidentCoordinatorTest {
         );
     }
 
-    private static ApiClient createBaseMockApi(ServerConfig config, SessionState sessionState) {
-        return new ApiClient(config, sessionState, null);
-    }
-
     private ProctorIncidentCoordinator retryCoordinator(int status, String errorCode) {
         return createCoordinator(new ApiClient(new ServerConfig("http://localhost:8080"), new SessionState(), null) {
             @Override public StudentProctorEventResponseDto recordProctorEvent(int attemptId, String type, String key) {
