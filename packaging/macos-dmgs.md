@@ -1,9 +1,11 @@
 # macOS Apple Silicon DMGs (R4-C06)
 
-This development/internal distribution extends `BuildImages.java`; acceptance
-requires manual Mac checks and a separate independent audit. It does not require
-a paid Apple identity, provision MySQL, or perform signing/notarization release
-work. C07 remains separate.
+C06 delivers Student and Operator Apple Silicon DMGs with bundled arm64 runtimes,
+using the existing `BuildImages.java` architecture. The accepted macOS scope is
+developer use, demonstrations, portability validation, and native use on the
+developer's MacBook. Windows x64 single-display college lab PCs remain the
+production examination target; macOS production multi-monitor capture is not
+certified. MySQL remains external; no paid Apple identity is required.
 
 ## Build and verify
 
@@ -123,13 +125,17 @@ The existing atomic writer uses owner-only POSIX permissions. Student stores
 only its Server URL. Operator settings hold external MySQL connection settings;
 Server receives the configuration file path through the accepted environment,
 not password arguments. Configure a reachable, separately provisioned test
-MySQL instance/account through Control Center. No database or demo account is
-bundled. Use a disposable test database for lifecycle/functional acceptance.
+MySQL instance/account through Control Center. Only Server accesses MySQL;
+MySQL is not bundled and fresh databases contain no default ExaSecure application
+users. Use a disposable test database for lifecycle/functional acceptance.
+Current client/Server communication uses HTTP on a trusted/private college LAN.
+Add an appropriate TLS-secured deployment layer before any untrusted-network
+exposure; HTTP is not suitable for arbitrary public or hostile networks.
 
 The accepted application currently uses console logging; it does **not** create
 persistent log files under `~/Library/Logs/ExaSecure`. When collecting manual
 terminal diagnostics, write them there, outside the app. Persistent child
-logging remains the earlier deferred follow-up; C06 does not change it. Removing
+diagnostics/logging remain a LOW future enhancement. Removing
 an app or ejecting its DMG must not remove external settings or database data.
 
 ## Screen capture and macOS privacy
@@ -141,6 +147,7 @@ JavaFX scene snapshot. Oracle 25+37's bundled AWT native library imports
 ScreenCaptureKit implementation. `java.desktop` and its native libraries remain
 in each runtime.
 
+Screen Recording permission is required for desktop proctor screenshots.
 macOS TCC controls access to other applications' screen content. No entitlement
 in this development package grants or bypasses Screen Recording permission.
 The ad-hoc app signature has no entitlement payload. First-use prompts and the
@@ -157,9 +164,12 @@ The existing service returns null on thrown/headless/encoding failure; incident
 recording is independent of evidence success. Permission denial must not erase
 a violation. After permission, manually inspect actual focus-loss evidence in
 Admin and confirm another harmless desktop window appears. Do not use sensitive
-content for this test. The current default-screen rectangle is not a promise
-of complete multi-display capture. No TCC reset, database manipulation, silent
-grant or privacy bypass is part of this build.
+content for this test. Physical C06 testing proved correct real-desktop capture
+on the main display. With multiple displays, capture targets the main/default
+display and may miss the monitor containing the foreground application. This is
+a non-blocking limitation for the accepted developer/demo scope; production
+multi-monitor capture remains future work. No TCC reset, database manipulation,
+silent grant or privacy bypass is part of this build.
 
 ## Signing, Gatekeeper and DMG
 
@@ -174,14 +184,25 @@ Finder. Record the actual message. If blocked, follow Apple's supported local
 allowance in System Settings → Privacy & Security → Open Anyway after attempting
 to open the app; right-click/Open may be available depending on macOS version.
 See [Apple's unknown-developer instructions](https://support.apple.com/en-asia/guide/mac-help/-mh40616/mac).
-Do not disable Gatekeeper globally or strip quarantine automatically. Release
-identity, notarization and distribution hardening remain C07/release work.
+Do not disable Gatekeeper globally or strip quarantine automatically.
+Developer ID signing and notarization are optional future work for public/general
+macOS distribution, not requirements for this college-project release.
 
 The DMG uses jpackage's standard product/Applications-link layout and background.
 There is no custom installer framework or configuration included in the DMG.
 CLI mounting for payload inspection is distinct from manual install acceptance.
 
-## Manual physical checklist — record results for independent audit
+## Accepted C06 verification evidence
+
+Mac C06 automated verification reported 262 tests, 0 failures, 0 errors, and
+55 skipped (207 non-skipped). The environment-dependent skips were 39 Server
+integration tests and 16 MySQL migration integration tests; skips are not passes.
+Later physical validation separately proved fresh MySQL migration, packaged
+Server → MySQL connectivity, and packaged Admin and Student authentication.
+These checks complement the automated evidence without replacing every skipped
+test. Main-display screenshot acceptance and its limits are recorded above.
+
+## Manual physical checklist — retain for repeat validation
 
 1. Verify `SHA256SUMS.txt` with `shasum -a 256 -c SHA256SUMS.txt` from the
    installers directory. Mount Student DMG. Check the product and Applications
@@ -204,7 +225,7 @@ CLI mounting for payload inspection is distinct from manual install acceptance.
    as macOS requests. On a fresh disposable exam repeat focus loss for >800 ms
    and >5 seconds; inspect initial and long-absence evidence in Admin. Confirm
    actual other-window desktop pixels and one incident per departure. Save the
-   manual evidence and actual permission behavior for Luna.
+   manual evidence and actual permission behavior for independent review.
 6. Mount Operator DMG, inspect its app/Applications link, copy Operator beside
    Student, eject and launch Control Center. Confirm icon/UI. Configure a
    reachable external test MySQL database/account and an unused Server port.
@@ -227,4 +248,5 @@ CLI mounting for payload inspection is distinct from manual install acceptance.
 
 If no test MySQL/server/accounts are available, mark DB/login/exam/lifecycle
 steps NOT RUN with that prerequisite; do not invent credentials or report them
-as passed. Manual results and Luna determine acceptance, not the build driver.
+as passed. Independent review assesses recorded automated and physical evidence;
+package generation alone does not establish acceptance.

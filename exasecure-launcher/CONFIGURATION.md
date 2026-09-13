@@ -2,8 +2,22 @@
 
 Configuration mode is explicit: `-Dexasecure.config.mode=installed` or
 `EXASECURE_CONFIG_MODE=installed`. The JVM property takes precedence. The default
-is `development`; unknown modes fail. This contract does not implement packaged
-launching. Existing Control Center buttons still launch the development Maven commands.
+is `development`; unknown modes fail. Native packages select installed mode.
+Packaged Control Center launches and owns its Server/Admin native processes;
+development execution retains the Maven launch commands.
+
+## Deployment boundary
+
+The current client/Server transport is HTTP, intended for a trusted/private
+college LAN. Accepting an HTTPS URL does not provide TLS on the built-in Server.
+Before exposure across an untrusted/public network, add an appropriate
+TLS-secured deployment layer; plaintext HTTP is not suitable there.
+
+MySQL is external and is not bundled. Only Server connects to MySQL; Operator
+stores its connection settings outside installation directories, and Admin and
+Student have no database access. A fresh database has no default ExaSecure
+application users. Database accounts and application users are separate;
+configuration and installation do not create an initial application user.
 
 ## User files
 
@@ -60,9 +74,9 @@ DB/port property and environment overrides are not consumed in this mode.
 Pass the path, never credentials, on a command line. Both Server's bootstrap
 entry and direct DevBootstrap execution reject installed mode before DB access.
 
-`server.port` is the installed source for future C03 Server launch, health check
-and local Admin URL propagation. OperatorSettings derives the local Admin base
-URL from that port. C02 does not propagate it into development launch commands.
+`server.port` is the installed source for Server launch, health checks and local
+Admin URL propagation. OperatorSettings derives the local Admin base URL from
+that port. Installed settings do not change development launch commands.
 Student's LAN-reachable Server URL remains separately configured.
 
 Development preserves CWD then parent `db.properties`, existing defaults, and
@@ -92,5 +106,13 @@ These are OS-account restrictions, not encryption. Administrators and other
 programs running as the same account can access the files. Separate Student and
 Operator OS accounts are required for OS-level isolation. The Student production
 dependency graph excludes Operator settings, Server implementation and JDBC
-drivers; Admin does not load DB settings. macOS path and POSIX implementation
-must also be exercised on macOS during later physical platform acceptance.
+drivers; Admin does not load DB settings.
+
+Uninstalling/removing an application retains external user configuration and
+does not delete external MySQL data. Back up and remove retained data separately
+only by explicit operator decision. Treat installation directories and `.app`
+bundles as read-only. Any collected diagnostic logs belong in user-writable
+locations under `%LOCALAPPDATA%\ExaSecure\...` on Windows or
+`~/Library/Logs/ExaSecure/` on macOS. Current application logging is console-based;
+bounded persistent child-process diagnostics/log files remain a LOW future
+enhancement, not an implemented feature.

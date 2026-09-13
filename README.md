@@ -21,11 +21,13 @@ Java 25, JavaFX 25.0.2, Javalin, MySQL, and Maven Wrapper.
 | `exasecure-client-common` | Shared API client, session state, and JavaFX utilities |
 | `exasecure-student-client` | Student exam and history workflows |
 | `exasecure-admin-client` | Exam, question, user, result, and evidence management |
-| `exasecure-launcher` | Control Center for development launching |
+| `exasecure-launcher` | Operator Control Center for packaged Server/Admin ownership and development launching |
 
 ## Architecture
 
-Student and Admin clients communicate with the Server through HTTP/JSON. Only the Server accesses MySQL and holds database credentials. Attempt timing, grading, submission, and proctor incident decisions are server-authoritative; Student clients have no direct database access or database credentials.
+Student and Admin clients communicate with the Server through HTTP/JSON. Only the Server accesses MySQL; Operator stores its database configuration outside the installed application directories. Attempt timing, grading, submission, and proctor incident decisions are server-authoritative; Student clients have no direct database access or database credentials.
+
+The release uses HTTP on a trusted/private college LAN. Plaintext HTTP is not appropriate for public or hostile networks; add an appropriate TLS-secured deployment layer before exposing ExaSecure across untrusted networks. MySQL is external and is not bundled.
 
 ## Core Features
 
@@ -33,7 +35,7 @@ Student and Admin clients communicate with the Server through HTTP/JSON. Only th
 - Answer autosave, exam resume, server-authoritative grading, and submission.
 - Focus-loss proctoring, supporting screenshots, and Admin evidence review.
 - Attempt history, results, statistics, and database migrations.
-- Control Center development launching and Light/Dark/System themes.
+- Operator Control Center, development launching, and Light/Dark/System themes.
 
 ## Build
 
@@ -43,13 +45,15 @@ Install JDK 25 and run the Maven Wrapper from the repository root:
 .\mvnw.cmd clean verify
 ```
 
-On macOS/Linux, use `./mvnw` in place of `.\mvnw.cmd`. The active reactor contains the parent and eight V2 modules.
+On macOS/Linux, use `/bin/sh mvnw` in place of `.\mvnw.cmd`. The active reactor contains the parent and eight V2 modules.
 
 ## Configuration
 
-For the Server, provision a local MySQL database and account, copy `db.properties.example` to the ignored root `db.properties`, and set `db.url`, `db.user`, and `db.password` locally. The example contains placeholders; keep real credentials out of Git. The Server also accepts `DB_URL`, `DB_USER`, `DB_PASSWORD`, and `SERVER_PORT` overrides.
+For development Server execution, provision a MySQL database and account, copy `db.properties.example` to the ignored root `db.properties`, and set `db.url`, `db.user`, and `db.password` locally. The example contains placeholders; keep real credentials out of Git. The Server also accepts `DB_URL`, `DB_USER`, `DB_PASSWORD`, and `SERVER_PORT` overrides.
 
-Clients default to `http://localhost:8089`. Set `EXASECURE_SERVER_URL` to use another server. Student and Admin machines do not need `db.properties` or MySQL. The archived V1 setup automation is not a V2 provisioning command.
+Development clients default to `http://localhost:8089`. Set `EXASECURE_SERVER_URL` to use another server. Student and Admin machines do not need `db.properties` or MySQL. The archived V1 setup automation is not a V2 provisioning command.
+
+Installed Student uses Server setup; Operator configures the external database through Control Center. Mutable configuration remains under `%LOCALAPPDATA%\ExaSecure\...` on Windows or `~/Library/Application Support/ExaSecure/...` on macOS. Fresh databases contain no default ExaSecure application users. See [application configuration](exasecure-launcher/CONFIGURATION.md) for installed/development settings and data retention.
 
 ## Development Run
 
@@ -74,7 +78,9 @@ Start the Server before the clients; `http://localhost:8089/health` returns HTTP
 
 `clean verify` runs unit, HTTP, migration, and architecture tests. Real MySQL tests require `EXASECURE_MYSQL_TEST_URL`, `EXASECURE_MYSQL_TEST_USER`, and `EXASECURE_MYSQL_TEST_PASSWORD`; without the URL, those tests are skipped.
 
-Use only the disposable database `exasecure_test` at `localhost:3306` for destructive MySQL fixtures. Construct the test URL explicitly, verify its database name before running, and supply credentials privately. Never point these tests at the application database or data you need to retain. A complete verification run includes the real MySQL tests with no skips.
+Use only the disposable database `exasecure_test` at `localhost:3306` for destructive MySQL fixtures. Construct the test URL explicitly, verify its database name before running, and supply credentials privately. Never point these tests at the application database or data you need to retain. Exercising the full automated MySQL coverage requires those tests to run without skips.
+
+Accepted Mac C06 automated verification reported **262 tests, 0 failures, 0 errors, and 55 skipped (207 non-skipped)**. The skips were environment-dependent gates: 39 Server integration tests and 16 MySQL migration integration tests. Later physical C06 validation separately proved fresh MySQL migration, packaged Server → MySQL connectivity, and packaged Admin and Student authentication. This is complementary evidence; it does not turn every skipped automated test into a pass.
 
 ## Database Migrations
 
@@ -84,9 +90,13 @@ The Server applies versioned migrations from its resources at startup. See [R3 m
 
 [legacy/](legacy/README.md) contains historical Swing V1 source, scripts, documentation, and release automation. It is outside the active V2 reactor. Git tag `v1.0.0` preserves the canonical buildable V1 release and its original working layout.
 
-## Current Development Limitation
+## Native Packages and Deployment Targets
 
-Native packaging and installers are planned for R4. Current launch commands are for development; native installers are not yet provided.
+C05 Windows x64 Student and Operator EXE installers and C06 macOS Apple Silicon Student and Operator DMGs are complete, with bundled runtimes. Operator includes Admin and Server with packaged process ownership. See [Windows installers](packaging/windows-installers.md) and [macOS DMGs](packaging/macos-dmgs.md) for build recipes and acceptance limits.
+
+Windows x64 single-display college lab PCs are the production examination target. macOS Apple Silicon is supported for developer use, demonstrations, portability validation, and native use on the developer's MacBook. macOS main-display proctor capture was physically validated with Screen Recording permission; production multi-monitor capture is not certified.
+
+Non-blocking future work includes bounded persistent child-process diagnostics, optional Windows default Program Files/repair/reinstall/upgrade QA for broader deployment, and production multi-monitor macOS capture. Current Mac builds are ad-hoc signed, not Developer-ID signed or notarized; Developer ID signing/notarization is optional for future public/general macOS distribution and is not required for this college-project release. TLS is required before any future untrusted-network deployment.
 
 ## License / Academic Context
 

@@ -142,5 +142,7 @@ Generated manifests record sorted input SHA-256 hashes, per-role classpaths,
 JDK metadata, jpackage version, runtime modules, and jdeps/build logs. Fixed
 Maven archive timestamps stabilize input JARs. Reproducibility here means a
 closed, deterministic staging layout and recipe; native image bytes can still
-vary with jpackage-generated metadata. Final installer/clean-machine acceptance
-belongs to C05/C06/C07. Existing C02/C03 follow-ups are unchanged.
+vary with jpackage-generated metadata. C05 Windows installers and C06 macOS DMGs
+are accepted within the deployment scope and physical QA limits documented in
+the linked platform guides. C07 documents those limits; bounded persistent child
+diagnostics remain a LOW future enhancement.

@@ -6,6 +6,12 @@ and bundled runtime. Recipients need no Java, Maven, JAVA_HOME, WiX, development
 scripts, or checkout. Operator still requires a separately provisioned, reachable
 MySQL database and account. The installer never provisions MySQL or accounts.
 
+Windows x64 single-display college lab PCs are the production examination
+deployment target. Client/Server communication uses HTTP on a trusted/private
+college LAN; untrusted-network exposure requires a TLS-secured deployment layer
+before use. Only Server accesses external MySQL. Fresh databases have no default
+ExaSecure application users. See [application configuration](../exasecure-launcher/CONFIGURATION.md).
+
 ## Build
 
 Use Windows x64, Oracle JDK **25.0.1**, and WiX **3.14.1.8722** (release 3.14.1).
@@ -101,9 +107,16 @@ shortcut/registration. There are no custom data-removal actions: configuration
 and logs created outside the installed payload are intentionally retained under
 LOCALAPPDATA. The external database and its data remain untouched. Back up and
 remove retained settings separately only on an explicit operator decision.
-Reinstallation can reuse these settings. Same-version behavior, running-file
-handling, and installed-path operation must be recorded from physical testing;
-successful package generation alone is not evidence of those behaviors.
+Reinstallation can reuse these settings. C05 physically validated installation,
+uninstallation and application behavior in disposable custom installation
+directories, including packaged Operator → Server/Admin process ownership.
+Default Program Files installation, repair, reinstall and future upgrade
+behavior are not fully physically certified; they remain optional final/manual
+QA if broader deployment requires them. Successful package generation alone is
+not evidence of those behaviors.
+
+Historical WiX/jpackage ICE61 and ICE69 installer-validation warnings were
+observed and were non-blocking. They do not establish repair/upgrade certification.
 
 ## Required evidence
 
@@ -122,6 +135,7 @@ The existing `NativePipeSmoke` and `NativeOwnershipSmoke` can probe actual
 installed paths, but do not replace physical Control Center button/UI checks.
 Keep credentials out of reports and never package the smoke harnesses.
 
-These unsigned local artifacts require independent acceptance before release.
-Code signing, macOS installers, and broader deployment hardening are outside
-this Windows implementation slice.
+These unsigned local artifacts have C05 acceptance within the limits above;
+publication remains a separate decision. Code signing and broader deployment
+QA remain outside C05. Accepted Apple Silicon deliverables are documented in
+[macOS DMGs](macos-dmgs.md).
