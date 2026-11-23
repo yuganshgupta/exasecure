@@ -1,6 +1,7 @@
 package com.examsystem.server;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.examsystem.server.adapters.jdbc.JdbcExamAttemptRepository;
 import com.examsystem.server.config.AppConfig;
 import org.mindrot.jbcrypt.BCrypt;
 import org.junit.jupiter.api.AfterAll;
@@ -17,10 +18,22 @@ import java.nio.charset.StandardCharsets;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @EnabledIfEnvironmentVariable(named = "EXASECURE_MYSQL_TEST_URL", matches = ".+")
 class ServerIntegrationTest {
@@ -645,6 +658,212 @@ class ServerIntegrationTest {
         assertThat(submit.statusCode()).isEqualTo(200);
         assertThat(new ObjectMapper().readTree(submit.body()).asInt()).isEqualTo(1);
         assertAttemptSubmittedWithScore(203, 1);
+    }
+
+    @Test
+    void attemptStart_twoFirstRequestsShareOneAttempt() throws Exception {
+        int examId = createAttemptStartExam();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        var firstLookupFinished = new CountDownLatch(1);
+        var secondReachedBoundary = new CountDownLatch(1);
+        var firstRepository = new JdbcExamAttemptRepository(JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (after && isLatestAttemptLookup(sql)) {
+                firstLookupFinished.countDown();
+                assertThat(secondReachedBoundary.await(10, SECONDS)).as("second start reached the database").isTrue();
+            }
+        }));
+        var secondRepository = new JdbcExamAttemptRepository(JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            // Let the first transaction proceed when the second is about to lock the user row.
+            // Without that lock, wait until both transactions have actually observed an empty lookup.
+            if ((!after && sql.startsWith("SELECT id FROM users WHERE id = ? FOR UPDATE"))
+                    || (after && isLatestAttemptLookup(sql))) {
+                secondReachedBoundary.countDown();
+            }
+        }));
+
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var first = workers.submit(() -> firstRepository.startOrResumeAttempt(101, examId, now, Duration.ofHours(1)));
+            assertThat(firstLookupFinished.await(10, SECONDS)).as("first start completed its empty lookup").isTrue();
+            var second = workers.submit(() -> secondRepository.startOrResumeAttempt(101, examId, now, Duration.ofHours(1)));
+
+            int firstId = first.get(10, SECONDS).id();
+            int secondId = second.get(10, SECONDS).id();
+            assertAttemptStartCount(examId, 101, 1);
+            assertThat(secondId).isEqualTo(firstId);
+        }
+    }
+
+    @Test
+    void attemptStart_concurrentHttpRequestsAndResumeReturnTheSameId() throws Exception {
+        int examId = createAttemptStartExam();
+        int requestCount = 6;
+        var start = new CyclicBarrier(requestCount);
+        try (var client = HttpClient.newHttpClient(); var workers = Executors.newFixedThreadPool(requestCount)) {
+            List<Future<Integer>> results = new ArrayList<>();
+            for (int i = 0; i < requestCount; i++) {
+                results.add(workers.submit(() -> {
+                    start.await(10, SECONDS);
+                    return startAttemptOverHttp(client, examId, "token-stu1");
+                }));
+            }
+            int attemptId = results.getFirst().get(10, SECONDS);
+            for (var result : results) {
+                assertThat(result.get(10, SECONDS)).isEqualTo(attemptId);
+            }
+            assertThat(startAttemptOverHttp(client, examId, "token-stu1")).isEqualTo(attemptId);
+            assertAttemptStartCount(examId, 101, 1);
+        }
+    }
+
+    @Test
+    void attemptStart_differentStudentsCanStartTheSameExamIndependently() throws Exception {
+        int examId = createAttemptStartExam();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        var firstLookupFinished = new CountDownLatch(1);
+        var releaseFirst = new CountDownLatch(1);
+        var pausedRepository = new JdbcExamAttemptRepository(JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (after && isLatestAttemptLookup(sql)) {
+                firstLookupFinished.countDown();
+                assertThat(releaseFirst.await(15, SECONDS)).as("release the first start").isTrue();
+            }
+        }));
+        var repository = new JdbcExamAttemptRepository(server.getDataSource());
+
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var first = workers.submit(() -> pausedRepository.startOrResumeAttempt(101, examId, now, Duration.ofHours(1)));
+            int secondId;
+            try {
+                assertThat(firstLookupFinished.await(10, SECONDS)).isTrue();
+                var second = workers.submit(() -> repository.startOrResumeAttempt(102, examId, now, Duration.ofHours(1)));
+                secondId = second.get(10, SECONDS).id();
+            } finally {
+                releaseFirst.countDown();
+            }
+            assertThat(first.get(10, SECONDS).id()).isNotEqualTo(secondId);
+            assertAttemptStartCount(examId, 101, 1);
+            assertAttemptStartCount(examId, 102, 1);
+        }
+    }
+
+    @Test
+    void attemptStart_preservesSubmittedAndExpiredAttempts() throws Exception {
+        int examId = createAttemptStartExam();
+        var repository = new JdbcExamAttemptRepository(server.getDataSource());
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        Duration limit = Duration.ofHours(1);
+        int submittedId = repository.startOrResumeAttempt(101, examId, now, limit).id();
+        repository.calculateAndSetScore(submittedId, 0, 1, now);
+        int expiredId = repository.startOrResumeAttempt(102, examId, now.minus(Duration.ofHours(2)), limit).id();
+
+        try (var client = HttpClient.newHttpClient()) {
+            String path = "/api/v1/student/exams/" + examId + "/attempts";
+            assertThat(sendJson(client, "POST", path, "token-stu1", null).statusCode()).isEqualTo(409);
+            assertThat(sendJson(client, "POST", path, "token-stu2", null).statusCode()).isEqualTo(409);
+            var expired = repository.findById(expiredId).orElseThrow();
+            assertThat(expired.finalized()).isTrue();
+            assertThat(expired.endTime()).isNotNull();
+            assertThat(sendJson(client, "POST", path, "token-stu2", null).statusCode()).isEqualTo(409);
+            assertThat(repository.findById(expiredId)).contains(expired);
+        }
+        assertAttemptSubmittedWithScore(submittedId, 1);
+        assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE status = 'EXPIRED' AND id = " + expiredId, 1);
+        assertAttemptStartCount(examId, 101, 1);
+        assertAttemptStartCount(examId, 102, 1);
+    }
+
+    @Test
+    void attemptStart_resumesLatestAttemptAndKeepsEarlierHistory() throws Exception {
+        int examId = createAttemptStartExam();
+        var repository = new JdbcExamAttemptRepository(server.getDataSource());
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        Duration limit = Duration.ofHours(1);
+        int earlierId = repository.startOrResumeAttempt(101, examId, now.minusSeconds(60), limit).id();
+        repository.calculateAndSetScore(earlierId, 0, 1, now.minusSeconds(30));
+        // A pre-existing history with more than one record for this exam is still valid input.
+        try (var connection = server.getDataSource().getConnection();
+             var insert = connection.prepareStatement(
+                     "INSERT INTO exam_attempts (exam_id, student_id, start_time, status) VALUES (?, 101, ?, 'ACTIVE')",
+                     Statement.RETURN_GENERATED_KEYS)) {
+            insert.setInt(1, examId);
+            insert.setTimestamp(2, java.sql.Timestamp.from(now));
+            insert.executeUpdate();
+            try (var keys = insert.getGeneratedKeys()) {
+                assertThat(keys.next()).isTrue();
+                var resumed = repository.startOrResumeAttempt(101, examId, now.plusSeconds(1), limit);
+                assertThat(resumed.id()).isEqualTo(keys.getInt(1));
+                assertThat(resumed.startTime()).isEqualTo(now);
+            }
+        }
+        assertAttemptSubmittedWithScore(earlierId, 1);
+        assertAttemptStartCount(examId, 101, 2);
+    }
+
+    @Test
+    void attemptStart_adminDeletionPermitsAnApprovedRestart() throws Exception {
+        int examId = createAttemptStartExam();
+        try (var client = HttpClient.newHttpClient()) {
+            int original = startAttemptOverHttp(client, examId, "token-stu1");
+            String path = "/api/v1/student/attempts/" + original + "/submit";
+            assertThat(sendJson(client, "POST", path, "token-stu1", null).statusCode()).isEqualTo(200);
+            var deleted = sendJson(client, "DELETE", "/api/v1/admin/attempts/" + original, "token-admin1", null);
+            assertThat(deleted.statusCode()).isEqualTo(204);
+            assertAttemptStartCount(examId, 101, 0);
+            int replacement = startAttemptOverHttp(client, examId, "token-stu1");
+            assertThat(replacement).isNotEqualTo(original);
+            assertThat(startAttemptOverHttp(client, examId, "token-stu1")).isEqualTo(replacement);
+            assertAttemptStartCount(examId, 101, 1);
+        }
+    }
+
+    @Test
+    void attemptStart_commitFailureRollsBackInsertAndReleasesTheLock() throws Exception {
+        int examId = createAttemptStartExam();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        var failedRepository = new JdbcExamAttemptRepository(JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (!after && sql.equals("COMMIT")) throw new SQLException("injected start commit failure");
+        }));
+
+        assertThatThrownBy(() -> failedRepository.startOrResumeAttempt(101, examId, now, Duration.ofHours(1)))
+                .hasRootCauseMessage("injected start commit failure");
+        assertAttemptStartCount(examId, 101, 0);
+        try (var client = HttpClient.newHttpClient()) {
+            assertThat(startAttemptOverHttp(client, examId, "token-stu1")).isPositive();
+        }
+        assertAttemptStartCount(examId, 101, 1);
+    }
+
+    private static boolean isLatestAttemptLookup(String sql) {
+        return sql.contains("FROM exam_attempts WHERE student_id = ? AND exam_id = ?");
+    }
+
+    private static int createAttemptStartExam() throws SQLException {
+        try (var connection = server.getDataSource().getConnection();
+             var insert = connection.prepareStatement(
+                     "INSERT INTO exams (title, duration_minutes, created_by) VALUES ('Attempt start fixture', 60, 103)",
+                     Statement.RETURN_GENERATED_KEYS)) {
+            insert.executeUpdate();
+            try (var keys = insert.getGeneratedKeys()) {
+                assertThat(keys.next()).isTrue();
+                return keys.getInt(1);
+            }
+        }
+    }
+
+    private static int startAttemptOverHttp(HttpClient client, int examId, String token) throws Exception {
+        var request = HttpRequest.newBuilder(URI.create("http://localhost:" + PORT + "/api/v1/student/exams/" + examId + "/attempts"))
+                .timeout(Duration.ofSeconds(8))
+                .header("Authorization", "Bearer " + token)
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+        var attempt = new ObjectMapper().readTree(response.body());
+        assertThat(attempt.required("status").asText()).isEqualTo("ACTIVE");
+        return attempt.required("id").asInt();
+    }
+
+    private static void assertAttemptStartCount(int examId, int studentId, int expected) throws Exception {
+        assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE exam_id = " + examId + " AND student_id = " + studentId, expected);
     }
 
     @Test

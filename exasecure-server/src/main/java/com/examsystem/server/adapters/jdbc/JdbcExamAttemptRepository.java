@@ -105,6 +105,15 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
+                // The user row exists even on a first start. Lock it before the first
+                // consistent read so a waiting transaction sees the preceding start's commit.
+                try (PreparedStatement studentLock = conn.prepareStatement("SELECT id FROM users WHERE id = ? FOR UPDATE")) {
+                    studentLock.setInt(1, studentId);
+                    try (ResultSet studentRow = studentLock.executeQuery()) {
+                        if (!studentRow.next()) throw new SQLException("Student no longer exists");
+                    }
+                }
+
                 // Find active or existing attempt
                 try (PreparedStatement ps = conn.prepareStatement(
                         "SELECT id, start_time, end_time, score, status FROM exam_attempts WHERE student_id = ? AND exam_id = ? ORDER BY id DESC LIMIT 1")) {
