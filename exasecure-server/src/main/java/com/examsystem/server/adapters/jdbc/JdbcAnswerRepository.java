@@ -6,10 +6,14 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class JdbcAnswerRepository implements AnswerRepository {
     private final DataSource dataSource;
@@ -101,10 +105,17 @@ public class JdbcAnswerRepository implements AnswerRepository {
     }
 
     @Override
-    public java.util.Map<Integer, List<Integer>> getSelectedOptionsForAttempt(int attemptId) {
-        java.util.Map<Integer, List<Integer>> answers = new java.util.HashMap<>();
-        try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
+    public Map<Integer, List<Integer>> getSelectedOptionsForAttempt(int attemptId) {
+        try (Connection conn = dataSource.getConnection()) {
+            return readSelectedOptions(conn, attemptId);
+        } catch (Exception e) {
+            throw new RuntimeException("DB error", e);
+        }
+    }
+
+    static Map<Integer, List<Integer>> readSelectedOptions(Connection conn, int attemptId) throws SQLException {
+        Map<Integer, List<Integer>> answers = new HashMap<>();
+        try (PreparedStatement ps = conn.prepareStatement(
                      "SELECT sa.question_id, sao.selected_option FROM student_answers sa " +
                      "LEFT JOIN student_answer_options sao ON sa.id = sao.answer_id " +
                      "WHERE sa.attempt_id = ?")) {
@@ -113,14 +124,12 @@ public class JdbcAnswerRepository implements AnswerRepository {
                 while (rs.next()) {
                     int questionId = rs.getInt("question_id");
                     int option = rs.getInt("selected_option");
-                    answers.computeIfAbsent(questionId, k -> new java.util.ArrayList<>());
+                    List<Integer> selections = answers.computeIfAbsent(questionId, k -> new ArrayList<>());
                     if (!rs.wasNull()) {
-                        answers.get(questionId).add(option);
+                        selections.add(option);
                     }
                 }
             }
-        } catch (Exception e) {
-            throw new RuntimeException("DB error", e);
         }
         return answers;
     }

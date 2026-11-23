@@ -6,6 +6,16 @@ The automated destructive fixtures accept only `exasecure_test` on localhost:330
 
 The migrator holds a MySQL named lock for the database across inspection, DDL,
 data updates, and version markers. A competing migrator waits at this lock.
+
+V7 commits the legacy answer backfill and its version marker in the same
+transaction. The server retries an interrupted V7 backfill on a pre-V7 database.
+On V7 or later it requires the exact V7 marker before serving requests. If the
+marker is missing, verify the backfill against a backup on a disposable copy.
+The server reads `student_answer_options` for current selections and retains the
+legacy CSV for historical recovery. Empty normalized selections can be an
+intentional clear, so recovery from a manual import needs evidence beyond the
+retained CSV before anyone restores selections or records a migration marker.
+
 For version 9 only, the V10 compatibility executor validates existing columns and
 the exact unique index definitions, adds missing columns, and transactionally
 labels legacy evidence `L` followed by the uppercase base36 immutable evidence ID.

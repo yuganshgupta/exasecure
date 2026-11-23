@@ -1,6 +1,10 @@
 package com.examsystem.server;
 
 import com.examsystem.server.adapters.jdbc.JdbcAnswerRepository;
+import com.examsystem.server.adapters.jdbc.JdbcAdminQueryPort;
+import com.examsystem.server.adapters.jdbc.JdbcExamAttemptRepository;
+import com.examsystem.server.adapters.jdbc.JdbcQuestionRepository;
+import com.examsystem.application.usecases.SubmitExamUseCase;
 import com.examsystem.server.db.DatabaseMigrator;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -16,7 +20,9 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HexFormat;
 import java.util.List;
@@ -128,6 +134,136 @@ class MySqlMigrationIntegrationTest {
                     "SELECT COUNT(*) FROM student_answer_options sao JOIN student_answers sa ON sa.id = sao.answer_id WHERE sa.question_id = 2 AND sao.selected_option = 1",
                     1);
         }
+    }
+
+    @Test
+    void adminReviewMatchesStudentAndGradingAfterReplacingAndClearingMigratedAnswer() throws Exception {
+        seedV3AnswerFixture();
+        dataSource = dataSource();
+        var migrator = new DatabaseMigrator(dataSource);
+        migrator.migrate();
+        var studentAnswers = new JdbcAnswerRepository(dataSource);
+        var admin = new JdbcAdminQueryPort(dataSource);
+        var attempts = new JdbcExamAttemptRepository(dataSource);
+        Instant now = attempts.findById(1).orElseThrow().startTime().plusSeconds(1800);
+        var submit = new SubmitExamUseCase(studentAnswers, attempts, new JdbcQuestionRepository(dataSource), () -> now);
+        Duration timeLimit = Duration.ofHours(1);
+
+        assertAnswerReview(studentAnswers, admin, 1, List.of(1, 2), List.of("A", "B"), 1);
+        assertThat(studentAnswers.getSelectedOptionsForAttempt(1)).doesNotContainKey(2);
+        assertAdminAnswer(admin, 2, List.of(), List.of(), 0);
+
+        submit.saveAnswer(1, 1, List.of(2), timeLimit);
+        assertAnswerReview(studentAnswers, admin, 1, List.of(2), List.of("B"), 0);
+
+        submit.saveAnswer(1, 1, List.of(), timeLimit);
+        assertAnswerReview(studentAnswers, admin, 1, List.of(), List.of(), 0);
+        assertThat(studentAnswers.getSelectedOptionsForAttempt(1)).doesNotContainKey(2);
+        assertAdminAnswer(admin, 2, List.of(), List.of(), 0);
+
+        // Keep a correct answer as a positive control for the stored score.
+        submit.saveAnswer(1, 2, List.of(1), timeLimit);
+        assertThat(submit.submitExam(1, now)).isEqualTo(1);
+        migrator.migrate();
+        assertAnswerReview(studentAnswers, admin, 1, List.of(), List.of(), 0);
+        assertAnswerReview(studentAnswers, admin, 2, List.of(1), List.of("Yes"), 1);
+        assertThat(admin.getAttemptDetails(1).stream().mapToInt(result -> result.marksAwarded()).sum()).isEqualTo(1);
+        try (var conn = connection()) {
+            assertSingleInt(conn, "SELECT COUNT(*) FROM exam_attempts WHERE id = 1 AND status = 'SUBMITTED' AND score = 1", 1);
+            assertOriginalLegacyAnswer(conn);
+        }
+    }
+
+    @Test
+    void historicalSubmittedAnswerRemainsReviewableAfterV7Backfill() throws Exception {
+        seedV3AnswerFixture();
+        try (var conn = connection(); var stmt = conn.createStatement()) {
+            stmt.execute("UPDATE exam_attempts SET end_time = '2026-09-02 10:15:00', score = 1 WHERE id = 1");
+        }
+        dataSource = dataSource();
+        new DatabaseMigrator(dataSource).migrate();
+
+        var studentAnswers = new JdbcAnswerRepository(dataSource);
+        var admin = new JdbcAdminQueryPort(dataSource);
+        assertAnswerReview(studentAnswers, admin, 1, List.of(1, 2), List.of("A", "B"), 1);
+        assertThat(studentAnswers.getSelectedOptionsForAttempt(1)).doesNotContainKey(2);
+        assertAdminAnswer(admin, 2, List.of(), List.of(), 0);
+        try (var conn = connection()) {
+            assertSingleInt(conn, "SELECT COUNT(*) FROM exam_attempts WHERE id = 1 AND status = 'SUBMITTED' "
+                    + "AND score = 1 AND end_time = '2026-09-02 10:15:00'", 1);
+            assertOriginalLegacyAnswer(conn);
+        }
+    }
+
+    @Test
+    void interruptedV7BackfillRollsBackSelectionsAndMarkerThenRetries() throws Exception {
+        seedV3AnswerFixture();
+        dataSource = dataSource();
+        var interrupted = JdbcTestProbe.wrap(dataSource, (sql, after) -> {
+            if (after && sql.startsWith("INSERT INTO schema_versions (version, applied_at) VALUES (7,")) {
+                throw new SQLException("interrupted V7 backfill before commit");
+            }
+        });
+        assertThatThrownBy(() -> new DatabaseMigrator(interrupted).migrate())
+                .hasRootCauseMessage("interrupted V7 backfill before commit");
+        try (var conn = connection()) {
+            assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 6);
+            assertSingleInt(conn, "SELECT COUNT(*) FROM student_answer_options WHERE answer_id = 1", 0);
+            assertOriginalLegacyAnswer(conn);
+        }
+
+        new DatabaseMigrator(dataSource).migrate();
+        try (var conn = connection()) {
+            assertSingleInt(conn, "SELECT COUNT(*) FROM schema_versions WHERE version = 7", 1);
+            assertOriginalLegacyAnswer(conn);
+        }
+        assertAnswerReview(new JdbcAnswerRepository(dataSource), new JdbcAdminQueryPort(dataSource),
+                1, List.of(1, 2), List.of("A", "B"), 1);
+    }
+
+    @Test
+    void laterSchemaWithoutV7BackfillMarkerRequiresRecoveryBeforeFurtherMigration() throws Exception {
+        historicalV9();
+        try (var conn = connection(); var stmt = conn.createStatement()) {
+            stmt.execute("DELETE FROM schema_versions WHERE version = 7");
+        }
+        dataSource = dataSource();
+
+        assertThatThrownBy(() -> new DatabaseMigrator(dataSource).migrate())
+                .hasRootCauseMessage("V7 answer backfill marker is missing; verify normalized selections against a backup before startup");
+        try (var conn = connection()) {
+            assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 9);
+            assertSingleInt(conn, "SELECT COUNT(*) FROM student_answer_options WHERE answer_id = 1", 0);
+            assertOriginalLegacyAnswer(conn);
+        }
+    }
+
+    private void seedV3AnswerFixture() throws Exception {
+        try (var conn = connection()) {
+            executeScript(conn, new String(readResource("db/migration/schema-v3.sql"), StandardCharsets.UTF_8));
+            seedV3Data(conn);
+        }
+    }
+
+    private void assertAnswerReview(JdbcAnswerRepository studentAnswers, JdbcAdminQueryPort admin, int questionId,
+                                    List<Integer> options, List<String> texts, int marks) {
+        assertThat(studentAnswers.getSelectedOptionsForAttempt(1).get(questionId))
+                .containsExactlyInAnyOrderElementsOf(options);
+        assertAdminAnswer(admin, questionId, options, texts, marks);
+    }
+
+    private void assertAdminAnswer(JdbcAdminQueryPort admin, int questionId,
+                                   List<Integer> options, List<String> texts, int marks) {
+        var result = admin.getAttemptDetails(1).stream().filter(row -> row.questionId() == questionId).findFirst().orElseThrow();
+        assertThat(result.selectedOptionNumbers()).as("Admin selections for question %s", questionId)
+                .containsExactlyInAnyOrderElementsOf(options);
+        assertThat(result.selectedOptionTexts()).containsExactlyInAnyOrderElementsOf(texts);
+        assertThat(result.isCorrect()).isEqualTo(marks > 0);
+        assertThat(result.marksAwarded()).isEqualTo(marks);
+    }
+
+    private void assertOriginalLegacyAnswer(Connection conn) throws Exception {
+        assertSingleInt(conn, "SELECT COUNT(*) FROM student_answers WHERE id = 1 AND selected_options = '1, 2' AND is_correct = 1", 1);
     }
 
     @Test void populatedV9WithOneTwoAndFourEvidenceRows() throws Exception { resumeHistorical(0, false); }

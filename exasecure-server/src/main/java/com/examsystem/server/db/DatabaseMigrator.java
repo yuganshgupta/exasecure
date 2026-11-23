@@ -90,6 +90,15 @@ public class DatabaseMigrator {
                 migrateLegacyAnswerSelections(conn);
                 log.info("Successfully migrated to v7");
                 currentVersion = 7;
+            } else {
+                // V7 commits this marker with the backfill. A later version alone cannot vouch for it.
+                try (Statement stmt = conn.createStatement();
+                     ResultSet marker = stmt.executeQuery("SELECT 1 FROM schema_versions WHERE version = 7")) {
+                    if (!marker.next()) {
+                        throw new IllegalStateException(
+                                "V7 answer backfill marker is missing; verify normalized selections against a backup before startup");
+                    }
+                }
             }
             if (currentVersion < 8) {
                 log.info("Migrating schema to v8...");

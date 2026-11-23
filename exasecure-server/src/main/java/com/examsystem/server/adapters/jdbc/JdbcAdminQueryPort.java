@@ -123,36 +123,7 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
             }
             if (examId == -1) return details;
 
-            // Load student answers map: question_id -> list of selected option numbers
-            Map<Integer, List<Integer>> selectedMap = new HashMap<>();
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "SELECT a.question_id, o.selected_option, a.selected_options "
-                            + "FROM student_answers a "
-                            + "LEFT JOIN student_answer_options o ON a.id = o.answer_id "
-                            + "WHERE a.attempt_id = ?")) {
-                ps.setInt(1, attemptId);
-                try (ResultSet rs = ps.executeQuery()) {
-                    while (rs.next()) {
-                        int qId = rs.getInt("question_id");
-                        int opt = rs.getInt("selected_option");
-                        if (!rs.wasNull() && opt > 0) {
-                            selectedMap.computeIfAbsent(qId, k -> new ArrayList<>()).add(opt);
-                        } else {
-                            String csv = rs.getString("selected_options");
-                            if (csv != null && !csv.isBlank()) {
-                                for (String part : csv.split(",")) {
-                                    try {
-                                        int parsed = Integer.parseInt(part.trim());
-                                        if (parsed > 0) {
-                                            selectedMap.computeIfAbsent(qId, k -> new ArrayList<>()).add(parsed);
-                                        }
-                                    } catch (NumberFormatException ignored) {}
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            Map<Integer, List<Integer>> selectedMap = JdbcAnswerRepository.readSelectedOptions(conn, attemptId);
 
             // 2. Load questions AND their options in a single ordered JOIN query (eliminates N+1)
             record OptData(int num, String text, boolean correct) {}
