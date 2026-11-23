@@ -167,7 +167,8 @@ public class StudentExamController {
     public void submitExam(Context ctx) {
         int attemptId = Integer.parseInt(ctx.pathParam("attemptId"));
         enforceOwnership(ctx, attemptId);
-        int score = submitUseCase.submitExam(attemptId, java.time.Instant.now(clock));
+        boolean deadlineTriggered = "deadline".equals(ctx.queryParam("trigger"));
+        int score = submitUseCase.submitExam(attemptId, java.time.Instant.now(clock), deadlineTriggered);
         ctx.json(score);
     }
     

@@ -283,6 +283,132 @@ class ServerIntegrationTest {
 
     private record DeadlineAnswerFixture(int attemptId, int questionId) {}
 
+    @Test
+    void overdueResumeAndSubmitStoreTheSameCanonicalResult() throws Exception {
+        var client = HttpClient.newHttpClient();
+        for (boolean resumeFirst : List.of(true, false)) {
+            var fixture = createDeadlineAnswerFixture();
+            int examId = new JdbcExamAttemptRepository(server.getDataSource())
+                    .findById(fixture.attemptId()).orElseThrow().examId();
+            String resume = "/api/v1/student/exams/" + examId + "/attempts";
+            String submit = "/api/v1/student/attempts/" + fixture.attemptId() + "/submit";
+            if (resumeFirst) {
+                assertThat(sendJson(client, "POST", resume, "token-stu1", null).statusCode()).isEqualTo(409);
+            }
+            var result = sendJson(client, "POST", submit, "token-stu1", null);
+            assertThat(result.statusCode()).as(result.body()).isEqualTo(200);
+            assertThat(result.body()).isEqualTo("1");
+            if (!resumeFirst) {
+                assertThat(sendJson(client, "POST", resume, "token-stu1", null).statusCode()).isEqualTo(409);
+            }
+            var stored = new JdbcExamAttemptRepository(server.getDataSource()).findById(fixture.attemptId()).orElseThrow();
+            assertThat(stored.endTime()).isEqualTo(ANSWER_DEADLINE);
+            assertThat(stored.score()).isEqualTo(1);
+            assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE status = 'SUBMITTED' AND id = "
+                    + fixture.attemptId(), 1);
+        }
+    }
+
+    @Test
+    void deadlineTriggerRejectsAnEarlyRequestAndGradesExactlyAtTheCutoff() throws Exception {
+        int activeId = atomicFixture(0);
+        try (var client = HttpClient.newHttpClient()) {
+            String path = "/api/v1/student/attempts/" + activeId + "/submit";
+            var early = sendJson(client, "POST", path + "?trigger=deadline", "token-stu1", null);
+            assertThat(early.statusCode()).isEqualTo(409);
+            assertThat(new ObjectMapper().readTree(early.body()).required("errorCode").asText())
+                    .isEqualTo("ATTEMPT_DEADLINE_NOT_REACHED");
+            assertThat(sendJson(client, "POST", path, "token-stu1", null).body()).isEqualTo("1");
+        }
+        var fixture = createDeadlineAnswerFixture();
+        var clock = new AtomicReference<>(ANSWER_DEADLINE.minusNanos(1));
+        var source = server.getDataSource();
+        var attempts = new JdbcExamAttemptRepository(source, clock::get);
+        var submission = new SubmitExamUseCase(new JdbcAnswerRepository(source, clock::get), attempts,
+                new JdbcQuestionRepository(source), clock::get);
+        assertThatThrownBy(() -> submission.submitExam(fixture.attemptId(), clock.get(), true))
+                .isInstanceOf(com.examsystem.application.ports.DeadlineNotReachedException.class);
+        assertThat(attempts.findById(fixture.attemptId()).orElseThrow().finalized()).isFalse();
+        clock.set(ANSWER_DEADLINE);
+        assertThat(submission.submitExam(fixture.attemptId(), clock.get(), true)).isEqualTo(1);
+        clock.set(ANSWER_DEADLINE.plusSeconds(20));
+        assertThat(submission.submitExam(fixture.attemptId(), clock.get())).isEqualTo(1);
+        assertThat(attempts.findById(fixture.attemptId()).orElseThrow().endTime()).isEqualTo(ANSWER_DEADLINE);
+    }
+
+    @Test
+    void overdueResumeGradesAnAcceptedAnswerThatCommitsWhileResumeWaits() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        var clock = new AtomicReference<>(ANSWER_DEADLINE.minusNanos(1));
+        var atCommit = new CountDownLatch(1);
+        var resumeRequestedLock = new CountDownLatch(1);
+        var releaseCommit = new CountDownLatch(1);
+        var writer = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (sql.equals("COMMIT")) {
+                clock.set(ANSWER_DEADLINE);
+                atCommit.countDown();
+                assertThat(releaseCommit.await(5, SECONDS)).isTrue();
+            }
+        });
+        var resume = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (!after && sql.contains("exam_attempts WHERE id = ? FOR UPDATE")) resumeRequestedLock.countDown();
+        });
+        var attempts = new JdbcExamAttemptRepository(resume, clock::get);
+        int examId = attempts.findById(fixture.attemptId()).orElseThrow().examId();
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var save = workers.submit(() -> new JdbcAnswerRepository(writer, clock::get)
+                    .saveAnswer(fixture.attemptId(), fixture.questionId(), List.of(2), ANSWER_DEADLINE.minusSeconds(1)));
+            Future<?> resumed;
+            try {
+                assertThat(atCommit.await(5, SECONDS)).isTrue();
+                resumed = workers.submit(() -> attempts.startOrResumeAttempt(101, examId, clock.get(), Duration.ofHours(1)));
+                assertThat(resumeRequestedLock.await(5, SECONDS)).isTrue();
+            } finally {
+                releaseCommit.countDown();
+            }
+            save.get(5, SECONDS);
+            assertThatThrownBy(() -> resumed.get(5, SECONDS)).hasRootCauseMessage("Exam attempt expired and has been finalized");
+        }
+        var stored = attempts.findById(fixture.attemptId()).orElseThrow();
+        assertThat(stored.score()).isZero();
+        assertThat(stored.endTime()).isEqualTo(ANSWER_DEADLINE);
+    }
+
+    @Test
+    void concurrentOverdueResumeSubmitAndThirdStrikePreserveOneResult() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        var source = server.getDataSource();
+        var attempts = new JdbcExamAttemptRepository(source, () -> ANSWER_DEADLINE);
+        int examId = attempts.findById(fixture.attemptId()).orElseThrow().examId();
+        try (var conn = source.getConnection(); var stmt = conn.createStatement()) {
+            stmt.executeUpdate("UPDATE exam_attempts SET focus_lost_count = 2 WHERE id = " + fixture.attemptId());
+        }
+        var barrier = new CyclicBarrier(3);
+        try (var workers = Executors.newFixedThreadPool(3)) {
+            var resume = workers.submit(() -> {
+                barrier.await(5, SECONDS);
+                return attempts.startOrResumeAttempt(101, examId, ANSWER_DEADLINE, Duration.ofHours(1));
+            });
+            var submit = workers.submit(() -> {
+                barrier.await(5, SECONDS);
+                return ordinarySubmit(source, fixture.attemptId());
+            });
+            var incident = workers.submit(() -> {
+                barrier.await(5, SECONDS);
+                return recordIncident(source, fixture.attemptId(), UUID.randomUUID().toString());
+            });
+            assertThatThrownBy(() -> resume.get(5, SECONDS)).hasCauseInstanceOf(IllegalStateException.class);
+            assertThat(submit.get(5, SECONDS)).isEqualTo(1);
+            assertThatThrownBy(() -> incident.get(5, SECONDS)).hasCauseInstanceOf(IllegalStateException.class);
+        }
+        var stored = attempts.findById(fixture.attemptId()).orElseThrow();
+        assertThat(stored.focusLostCount()).isEqualTo(2);
+        assertThat(stored.flagged()).isFalse();
+        assertThat(stored.endTime()).isEqualTo(ANSWER_DEADLINE);
+        assertThat(stored.score()).isEqualTo(1);
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id = " + fixture.attemptId(), 0);
+    }
+
     @Test void atomicSameKeyContentionStartingAtZero() throws Exception { atomicContention(0); }
     @Test void atomicSameKeyContentionStartingAtOne() throws Exception { atomicContention(1); }
     @Test void atomicSameKeyContentionStartingAtTwo() throws Exception { atomicContention(2); }
@@ -1001,11 +1127,16 @@ class ServerIntegrationTest {
         int submittedId = repository.startOrResumeAttempt(101, examId, now, limit).id();
         repository.calculateAndSetScore(submittedId, 0, 1, now);
         int expiredId = repository.startOrResumeAttempt(102, examId, now.minus(Duration.ofHours(2)), limit).id();
+        try (var conn = server.getDataSource().getConnection(); var stmt = conn.createStatement()) {
+            stmt.executeUpdate("UPDATE exam_attempts SET status = 'EXPIRED', score = 0, end_time = start_time WHERE id = " + expiredId);
+        }
 
         try (var client = HttpClient.newHttpClient()) {
             String path = "/api/v1/student/exams/" + examId + "/attempts";
             assertThat(sendJson(client, "POST", path, "token-stu1", null).statusCode()).isEqualTo(409);
             assertThat(sendJson(client, "POST", path, "token-stu2", null).statusCode()).isEqualTo(409);
+            assertThat(sendJson(client, "POST", "/api/v1/student/attempts/" + expiredId + "/submit",
+                    "token-stu2", null).statusCode()).isEqualTo(409);
             var expired = repository.findById(expiredId).orElseThrow();
             assertThat(expired.finalized()).isTrue();
             assertThat(expired.endTime()).isNotNull();
@@ -1191,23 +1322,24 @@ class ServerIntegrationTest {
     }
 
     @Test
-    void authoritativeTiming_expiredAttemptTransitionsToExpiredAndRejectsActions() throws Exception {
+    void authoritativeTiming_overdueResumeFinalizesAndRejectsAnswerEdits() throws Exception {
         HttpClient client = HttpClient.newHttpClient();
 
-        // 1. Calling start/resume on expired attempt 204 transitions it to EXPIRED and returns 409
+        // 1. Overdue resume finalizes the accepted answers and returns the terminal conflict.
         HttpResponse<String> startExpired = sendJson(
                 client, "POST", "/api/v1/student/exams/4/attempts", "token-stu1", null);
         assertThat(startExpired.statusCode()).isEqualTo(409);
         assertThat(startExpired.body()).contains("expired");
 
-        // 2. Database row updated to EXPIRED with end_time set
+        // 2. The stored result is an unanswered submission at the canonical deadline.
         try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
              PreparedStatement ps = conn.prepareStatement(
-                     "SELECT status, end_time FROM exam_attempts WHERE id = 204")) {
+                     "SELECT status, score, start_time, end_time FROM exam_attempts WHERE id = 204")) {
             try (ResultSet rs = ps.executeQuery()) {
                 assertThat(rs.next()).isTrue();
-                assertThat(rs.getString("status")).isEqualTo("EXPIRED");
-                assertThat(rs.getTimestamp("end_time")).isNotNull();
+                assertThat(rs.getString("status")).isEqualTo("SUBMITTED");
+                assertThat(rs.getInt("score")).isZero();
+                assertThat(rs.getTimestamp("end_time").toInstant()).isEqualTo(rs.getTimestamp("start_time").toInstant().plusSeconds(3600));
             }
         }
 

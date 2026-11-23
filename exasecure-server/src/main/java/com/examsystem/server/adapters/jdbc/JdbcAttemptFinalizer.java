@@ -1,12 +1,23 @@
 package com.examsystem.server.adapters.jdbc;
 
 import java.sql.*;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.function.ToIntFunction;
 
 /** Caller owns the connection, attempt row lock, transaction, and commit. */
 final class JdbcAttemptFinalizer {
+    static Instant deadline(Connection conn, int examId, Instant start) throws SQLException {
+        try (PreparedStatement exam = conn.prepareStatement("SELECT duration_minutes FROM exams WHERE id = ?")) {
+            exam.setInt(1, examId);
+            try (ResultSet row = exam.executeQuery()) {
+                if (!row.next()) throw new IllegalStateException("Attempt exam is missing");
+                return start.plus(Duration.ofMinutes(row.getInt(1)));
+            }
+        }
+    }
+
     static int finalizeLocked(Connection conn, int attemptId, Instant submittedAt,
                               ToIntFunction<Map<Integer, List<Integer>>> grader) throws SQLException {
         Map<Integer, List<Integer>> answers = new HashMap<>();

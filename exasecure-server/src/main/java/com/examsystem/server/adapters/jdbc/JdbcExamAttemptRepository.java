@@ -1,6 +1,9 @@
 package com.examsystem.server.adapters.jdbc;
 
+import com.examsystem.application.ports.ClockPort;
+import com.examsystem.application.ports.DeadlineNotReachedException;
 import com.examsystem.application.ports.ExamAttemptRepository;
+import com.examsystem.domain.grading.GradingPolicy;
 import com.examsystem.domain.models.ExamAttempt;
 
 import javax.sql.DataSource;
@@ -14,9 +17,15 @@ import java.util.Optional;
 
 public class JdbcExamAttemptRepository implements ExamAttemptRepository {
     private final DataSource dataSource;
+    private final ClockPort clock;
 
     public JdbcExamAttemptRepository(DataSource dataSource) {
+        this(dataSource, Instant::now);
+    }
+
+    public JdbcExamAttemptRepository(DataSource dataSource, ClockPort clock) {
         this.dataSource = dataSource;
+        this.clock = clock;
     }
 
     @Override
@@ -100,132 +109,127 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
         }
     }
 
+
     @Override
     public ExamAttempt startOrResumeAttempt(int studentId, int examId, Instant now, java.time.Duration timeLimit) {
         try (Connection conn = dataSource.getConnection()) {
+            // Read answers committed by a writer that held the lock during the latest-ID lookup.
+            conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             conn.setAutoCommit(false);
             try {
-                // The user row exists even on a first start. Lock it before the first
-                // consistent read so a waiting transaction sees the preceding start's commit.
+                // The existing user row also serializes requests when no attempt exists yet.
                 try (PreparedStatement studentLock = conn.prepareStatement("SELECT id FROM users WHERE id = ? FOR UPDATE")) {
                     studentLock.setInt(1, studentId);
                     try (ResultSet studentRow = studentLock.executeQuery()) {
                         if (!studentRow.next()) throw new SQLException("Student no longer exists");
                     }
                 }
-
-                // Find active or existing attempt
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "SELECT id, start_time, end_time, score, status FROM exam_attempts WHERE student_id = ? AND exam_id = ? ORDER BY id DESC LIMIT 1")) {
-                    ps.setInt(1, studentId);
-                    ps.setInt(2, examId);
-                    try (ResultSet rs = ps.executeQuery()) {
-                        if (rs.next()) {
-                            String status = rs.getString("status");
-                            boolean finalized = "SUBMITTED".equals(status) || "EXPIRED".equals(status);
-                            Timestamp endTs = rs.getTimestamp("end_time");
-                            Integer score = rs.getObject("score") != null ? rs.getInt("score") : null;
-                            ExamAttempt attempt = new ExamAttempt(
-                                    rs.getInt("id"), examId, studentId,
-                                    rs.getTimestamp("start_time").toInstant(),
-                                    endTs != null ? endTs.toInstant() : null,
-                                    score, finalized
-                            );
-                            if (!attempt.finalized() && !attempt.isExpired(now, timeLimit)) {
-                                conn.commit();
-                                return attempt;
-                            }
-                            if (attempt.finalized()) {
-                                conn.commit();
-                                throw new IllegalStateException("Exam attempt is already finalized");
-                            }
-                            if (attempt.isExpired(now, timeLimit)) {
-                                try (PreparedStatement psExpire = conn.prepareStatement(
-                                        "UPDATE exam_attempts SET status = 'EXPIRED', end_time = ? WHERE id = ? AND status = 'ACTIVE'")) {
-                                    psExpire.setTimestamp(1, Timestamp.from(now));
-                                    psExpire.setInt(2, attempt.id());
-                                    psExpire.executeUpdate();
-                                }
-                                conn.commit();
-                                throw new IllegalStateException("Exam attempt has expired");
-                            }
-                        }
+                Integer latestId = latestAttemptId(conn, studentId, examId);
+                if (latestId != null) {
+                    var attempt = lockAttempt(conn, latestId);
+                    if (attempt == null) throw new IllegalStateException("Exam attempt was removed. Retry to start again.");
+                    if (!"ACTIVE".equals(attempt.status())) {
+                        throw new IllegalStateException("Exam attempt is already finalized");
                     }
-                }
-
-                // If no attempt exists, create a new attempt
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "INSERT INTO exam_attempts (exam_id, student_id, start_time, status) VALUES (?, ?, ?, 'ACTIVE')",
-                        java.sql.Statement.RETURN_GENERATED_KEYS)) {
-                    ps.setInt(1, examId);
-                    ps.setInt(2, studentId);
-                    ps.setTimestamp(3, Timestamp.from(now));
-                    ps.executeUpdate();
-                    try (ResultSet rs = ps.getGeneratedKeys()) {
-                        if (rs.next()) {
-                            int id = rs.getInt(1);
+                    Instant deadline = JdbcAttemptFinalizer.deadline(conn, examId, attempt.start());
+                    if (clock.now().isBefore(deadline)) {
+                        conn.commit();
+                        return new ExamAttempt(latestId, examId, studentId, attempt.start(), null, null, false);
+                    }
+                    var questions = JdbcQuestionRepository.findByExamId(conn, examId);
+                    JdbcAttemptFinalizer.finalizeLocked(conn, latestId, deadline, answers -> GradingPolicy.score(questions, answers));
+                } else {
+                    try (PreparedStatement insert = conn.prepareStatement(
+                            "INSERT INTO exam_attempts (exam_id, student_id, start_time, status) VALUES (?, ?, ?, 'ACTIVE')",
+                            java.sql.Statement.RETURN_GENERATED_KEYS)) {
+                        insert.setInt(1, examId);
+                        insert.setInt(2, studentId);
+                        insert.setTimestamp(3, Timestamp.from(now));
+                        insert.executeUpdate();
+                        try (ResultSet keys = insert.getGeneratedKeys()) {
+                            if (!keys.next()) throw new SQLException("Attempt ID was not generated");
+                            int id = keys.getInt(1);
                             conn.commit();
                             return new ExamAttempt(id, examId, studentId, now, null, null, false);
                         }
                     }
                 }
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
-            } finally {
-                conn.setAutoCommit(true);
+                conn.commit();
+            } catch (Exception | Error failure) {
+                rollback(conn, failure);
+                throw failure;
             }
-        } catch (Exception e) {
-            if (e instanceof IllegalStateException ise) {
-                throw ise;
-            }
+        } catch (SQLException e) {
             throw new RuntimeException("DB error", e);
         }
-        throw new IllegalStateException("Could not create attempt");
+        throw new IllegalStateException("Exam attempt expired and has been finalized");
+    }
+
+    private static Integer latestAttemptId(Connection conn, int studentId, int examId) throws SQLException {
+        try (PreparedStatement query = conn.prepareStatement(
+                "SELECT id FROM exam_attempts WHERE student_id = ? AND exam_id = ? ORDER BY id DESC LIMIT 1")) {
+            query.setInt(1, studentId);
+            query.setInt(2, examId);
+            try (ResultSet row = query.executeQuery()) {
+                return row.next() ? row.getInt(1) : null;
+            }
+        }
     }
 
     @Override
     public int finalizeAndGradeAttempt(int attemptId, Instant submittedAt,
                                         java.util.function.ToIntFunction<java.util.Map<Integer, java.util.List<Integer>>> grader,
-                                        com.examsystem.application.ports.AnswerRepository answerRepository) {
+                                        com.examsystem.application.ports.AnswerRepository answerRepository,
+                                        boolean deadlineTriggered) {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                // Lock attempt row FOR UPDATE
-                try (PreparedStatement psLock = conn.prepareStatement(
-                        "SELECT status, score FROM exam_attempts WHERE id = ? FOR UPDATE")) {
-                    psLock.setInt(1, attemptId);
-                    try (ResultSet rs = psLock.executeQuery()) {
-                        if (!rs.next()) {
-                            throw new IllegalArgumentException("Attempt not found: " + attemptId);
-                        }
-                        String status = rs.getString("status");
-                        if ("SUBMITTED".equals(status)) {
-                            conn.commit();
-                            return rs.getObject("score") != null ? rs.getInt("score") : 0;
-                        }
-                        if (!"ACTIVE".equals(status)) {
-                            throw new IllegalStateException("Attempt is not ACTIVE (status: " + status + ")");
-                        }
-                    }
+                var attempt = lockAttempt(conn, attemptId);
+                if (attempt == null) throw new IllegalArgumentException("Attempt not found");
+                if ("SUBMITTED".equals(attempt.status()) && attempt.score() != null) {
+                    conn.commit();
+                    return attempt.score();
                 }
-
-                int score = JdbcAttemptFinalizer.finalizeLocked(conn, attemptId, submittedAt, grader);
-
+                if (!"ACTIVE".equals(attempt.status())) {
+                    throw new IllegalStateException("Attempt cannot be graded (status: " + attempt.status() + ")");
+                }
+                Instant deadline = JdbcAttemptFinalizer.deadline(conn, attempt.examId(), attempt.start());
+                Instant now = clock.now();
+                boolean beforeDeadline = now.isBefore(deadline);
+                if (beforeDeadline && deadlineTriggered) throw new DeadlineNotReachedException();
+                int score = JdbcAttemptFinalizer.finalizeLocked(conn, attemptId, beforeDeadline ? now : deadline, grader);
                 conn.commit();
                 return score;
-            } catch (Exception e) {
-                conn.rollback();
-                throw e;
-            } finally {
-                conn.setAutoCommit(true);
+            } catch (Exception | Error failure) {
+                rollback(conn, failure);
+                throw failure;
             }
-        } catch (IllegalArgumentException | IllegalStateException e) {
-            throw e;
-        } catch (Exception e) {
+        } catch (SQLException e) {
             throw new RuntimeException("DB error", e);
         }
     }
+
+    private static LockedAttempt lockAttempt(Connection conn, int attemptId) throws SQLException {
+        try (PreparedStatement query = conn.prepareStatement(
+                "SELECT exam_id, status, score, start_time FROM exam_attempts WHERE id = ? FOR UPDATE")) {
+            query.setInt(1, attemptId);
+            try (ResultSet row = query.executeQuery()) {
+                if (!row.next()) return null;
+                return new LockedAttempt(row.getInt("exam_id"), row.getString("status"),
+                        (Integer) row.getObject("score"), row.getTimestamp("start_time").toInstant());
+            }
+        }
+    }
+
+    private static void rollback(Connection conn, Throwable failure) {
+        try {
+            conn.rollback();
+        } catch (SQLException rollbackFailure) {
+            failure.addSuppressed(rollbackFailure);
+        }
+    }
+
+    private record LockedAttempt(int examId, String status, Integer score, Instant start) {}
 
     @Override
     public boolean deleteAttempt(int attemptId) {

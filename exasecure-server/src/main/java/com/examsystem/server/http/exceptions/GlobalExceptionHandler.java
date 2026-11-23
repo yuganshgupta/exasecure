@@ -11,6 +11,10 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     public static void register(io.javalin.config.JavalinConfig config) {
+        config.routes.exception(com.examsystem.application.ports.DeadlineNotReachedException.class, (e, ctx) -> {
+            ctx.status(409).json(new ErrorResponseDto(409, e.getMessage(), UUID.randomUUID().toString(),
+                    "ATTEMPT_DEADLINE_NOT_REACHED"));
+        });
         config.routes.exception(CodedBadRequestException.class, (e, ctx) -> {
             ctx.status(400).json(new ErrorResponseDto(400, e.getMessage(), UUID.randomUUID().toString(), e.getErrorCode()));
         });

@@ -74,32 +74,14 @@ public class SubmitExamUseCase {
     }
 
     public int submitExam(int attemptId, Instant submittedAt) {
+        return submitExam(attemptId, submittedAt, false);
+    }
+
+    public int submitExam(int attemptId, Instant submittedAt, boolean deadlineTriggered) {
         var attempt = attemptRepository.findById(attemptId)
             .orElseThrow(() -> new IllegalArgumentException("Attempt not found"));
-
-        if (attempt.finalized() && attempt.score() != null) {
-            return attempt.score();
-        }
-            
         List<Question> questions = questionRepository.findByExamId(attempt.examId());
-        
-        try {
-            return attemptRepository.finalizeAndGradeAttempt(attemptId, submittedAt, answers -> {
-                int correct = 0;
-                for (Question q : questions) {
-                    List<Integer> selected = answers.getOrDefault(q.id(), java.util.Collections.emptyList());
-                    if (GradingPolicy.isAnswerCorrect(q, selected)) {
-                        correct++;
-                    }
-                }
-                return correct;
-            }, answerRepository);
-        } catch (IllegalStateException e) {
-            var fresh = attemptRepository.findById(attemptId);
-            if (fresh.isPresent() && fresh.get().finalized() && fresh.get().score() != null) {
-                return fresh.get().score();
-            }
-            throw e;
-        }
+        return attemptRepository.finalizeAndGradeAttempt(attemptId, submittedAt,
+                answers -> GradingPolicy.score(questions, answers), answerRepository, deadlineTriggered);
     }
 }

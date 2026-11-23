@@ -803,30 +803,46 @@ public class ExamTakingView {
     }
 
     private void handleAutoSubmitOnExpiry() {
-        cleanupListeners();
-        UiFeedback.showError("Exam Time Expired", "The authoritative examination duration has expired. Submitting answers now...");
-        startSubmissionProcess();
+        if (!isSubmitted) performSubmission(true);
     }
 
     private void performSubmission() {
+        performSubmission(false);
+    }
+
+    private void performSubmission(boolean deadlineTriggered) {
         isSubmitted = true;
         isSubmissionPending = false;
-        cleanupListeners();
         setControlsDisabled(true);
-        if (stage != null) stage.setFullScreen(false);
+        if (!deadlineTriggered) {
+            cleanupListeners();
+            if (stage != null) stage.setFullScreen(false);
+        }
         submitBtn.setText("Finalizing...");
 
         AsyncRunner.runAsync(
-                () -> apiClient.submitExam(attempt.id()),
+                () -> deadlineTriggered ? apiClient.submitExamAtDeadline(attempt.id()) : apiClient.submitExam(attempt.id()),
                 (Integer score) -> {
+                    cleanupListeners();
+                    if (stage != null) stage.setFullScreen(false);
                     UiFeedback.showInfo("Examination Completed",
                             "Your exam attempt #" + attempt.id() + " has been successfully submitted and finalized!\n\nFinal Score: " + score + " points.");
                     app.showHistory();
                 },
                 (Throwable err) -> {
+                    if (deadlineTriggered && err instanceof ApiException apiEx
+                            && "ATTEMPT_DEADLINE_NOT_REACHED".equals(apiEx.getErrorCode())) {
+                        isSubmitted = false;
+                        setControlsDisabled(false);
+                        submitBtn.setText("Submit Exam");
+                        countdownTimeline.playFromStart();
+                        return;
+                    }
                     setControlsDisabled(false);
                     submitBtn.setText("Submit Exam");
                     if (err instanceof ApiException apiEx && apiEx.isConflict()) {
+                        cleanupListeners();
+                        if (stage != null) stage.setFullScreen(false);
                         UiFeedback.showInfo("Attempt Finalized", "This exam attempt has already been finalized by the server.");
                         app.showHistory();
                     } else {

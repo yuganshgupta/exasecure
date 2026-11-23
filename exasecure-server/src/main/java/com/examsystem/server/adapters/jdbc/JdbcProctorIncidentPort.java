@@ -65,13 +65,8 @@ public final class JdbcProctorIncidentPort implements ProctorIncidentPort {
                 if (!"ACTIVE".equals(status)) throw new IllegalStateException("Attempt is not ACTIVE");
                 if (count < 0 || count >= 3) throw new IllegalStateException("Attempt strike state does not allow a new incident");
                 Instant now = clock.now();
-                try (PreparedStatement query = conn.prepareStatement("SELECT duration_minutes FROM exams WHERE id = ?")) {
-                    query.setInt(1, examId);
-                    try (ResultSet row = query.executeQuery()) {
-                        if (!row.next()) throw new IllegalStateException("Attempt exam is missing");
-                        int minutes = row.getInt(1);
-                        if (minutes > 0 && now.isAfter(start.plusSeconds(minutes * 60L))) throw new IllegalStateException("Exam attempt has expired");
-                    }
+                if (!now.isBefore(JdbcAttemptFinalizer.deadline(conn, examId, start))) {
+                    throw new IllegalStateException("Exam attempt has expired");
                 }
                 int eventId;
                 try (PreparedStatement insert = conn.prepareStatement(

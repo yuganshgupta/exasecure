@@ -127,6 +127,10 @@ public class ApiClient {
         return postEmpty("/student/attempts/" + attemptId + "/submit", Integer.class, true);
     }
 
+    public int submitExamAtDeadline(int attemptId) {
+        return postEmpty("/student/attempts/" + attemptId + "/submit?trigger=deadline", Integer.class, true);
+    }
+
     public List<StudentAttemptHistoryDto> getStudentHistory() {
         return get("/student/history", new TypeReference<List<StudentAttemptHistoryDto>>() {});
     }

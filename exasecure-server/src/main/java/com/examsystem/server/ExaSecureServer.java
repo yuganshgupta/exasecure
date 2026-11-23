@@ -44,7 +44,7 @@ public class ExaSecureServer {
         ClockPort clockPort = new SystemClockPort();
         PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
         JdbcUserRepository userRepository = new JdbcUserRepository(dataSource);
-        JdbcExamAttemptRepository attemptRepository = new JdbcExamAttemptRepository(dataSource);
+        JdbcExamAttemptRepository attemptRepository = new JdbcExamAttemptRepository(dataSource, clockPort);
         JdbcQuestionRepository questionRepository = new JdbcQuestionRepository(dataSource);
         JdbcAnswerRepository answerRepository = new JdbcAnswerRepository(dataSource, clockPort);
         JdbcExamRepository examRepository = new JdbcExamRepository(dataSource);
