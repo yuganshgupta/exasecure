@@ -46,7 +46,7 @@ public class ExaSecureServer {
         JdbcUserRepository userRepository = new JdbcUserRepository(dataSource);
         JdbcExamAttemptRepository attemptRepository = new JdbcExamAttemptRepository(dataSource);
         JdbcQuestionRepository questionRepository = new JdbcQuestionRepository(dataSource);
-        JdbcAnswerRepository answerRepository = new JdbcAnswerRepository(dataSource);
+        JdbcAnswerRepository answerRepository = new JdbcAnswerRepository(dataSource, clockPort);
         JdbcExamRepository examRepository = new JdbcExamRepository(dataSource);
         SessionManager sessionManager = new SessionManager(dataSource);
         JdbcProctorRepository proctorRepository = new JdbcProctorRepository(dataSource);

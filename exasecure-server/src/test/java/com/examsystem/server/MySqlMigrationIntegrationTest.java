@@ -125,7 +125,8 @@ class MySqlMigrationIntegrationTest {
                     1);
         }
 
-        new JdbcAnswerRepository(dataSource).saveAnswer(1, 2, List.of(1), Instant.parse("2026-09-02T12:00:00Z"));
+        Instant activeTime = new JdbcExamAttemptRepository(dataSource).findById(1).orElseThrow().startTime().plusSeconds(1800);
+        new JdbcAnswerRepository(dataSource, () -> activeTime).saveAnswer(1, 2, List.of(1), activeTime);
         try (Connection conn = dataSource.getConnection()) {
             assertSingleInt(conn,
                     "SELECT COUNT(*) FROM student_answers WHERE question_id = 2 AND selected_options IS NULL AND is_correct IS NULL",
@@ -142,10 +143,10 @@ class MySqlMigrationIntegrationTest {
         dataSource = dataSource();
         var migrator = new DatabaseMigrator(dataSource);
         migrator.migrate();
-        var studentAnswers = new JdbcAnswerRepository(dataSource);
         var admin = new JdbcAdminQueryPort(dataSource);
         var attempts = new JdbcExamAttemptRepository(dataSource);
         Instant now = attempts.findById(1).orElseThrow().startTime().plusSeconds(1800);
+        var studentAnswers = new JdbcAnswerRepository(dataSource, () -> now);
         var submit = new SubmitExamUseCase(studentAnswers, attempts, new JdbcQuestionRepository(dataSource), () -> now);
         Duration timeLimit = Duration.ofHours(1);
 
@@ -183,7 +184,7 @@ class MySqlMigrationIntegrationTest {
         dataSource = dataSource();
         new DatabaseMigrator(dataSource).migrate();
 
-        var studentAnswers = new JdbcAnswerRepository(dataSource);
+        var studentAnswers = new JdbcAnswerRepository(dataSource, Instant::now);
         var admin = new JdbcAdminQueryPort(dataSource);
         assertAnswerReview(studentAnswers, admin, 1, List.of(1, 2), List.of("A", "B"), 1);
         assertThat(studentAnswers.getSelectedOptionsForAttempt(1)).doesNotContainKey(2);
@@ -217,7 +218,7 @@ class MySqlMigrationIntegrationTest {
             assertSingleInt(conn, "SELECT COUNT(*) FROM schema_versions WHERE version = 7", 1);
             assertOriginalLegacyAnswer(conn);
         }
-        assertAnswerReview(new JdbcAnswerRepository(dataSource), new JdbcAdminQueryPort(dataSource),
+        assertAnswerReview(new JdbcAnswerRepository(dataSource, Instant::now), new JdbcAdminQueryPort(dataSource),
                 1, List.of(1, 2), List.of("A", "B"), 1);
     }
 

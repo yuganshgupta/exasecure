@@ -1,7 +1,10 @@
 package com.examsystem.server;
 
+import com.examsystem.application.usecases.SubmitExamUseCase;
+import com.examsystem.server.adapters.jdbc.JdbcAnswerRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.examsystem.server.adapters.jdbc.JdbcExamAttemptRepository;
+import com.examsystem.server.adapters.jdbc.JdbcQuestionRepository;
 import com.examsystem.server.config.AppConfig;
 import org.mindrot.jbcrypt.BCrypt;
 import org.junit.jupiter.api.AfterAll;
@@ -20,6 +23,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -28,8 +32,10 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -37,6 +43,245 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @EnabledIfEnvironmentVariable(named = "EXASECURE_MYSQL_TEST_URL", matches = ".+")
 class ServerIntegrationTest {
+
+    private static final Instant ANSWER_START = Instant.parse("2025-01-01T10:00:00Z");
+    private static final Instant ANSWER_DEADLINE = ANSWER_START.plus(Duration.ofHours(1));
+    private static final Instant PREVIOUS_ANSWER_TIME = ANSWER_START.plusSeconds(60);
+
+    @Test
+    void answerThatPassesPreflightCannotWriteAfterWaitingOnAttemptLock() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        var clock = new AtomicReference<>(ANSWER_DEADLINE.minusNanos(1));
+        var attemptingLock = new CountDownLatch(1);
+        var source = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (!after && sql.contains("FOR UPDATE")) {
+                attemptingLock.countDown();
+            }
+        });
+        var useCase = new SubmitExamUseCase(new JdbcAnswerRepository(source, clock::get),
+                new JdbcExamAttemptRepository(source), new JdbcQuestionRepository(source), clock::get);
+
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            Future<?> save;
+            try (var blocker = server.getDataSource().getConnection();
+                 var lock = blocker.prepareStatement("SELECT id FROM exam_attempts WHERE id = ? FOR UPDATE")) {
+                blocker.setAutoCommit(false);
+                lock.setInt(1, fixture.attemptId());
+                try (var row = lock.executeQuery()) {
+                    assertThat(row.next()).isTrue();
+                }
+                save = worker.submit(() -> useCase.saveAnswer(fixture.attemptId(), fixture.questionId(),
+                        List.of(2), Duration.ofHours(1)));
+                assertThat(attemptingLock.await(5, SECONDS)).isTrue();
+                try (var waiter = blocker.createStatement()) {
+                    long waitUntil = System.nanoTime() + SECONDS.toNanos(5);
+                    boolean blocked = false;
+                    while (!blocked && System.nanoTime() < waitUntil) {
+                        try (var rows = waiter.executeQuery("""
+                                SELECT EXISTS (SELECT 1 FROM performance_schema.data_lock_waits w
+                                    JOIN performance_schema.threads t ON t.THREAD_ID = w.BLOCKING_THREAD_ID
+                                    WHERE t.PROCESSLIST_ID = CONNECTION_ID())
+                                """)) {
+                            rows.next();
+                            blocked = rows.getBoolean(1);
+                        }
+                    }
+                    assertThat(blocked).as("the answer writer is waiting in MySQL").isTrue();
+                }
+                clock.set(ANSWER_DEADLINE);
+                blocker.commit();
+            }
+            Exception rejection = null;
+            try {
+                save.get(5, SECONDS);
+            } catch (ExecutionException e) {
+                rejection = e;
+            }
+            assertStoredAnswer(fixture, 1, PREVIOUS_ANSWER_TIME);
+            assertThat(rejection).hasCauseInstanceOf(IllegalStateException.class);
+        }
+    }
+
+    @Test
+    void answerCutoffUsesTheServerClockAndPersistedDeadline() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        var clock = new AtomicReference<>(ANSWER_DEADLINE.minusNanos(1));
+        var repository = new JdbcAnswerRepository(server.getDataSource(), clock::get);
+        Instant savedAt = ANSWER_DEADLINE.minusSeconds(1);
+        repository.saveAnswer(fixture.attemptId(), fixture.questionId(), List.of(2), savedAt);
+        assertStoredAnswer(fixture, 2, savedAt);
+
+        var noWritesAllowed = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (!after && (sql.startsWith("UPDATE student_answers") || sql.startsWith("INSERT INTO student_answers")
+                    || sql.startsWith("DELETE FROM student_answer_options") || sql.startsWith("INSERT INTO student_answer_options"))) {
+                throw new AssertionError("rejected edit reached answer DML: " + sql);
+            }
+        });
+        var closedRepository = new JdbcAnswerRepository(noWritesAllowed, clock::get);
+        for (Instant atOrAfter : List.of(ANSWER_DEADLINE, ANSWER_DEADLINE.plusNanos(1))) {
+            clock.set(atOrAfter);
+            assertThatThrownBy(() -> closedRepository.saveAnswer(fixture.attemptId(), fixture.questionId(),
+                    List.of(1), PREVIOUS_ANSWER_TIME)).isInstanceOf(IllegalStateException.class);
+            assertStoredAnswer(fixture, 2, savedAt);
+        }
+    }
+
+    @Test
+    void replacementRollsBackIfDeadlineArrivesAfterSelectionsAreWritten() throws Exception {
+        assertDeadlineRollsBackEdit(List.of(2), "INSERT INTO student_answer_options");
+    }
+
+    @Test
+    void clearingRollsBackIfDeadlineArrivesAfterSelectionsAreDeleted() throws Exception {
+        assertDeadlineRollsBackEdit(List.of(), "DELETE FROM student_answer_options");
+    }
+
+    private static void assertDeadlineRollsBackEdit(List<Integer> selections, String lastWrite) throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        var clock = new AtomicReference<>(ANSWER_DEADLINE.minusNanos(1));
+        var source = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (after && sql.startsWith(lastWrite)) {
+                clock.set(ANSWER_DEADLINE);
+            }
+        });
+        var repository = new JdbcAnswerRepository(source, clock::get);
+        assertThatThrownBy(() -> repository.saveAnswer(fixture.attemptId(), fixture.questionId(), selections,
+                ANSWER_DEADLINE.minusSeconds(1))).isInstanceOf(IllegalStateException.class);
+        assertThat(clock.get()).isEqualTo(ANSWER_DEADLINE);
+        assertStoredAnswer(fixture, 1, PREVIOUS_ANSWER_TIME);
+    }
+
+    @Test
+    void failingCommitRequestIsReportedAndPreservesThePriorAnswer() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        var source = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (sql.equals("COMMIT")) {
+                throw new SQLException("injected answer commit failure");
+            }
+        });
+        Instant now = ANSWER_START.plusSeconds(120);
+        var repository = new JdbcAnswerRepository(source, () -> now);
+        assertThatThrownBy(() -> repository.saveAnswer(fixture.attemptId(), fixture.questionId(), List.of(2), now))
+                .hasRootCauseMessage("injected answer commit failure");
+        assertStoredAnswer(fixture, 1, PREVIOUS_ANSWER_TIME);
+    }
+
+    @Test
+    void errorAfterAnswerDmlRollsBackTheTransaction() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        var source = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (after && sql.startsWith("DELETE FROM student_answer_options")) {
+                throw new AssertionError("injected failure after deleting selections");
+            }
+        });
+        Instant now = ANSWER_START.plusSeconds(120);
+        var repository = new JdbcAnswerRepository(source, () -> now);
+        assertThatThrownBy(() -> repository.saveAnswer(fixture.attemptId(), fixture.questionId(), List.of(2), now))
+                .isInstanceOf(AssertionError.class).hasMessage("injected failure after deleting selections");
+        assertStoredAnswer(fixture, 1, PREVIOUS_ANSWER_TIME);
+    }
+
+    @Test
+    void acceptedSaveCanCommitAfterTheDeadlineAndIsVisibleToWaitingFinalization() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        var clock = new AtomicReference<>(ANSWER_DEADLINE.minusNanos(1));
+        var initialWriter = new JdbcAnswerRepository(server.getDataSource(), clock::get);
+        initialWriter.saveAnswer(fixture.attemptId(), fixture.questionId(), List.of(2), PREVIOUS_ANSWER_TIME);
+        var atCommit = new CountDownLatch(1);
+        var releaseCommit = new CountDownLatch(1);
+        var finalizerLockRequested = new CountDownLatch(1);
+        var writerSource = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (sql.equals("COMMIT")) {
+                clock.set(ANSWER_DEADLINE);
+                atCommit.countDown();
+                assertThat(releaseCommit.await(5, SECONDS)).isTrue();
+            }
+        });
+        var finalizerSource = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (!after && sql.contains("FOR UPDATE")) {
+                finalizerLockRequested.countDown();
+            }
+        });
+        var repository = new JdbcAnswerRepository(writerSource, clock::get);
+        Instant savedAt = ANSWER_DEADLINE.minusSeconds(1);
+        try (var workers = Executors.newFixedThreadPool(2)) {
+            var save = workers.submit(() -> repository.saveAnswer(fixture.attemptId(), fixture.questionId(), List.of(1), savedAt));
+            Future<Integer> finalization;
+            try {
+                assertThat(atCommit.await(5, SECONDS)).isTrue();
+                finalization = workers.submit(() -> ordinarySubmit(finalizerSource, fixture.attemptId()));
+                assertThat(finalizerLockRequested.await(5, SECONDS)).isTrue();
+                assertStoredAnswer(fixture, 2, PREVIOUS_ANSWER_TIME);
+            } finally {
+                releaseCommit.countDown();
+            }
+            save.get(5, SECONDS);
+            assertThat(finalization.get(5, SECONDS)).isEqualTo(1);
+        }
+        assertStoredAnswer(fixture, 1, savedAt);
+        var beforeDeadline = new JdbcAnswerRepository(server.getDataSource(), () -> savedAt);
+        assertThatThrownBy(() -> beforeDeadline.saveAnswer(fixture.attemptId(), fixture.questionId(), List.of(2), savedAt))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("SUBMITTED");
+        assertStoredAnswer(fixture, 1, savedAt);
+    }
+
+    private static DeadlineAnswerFixture createDeadlineAnswerFixture() throws SQLException {
+        int examId = createAttemptStartExam();
+        try (var conn = server.getDataSource().getConnection(); var stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO questions (exam_id, question_text, correct_option_number, question_type, is_active) "
+                    + "VALUES (" + examId + ", 'Deadline question', 1, 'SINGLE', 1)", Statement.RETURN_GENERATED_KEYS);
+            int questionId = generatedId(stmt);
+            stmt.executeUpdate("INSERT INTO options (question_id, option_number, option_text, is_correct, is_active) VALUES ("
+                    + questionId + ", 1, 'Correct', 1, 1), (" + questionId + ", 2, 'Incorrect', 0, 1)");
+            int attemptId;
+            try (var insert = conn.prepareStatement("""
+                    INSERT INTO exam_attempts (exam_id, student_id, start_time, status) VALUES (?, 101, ?, 'ACTIVE')
+                    """, Statement.RETURN_GENERATED_KEYS)) {
+                insert.setInt(1, examId);
+                insert.setTimestamp(2, Timestamp.from(ANSWER_START));
+                insert.executeUpdate();
+                attemptId = generatedId(insert);
+            }
+            try (var insert = conn.prepareStatement("""
+                    INSERT INTO student_answers (attempt_id, question_id, answer_timestamp) VALUES (?, ?, ?)
+                    """, Statement.RETURN_GENERATED_KEYS)) {
+                insert.setInt(1, attemptId);
+                insert.setInt(2, questionId);
+                insert.setTimestamp(3, Timestamp.from(PREVIOUS_ANSWER_TIME));
+                insert.executeUpdate();
+                int answerId = generatedId(insert);
+                stmt.executeUpdate("INSERT INTO student_answer_options (answer_id, selected_option) VALUES (" + answerId + ", 1)");
+            }
+            return new DeadlineAnswerFixture(attemptId, questionId);
+        }
+    }
+
+    private static int generatedId(Statement stmt) throws SQLException {
+        try (var keys = stmt.getGeneratedKeys()) {
+            assertThat(keys.next()).isTrue();
+            return keys.getInt(1);
+        }
+    }
+
+    private static void assertStoredAnswer(DeadlineAnswerFixture fixture, int option, Instant timestamp) throws SQLException {
+        try (var conn = server.getDataSource().getConnection();
+             var query = conn.prepareStatement("""
+                     SELECT o.selected_option, a.answer_timestamp FROM student_answers a
+                     JOIN student_answer_options o ON o.answer_id = a.id
+                     WHERE a.attempt_id = ? AND a.question_id = ?
+                     """)) {
+            query.setInt(1, fixture.attemptId());
+            query.setInt(2, fixture.questionId());
+            try (var row = query.executeQuery()) {
+                assertThat(row.next()).isTrue();
+                assertThat(row.getInt("selected_option")).as("committed selection").isEqualTo(option);
+                assertThat(row.getTimestamp("answer_timestamp").toInstant()).isEqualTo(timestamp);
+                assertThat(row.next()).isFalse();
+            }
+        }
+    }
+
+    private record DeadlineAnswerFixture(int attemptId, int questionId) {}
 
     @Test void atomicSameKeyContentionStartingAtZero() throws Exception { atomicContention(0); }
     @Test void atomicSameKeyContentionStartingAtOne() throws Exception { atomicContention(1); }
@@ -198,7 +443,7 @@ class ServerIntegrationTest {
             stmt.execute("INSERT INTO exam_attempts(id,exam_id,student_id,start_time,status,focus_lost_count,score) VALUES("+id+",1,101,UTC_TIMESTAMP(),'ACTIVE',"+count+",NULL)");
             for(int i=0;i<count;i++) stmt.execute("INSERT INTO proctor_events(attempt_id,event_type,recorded_at) VALUES("+id+",'FOCUS_LOST',UTC_TIMESTAMP())");
         }
-        new com.examsystem.server.adapters.jdbc.JdbcAnswerRepository(server.getDataSource()).saveAnswer(id,401,java.util.List.of(1),Instant.now());
+        new JdbcAnswerRepository(server.getDataSource(), Instant::now).saveAnswer(id,401,java.util.List.of(1),Instant.now());
         return id;
     }
 
@@ -208,7 +453,9 @@ class ServerIntegrationTest {
     }
 
     private static int ordinarySubmit(javax.sql.DataSource source,int attempt) {
-        return new com.examsystem.application.usecases.SubmitExamUseCase(new com.examsystem.server.adapters.jdbc.JdbcAnswerRepository(source),new com.examsystem.server.adapters.jdbc.JdbcExamAttemptRepository(source),new com.examsystem.server.adapters.jdbc.JdbcQuestionRepository(source),Instant::now).submitExam(attempt,Instant.now());
+        return new SubmitExamUseCase(new JdbcAnswerRepository(source, Instant::now),
+                new JdbcExamAttemptRepository(source), new JdbcQuestionRepository(source), Instant::now)
+                .submitExam(attempt, Instant.now());
     }
 
     private static HttpResponse<String> incidentHttp(HttpClient client,int attempt,String key,String type) throws Exception {
@@ -1229,7 +1476,7 @@ class ServerIntegrationTest {
 
         // 4. Verify direct repository call fails with IllegalStateException
         com.examsystem.server.adapters.jdbc.JdbcAnswerRepository answerRepo =
-                new com.examsystem.server.adapters.jdbc.JdbcAnswerRepository(server.getDataSource());
+                new JdbcAnswerRepository(server.getDataSource(), Instant::now);
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> {
             answerRepo.saveAnswer(lateAttemptId, 406, java.util.List.of(2), java.time.Instant.now());
         });

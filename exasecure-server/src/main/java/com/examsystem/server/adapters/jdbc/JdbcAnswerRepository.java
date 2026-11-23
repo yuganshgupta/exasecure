@@ -1,6 +1,7 @@
 package com.examsystem.server.adapters.jdbc;
 
 import com.examsystem.application.ports.AnswerRepository;
+import com.examsystem.application.ports.ClockPort;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -9,6 +10,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -17,9 +19,11 @@ import java.util.Map;
 
 public class JdbcAnswerRepository implements AnswerRepository {
     private final DataSource dataSource;
+    private final ClockPort clock;
 
-    public JdbcAnswerRepository(DataSource dataSource) {
+    public JdbcAnswerRepository(DataSource dataSource, ClockPort clock) {
         this.dataSource = dataSource;
+        this.clock = clock;
     }
 
     @Override
@@ -27,20 +31,8 @@ public class JdbcAnswerRepository implements AnswerRepository {
         try (Connection conn = dataSource.getConnection()) {
             conn.setAutoCommit(false);
             try {
-                // Lock attempt row and verify it is ACTIVE
-                try (PreparedStatement psLock = conn.prepareStatement(
-                        "SELECT status FROM exam_attempts WHERE id = ? FOR UPDATE")) {
-                    psLock.setInt(1, attemptId);
-                    try (ResultSet rs = psLock.executeQuery()) {
-                        if (!rs.next()) {
-                            throw new IllegalArgumentException("Attempt not found: " + attemptId);
-                        }
-                        String status = rs.getString("status");
-                        if (!"ACTIVE".equals(status)) {
-                            throw new IllegalStateException("Exam attempt is not ACTIVE (status: " + status + ")");
-                        }
-                    }
-                }
+                Instant deadline = lockAttemptDeadline(conn, attemptId);
+                requireBeforeDeadline(deadline);
 
                 // Check if answer already exists
                 int answerId = -1;
@@ -90,17 +82,58 @@ public class JdbcAnswerRepository implements AnswerRepository {
                         psOps.executeBatch();
                     }
                 }
+                // The final clock reading is the acceptance point for a successful commit.
+                requireBeforeDeadline(deadline);
                 conn.commit();
-            } catch (Exception e) {
-                conn.rollback();
+            } catch (Exception | Error e) {
+                try {
+                    conn.rollback();
+                } catch (SQLException rollbackFailure) {
+                    e.addSuppressed(rollbackFailure);
+                }
                 throw e;
-            } finally {
-                conn.setAutoCommit(true);
             }
         } catch (IllegalArgumentException | IllegalStateException e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("DB error", e);
+        }
+    }
+
+    private Instant lockAttemptDeadline(Connection conn, int attemptId) throws SQLException {
+        Instant startTime;
+        int examId;
+        try (PreparedStatement lock = conn.prepareStatement(
+                "SELECT status, start_time, exam_id FROM exam_attempts WHERE id = ? FOR UPDATE")) {
+            lock.setInt(1, attemptId);
+            try (ResultSet row = lock.executeQuery()) {
+                if (!row.next()) {
+                    throw new IllegalArgumentException("Attempt not found: " + attemptId);
+                }
+                String status = row.getString("status");
+                if (!"ACTIVE".equals(status)) {
+                    throw new IllegalStateException("Exam attempt is not ACTIVE (status: " + status + ")");
+                }
+                startTime = row.getTimestamp("start_time").toInstant();
+                examId = row.getInt("exam_id");
+            }
+        }
+
+        // Exam versions have a fixed duration. Keep the write lock scoped to the attempt.
+        try (PreparedStatement exam = conn.prepareStatement("SELECT duration_minutes FROM exams WHERE id = ?")) {
+            exam.setInt(1, examId);
+            try (ResultSet row = exam.executeQuery()) {
+                if (!row.next()) {
+                    throw new IllegalStateException("Exam not found for attempt: " + attemptId);
+                }
+                return startTime.plus(Duration.ofMinutes(row.getInt("duration_minutes")));
+            }
+        }
+    }
+
+    private void requireBeforeDeadline(Instant deadline) {
+        if (!clock.now().isBefore(deadline)) {
+            throw new IllegalStateException("Exam attempt is expired or finalized.");
         }
     }
 

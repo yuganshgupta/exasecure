@@ -7,6 +7,7 @@ import com.examsystem.application.ports.QuestionRepository;
 import com.examsystem.domain.grading.GradingPolicy;
 import com.examsystem.domain.models.Question;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
@@ -29,10 +30,11 @@ public class SubmitExamUseCase {
         this.clockPort = clockPort;
     }
 
-    public void saveAnswer(int attemptId, int questionId, List<Integer> selectedOptions, java.time.Duration timeLimit) {
+    public void saveAnswer(int attemptId, int questionId, List<Integer> selectedOptions, Duration timeLimit) {
         var attempt = attemptRepository.findById(attemptId)
                 .orElseThrow(() -> new IllegalArgumentException("Attempt not found"));
-        if (attempt.isExpired(clockPort.now(), timeLimit)) {
+        if (attempt.finalized()
+                || (timeLimit != null && !clockPort.now().isBefore(attempt.startTime().plus(timeLimit)))) {
             throw new IllegalStateException("Exam attempt is expired or finalized.");
         }
 
