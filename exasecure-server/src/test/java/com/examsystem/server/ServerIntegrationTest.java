@@ -409,6 +409,33 @@ class ServerIntegrationTest {
         assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id = " + fixture.attemptId(), 0);
     }
 
+    @Test
+    void abandonedSubmissionResponseCanBeRecoveredThroughHistoryAndRetry() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        String path = "/api/v1/student/attempts/" + fixture.attemptId() + "/submit";
+        try (var client = HttpClient.newHttpClient()) {
+            var request = HttpRequest.newBuilder(URI.create("http://localhost:" + PORT + path))
+                    .timeout(Duration.ofSeconds(8))
+                    .header("Authorization", "Bearer token-stu1")
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+            // The caller abandons the body after the real Server commits.
+            client.send(request, HttpResponse.BodyHandlers.discarding());
+            var history = sendJson(client, "GET", "/api/v1/student/history", "token-stu1", null);
+            assertThat(history.statusCode()).isEqualTo(200);
+            var rows = new ObjectMapper().readTree(history.body());
+            var record = java.util.stream.StreamSupport.stream(rows.spliterator(), false)
+                    .filter(row -> row.required("attemptId").asInt() == fixture.attemptId()).findFirst().orElseThrow();
+            assertThat(record.required("status").asText()).isEqualTo("SUBMITTED");
+            assertThat(record.required("score").asInt()).isEqualTo(1);
+            var retry = sendJson(client, "POST", path, "token-stu1", null);
+            assertThat(retry.statusCode()).isEqualTo(200);
+            assertThat(retry.body()).isEqualTo("1");
+            assertThat(new JdbcExamAttemptRepository(server.getDataSource()).findById(fixture.attemptId())
+                    .orElseThrow().endTime()).isEqualTo(ANSWER_DEADLINE);
+        }
+    }
+
     @Test void atomicSameKeyContentionStartingAtZero() throws Exception { atomicContention(0); }
     @Test void atomicSameKeyContentionStartingAtOne() throws Exception { atomicContention(1); }
     @Test void atomicSameKeyContentionStartingAtTwo() throws Exception { atomicContention(2); }

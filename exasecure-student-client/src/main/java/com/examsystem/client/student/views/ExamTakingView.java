@@ -1,7 +1,6 @@
 package com.examsystem.client.student.views;
 
 import com.examsystem.client.api.ApiClient;
-import com.examsystem.client.api.ApiException;
 import com.examsystem.client.async.AsyncRunner;
 import com.examsystem.client.exam.ExamTimer;
 import com.examsystem.client.student.StudentApp;
@@ -83,6 +82,11 @@ public class ExamTakingView {
     private boolean isDialogActive = false;
     private boolean isSubmitted = false;
     private boolean isSubmissionPending = false;
+    private boolean submissionInFlight;
+    private boolean submissionUnconfirmed;
+    private boolean deadlineRequestSent;
+    private boolean retryAtDeadline;
+    private boolean viewClosed;
     private ProctorIncidentCoordinator proctorCoordinator;
 
     public ExamTakingView(StudentApp app, ApiClient apiClient, Stage stage,
@@ -118,6 +122,7 @@ public class ExamTakingView {
                 new QuestionAutosaveCoordinator.Listener() {
                     @Override
                     public void onStateChanged(QuestionSaveState state) {
+                        if (viewClosed) return;
                         updateAutosaveUIForCurrentQuestion();
                         updatePalette();
                         if (isSubmissionPending && saveCoordinator.isAllSynchronized()) {
@@ -127,6 +132,7 @@ public class ExamTakingView {
 
                     @Override
                     public void onSaveFailed(QuestionSaveState state, Throwable error) {
+                        if (viewClosed) return;
                         if (isSubmissionPending) {
                             isSubmissionPending = false;
                             setControlsDisabled(false);
@@ -373,8 +379,7 @@ public class ExamTakingView {
         updateTimerDisplay();
         countdownTimeline = new Timeline(new KeyFrame(Duration.seconds(1), e -> {
             updateTimerDisplay();
-            if (examTimer.isExpired()) {
-                countdownTimeline.stop();
+            if (examTimer.isExpired() && !deadlineRequestSent && !submissionInFlight && !isSubmitted) {
                 handleAutoSubmitOnExpiry();
             }
         }));
@@ -408,21 +413,21 @@ public class ExamTakingView {
         stage.addEventHandler(WindowEvent.WINDOW_HIDDEN, proctorWindowHiddenHandler);
 
         focusListener = (obs, oldVal, newVal) -> {
-            if (!newVal && !isDialogActive && !isSubmitted && !isSubmissionPending) {
+            if (!newVal && !isDialogActive && !isSubmitted) {
                 proctorCoordinator.onFocusLost();
                 Platform.runLater(() -> {
                     setViolationBanner("violation-warning", "Window focus lost. Recording proctoring incident...");
                     proctorNoticeBanner.setVisible(true);
                     proctorNoticeBanner.setManaged(true);
                 });
-            } else if (newVal && !isSubmitted && !isSubmissionPending) {
+            } else if (newVal && !isSubmitted) {
                 proctorCoordinator.onFocusGained();
             }
         };
         stage.focusedProperty().addListener(focusListener);
 
         iconifiedListener = (obs, oldVal, newVal) -> {
-            if (newVal && !isSubmitted && !isSubmissionPending) {
+            if (newVal && !isSubmitted) {
                 Platform.runLater(() -> {
                     if (stage != null && !isSubmitted) {
                         stage.setIconified(false);
@@ -434,7 +439,7 @@ public class ExamTakingView {
         stage.iconifiedProperty().addListener(iconifiedListener);
 
         fullScreenListener = (obs, oldVal, newVal) -> {
-            if (!newVal && !isSubmitted && !isSubmissionPending && !isDialogActive) {
+            if (!newVal && !isSubmitted && !isDialogActive) {
                 Platform.runLater(() -> {
                     if (stage != null && !isSubmitted && !stage.isFullScreen()) {
                         stage.setFullScreen(true);
@@ -448,6 +453,7 @@ public class ExamTakingView {
 
     private void handleProctorResponseOnFxThread(StudentProctorEventResponseDto response) {
         Platform.runLater(() -> {
+            if (viewClosed) return;
             int count = response.violationCount();
             boolean flagged = response.flagged();
 
@@ -500,7 +506,7 @@ public class ExamTakingView {
 
     private void handleProctorTerminationOnFxThread() {
         Platform.runLater(() -> {
-            if (!isSubmitted) {
+            if (!viewClosed && !isSubmitted) {
                 isSubmitted = true;
                 isSubmissionPending = false;
                 cleanupListeners();
@@ -534,10 +540,10 @@ public class ExamTakingView {
             flagBtn.getStyleClass().add("btn-flag");
         }
 
-        prevBtn.setDisable(currentIndex == 0 || isSubmitted || isSubmissionPending);
-        nextBtn.setDisable(currentIndex == questions.size() - 1 || isSubmitted || isSubmissionPending);
-        clearBtn.setDisable(isSubmitted || isSubmissionPending);
-        flagBtn.setDisable(isSubmitted || isSubmissionPending);
+        prevBtn.setDisable(currentIndex == 0 || editsLocked());
+        nextBtn.setDisable(currentIndex == questions.size() - 1 || editsLocked());
+        clearBtn.setDisable(editsLocked());
+        flagBtn.setDisable(editsLocked());
 
         optionsBox.getChildren().clear();
         List<Integer> selectedOptions = answers.getOrDefault(q.id(), List.of());
@@ -556,7 +562,7 @@ public class ExamTakingView {
                 cb.setMaxWidth(Double.MAX_VALUE);
                 HBox.setHgrow(cb, Priority.ALWAYS);
                 cb.setSelected(selectedOptions.contains(opt.optionNumber()));
-                cb.setDisable(isSubmitted || isSubmissionPending);
+                cb.setDisable(editsLocked());
                 cb.selectedProperty().addListener((obs, oldVal, newVal) -> {
                     List<Integer> current = answers.computeIfAbsent(q.id(), k -> new ArrayList<>());
                     if (newVal && !current.contains(opt.optionNumber())) {
@@ -575,7 +581,7 @@ public class ExamTakingView {
                 HBox.setHgrow(rb, Priority.ALWAYS);
                 rb.setToggleGroup(singleGroup);
                 rb.setSelected(selectedOptions.contains(opt.optionNumber()));
-                rb.setDisable(isSubmitted || isSubmissionPending);
+                rb.setDisable(editsLocked());
                 rb.selectedProperty().addListener((obs, oldVal, newVal) -> {
                     if (newVal) {
                         List<Integer> current = List.of(opt.optionNumber());
@@ -593,7 +599,7 @@ public class ExamTakingView {
     }
 
     private void clearCurrentAnswer() {
-        if (isSubmitted || isSubmissionPending) return;
+        if (editsLocked()) return;
         StudentQuestionDto q = questions.get(currentIndex);
         answers.remove(q.id());
         onAnswerChanged(q.id(), List.of());
@@ -601,7 +607,7 @@ public class ExamTakingView {
     }
 
     private void toggleCurrentFlag() {
-        if (isSubmitted || isSubmissionPending) return;
+        if (editsLocked()) return;
         StudentQuestionDto q = questions.get(currentIndex);
         if (flaggedQuestions.contains(q.id())) {
             flaggedQuestions.remove(q.id());
@@ -613,13 +619,13 @@ public class ExamTakingView {
     }
 
     private void onAnswerChanged(int questionId, List<Integer> newSelections) {
-        if (isSubmitted || isSubmissionPending) return;
+        if (editsLocked()) return;
         saveCoordinator.onAnswerChanged(questionId, newSelections);
         updatePalette();
     }
 
     private void retryQuestionSave(int questionId) {
-        if (isSubmitted || isSubmissionPending) return;
+        if (editsLocked()) return;
         saveCoordinator.retry(questionId);
     }
 
@@ -640,7 +646,7 @@ public class ExamTakingView {
             autosaveStatusLabel.getStyleClass().add("status-error");
             retryAutosaveBtn.setVisible(true);
             retryAutosaveBtn.setManaged(true);
-            retryAutosaveBtn.setDisable(isSubmitted || isSubmissionPending);
+            retryAutosaveBtn.setDisable(editsLocked());
         } else if (state.inFlight()) {
             autosaveStatusLabel.setText("Saving answer...");
             autosaveStatusLabel.getStyleClass().add("status-warning");
@@ -678,7 +684,7 @@ public class ExamTakingView {
             String marker = failed ? "!" : flagged ? "F" : answered ? "✓" : "";
             Button pBtn = new Button((i + 1) + marker);
             pBtn.getStyleClass().add("navigator-button");
-            pBtn.setDisable(isSubmitted || isSubmissionPending);
+            pBtn.setDisable(editsLocked());
             pBtn.setAccessibleText("Question " + (i + 1)
                     + (failed ? ", save failed" : flagged ? ", flagged" : answered ? ", answered" : ", unanswered")
                     + (i == currentIndex ? ", current" : ""));
@@ -706,7 +712,11 @@ public class ExamTakingView {
     }
 
     private void confirmAndSubmitExam() {
-        if (isSubmitted || isSubmissionPending) return;
+        if (viewClosed || isSubmitted || isSubmissionPending || submissionInFlight) return;
+        if (submissionUnconfirmed) {
+            performSubmission(retryAtDeadline);
+            return;
+        }
 
         // Check if any question has already failed to save
         Optional<QuestionSaveState> failedOpt = saveCoordinator.getFirstFailed();
@@ -754,6 +764,7 @@ public class ExamTakingView {
     }
 
     private void startSubmissionProcess() {
+        if (editsLocked()) return;
         setControlsDisabled(true);
 
         Optional<QuestionSaveState> failedOpt = saveCoordinator.getFirstFailed();
@@ -803,7 +814,7 @@ public class ExamTakingView {
     }
 
     private void handleAutoSubmitOnExpiry() {
-        if (!isSubmitted) performSubmission(true);
+        performSubmission(true);
     }
 
     private void performSubmission() {
@@ -811,46 +822,72 @@ public class ExamTakingView {
     }
 
     private void performSubmission(boolean deadlineTriggered) {
-        isSubmitted = true;
+        if (viewClosed || isSubmitted || submissionInFlight) return;
+        submissionInFlight = true;
         isSubmissionPending = false;
+        retryAtDeadline = deadlineTriggered;
+        if (deadlineTriggered) deadlineRequestSent = true;
         setControlsDisabled(true);
-        if (!deadlineTriggered) {
-            cleanupListeners();
-            if (stage != null) stage.setFullScreen(false);
-        }
         submitBtn.setText("Finalizing...");
 
         AsyncRunner.runAsync(
-                () -> deadlineTriggered ? apiClient.submitExamAtDeadline(attempt.id()) : apiClient.submitExam(attempt.id()),
-                (Integer score) -> {
-                    cleanupListeners();
-                    if (stage != null) stage.setFullScreen(false);
-                    UiFeedback.showInfo("Examination Completed",
-                            "Your exam attempt #" + attempt.id() + " has been successfully submitted and finalized!\n\nFinal Score: " + score + " points.");
-                    app.showHistory();
-                },
-                (Throwable err) -> {
-                    if (deadlineTriggered && err instanceof ApiException apiEx
-                            && "ATTEMPT_DEADLINE_NOT_REACHED".equals(apiEx.getErrorCode())) {
-                        isSubmitted = false;
-                        setControlsDisabled(false);
-                        submitBtn.setText("Submit Exam");
-                        countdownTimeline.playFromStart();
-                        return;
-                    }
+                () -> SubmissionRecovery.submit(attempt.id(),
+                        () -> deadlineTriggered ? apiClient.submitExamAtDeadline(attempt.id()) : apiClient.submitExam(attempt.id()),
+                        apiClient::getStudentHistory),
+                this::handleSubmissionResult,
+                error -> handleSubmissionResult(new SubmissionRecovery.Result(SubmissionRecovery.Status.UNCONFIRMED, null))
+        );
+    }
+
+    private void handleSubmissionResult(SubmissionRecovery.Result result) {
+        if (viewClosed || isSubmitted) return;
+        submissionInFlight = false;
+        switch (result.status()) {
+            case TOO_EARLY -> {
+                deadlineRequestSent = false;
+                if (submissionUnconfirmed) {
+                    showUnconfirmedSubmission();
+                } else {
                     setControlsDisabled(false);
                     submitBtn.setText("Submit Exam");
-                    if (err instanceof ApiException apiEx && apiEx.isConflict()) {
-                        cleanupListeners();
-                        if (stage != null) stage.setFullScreen(false);
-                        UiFeedback.showInfo("Attempt Finalized", "This exam attempt has already been finalized by the server.");
-                        app.showHistory();
-                    } else {
-                        isSubmitted = false;
-                        UiFeedback.showError("Submission Error", "Failed to submit exam: " + err.getMessage());
-                    }
+                    renderCurrentQuestion();
+                    updatePalette();
                 }
-        );
+            }
+            case UNCONFIRMED -> showUnconfirmedSubmission();
+            case SIGN_IN_REQUIRED -> {
+                cleanupListeners();
+                UiFeedback.showInfo("Sign In Required", "Sign in again to check your attempt or continue recovery.");
+                app.showLogin();
+            }
+            case SUBMITTED, EXPIRED -> {
+                isSubmitted = true;
+                cleanupListeners();
+                if (stage != null) stage.setFullScreen(false);
+                if (result.status() == SubmissionRecovery.Status.SUBMITTED) {
+                    String score = result.score() == null ? "" : "\n\nFinal Score: " + result.score() + " points.";
+                    UiFeedback.showInfo("Examination Completed", "Your exam attempt #" + attempt.id()
+                            + " was submitted and finalized." + score);
+                } else {
+                    UiFeedback.showInfo("Attempt Expired", "The Server reports that this attempt has expired.");
+                }
+                app.showHistory();
+            }
+        }
+    }
+
+    private void showUnconfirmedSubmission() {
+        submissionUnconfirmed = true;
+        setControlsDisabled(true);
+        submitBtn.setText("Retry Finalization");
+        submitBtn.setDisable(false);
+        setViolationBanner("violation-warning", "Submission is unconfirmed. Retry when the connection is available.");
+        proctorNoticeBanner.setVisible(true);
+        proctorNoticeBanner.setManaged(true);
+    }
+
+    private boolean editsLocked() {
+        return viewClosed || isSubmitted || isSubmissionPending || submissionInFlight || submissionUnconfirmed;
     }
 
     private void setControlsDisabled(boolean disabled) {
@@ -871,6 +908,7 @@ public class ExamTakingView {
     }
 
     private void cleanupListeners() {
+        viewClosed = true;
         if (countdownTimeline != null) {
             countdownTimeline.stop();
         }
