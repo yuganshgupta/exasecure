@@ -930,6 +930,23 @@ class ServerIntegrationTest {
     }
 
     @Test
+    void nonImageEvidenceIsRejectedWithoutRemovingTheAcknowledgedIncident() throws Exception {
+        int attemptId = atomicFixture(0);
+        var incident = recordIncident(server.getDataSource(), attemptId, UUID.randomUUID().toString());
+        try (var client = HttpClient.newHttpClient()) {
+            var invalid = sendMultipartEvidence(client, attemptId, incident.eventId(), "token-stu1",
+                    "plain fixture text".getBytes(StandardCharsets.UTF_8), "INITIAL");
+            assertThat(invalid.statusCode()).isEqualTo(400);
+            var mismatched = sendMultipartEvidence(client, attemptId, incident.eventId(), "token-stu1",
+                    testScreenshot("png", 0x123456), "INITIAL");
+            assertThat(mismatched.statusCode()).isEqualTo(400);
+        }
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE id = " + incident.eventId(), 1);
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_evidence_v2 WHERE event_id = " + incident.eventId(), 0);
+        assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE id = " + attemptId + " AND focus_lost_count = 1", 1);
+    }
+
+    @Test
     void screenshotBytesSurviveStudentHttpMySqlAndAdminHttp() throws Exception {
         HttpClient client = HttpClient.newHttpClient();
         HttpRequest eventRequest = HttpRequest.newBuilder()
@@ -942,11 +959,7 @@ class ServerIntegrationTest {
 
         assertThat(eventResponse.statusCode()).isEqualTo(200);
         int eventId = new ObjectMapper().readTree(eventResponse.body()).required("eventId").asInt();
-        byte[] screenshot = new byte[] {
-                (byte) 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
-                0x00, 0x01, 0x02, 0x7f, (byte) 0x80, (byte) 0xfe, (byte) 0xff,
-                0x45, 0x78, 0x61, 0x53, 0x65, 0x63, 0x75, 0x72, 0x65
-        };
+        byte[] screenshot = testScreenshot("png", 0x123456);
         String boundary = "ExaSecureEvidenceBoundary7f30a1";
         byte[] multipartBody = multipartScreenshot(boundary, screenshot);
         HttpRequest uploadRequest = HttpRequest.newBuilder()
@@ -1986,7 +1999,7 @@ class ServerIntegrationTest {
         assertThat(eventJson.get("attemptStatus").asText()).isEqualTo("ACTIVE");
 
         // 2. Upload INITIAL screenshot evidence (~800ms)
-        byte[] initialBytes = new byte[]{11, 22, 33, 44};
+        byte[] initialBytes = testScreenshot("jpeg", 0x23338a);
         HttpResponse<String> initUploadRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", initialBytes, "INITIAL");
         assertThat(initUploadRes.statusCode()).isEqualTo(200);
 
@@ -2008,7 +2021,7 @@ class ServerIntegrationTest {
         assertThat(longAbsenceRes.statusCode()).isEqualTo(200);
 
         // 4. Upload LONG_ABSENCE screenshot evidence (~5000ms)
-        byte[] longAbsenceBytes = new byte[]{55, 66, 77, 88};
+        byte[] longAbsenceBytes = testScreenshot("jpeg", 0xacac21);
         HttpResponse<String> longUploadRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", longAbsenceBytes, "LONG_ABSENCE");
         assertThat(longUploadRes.statusCode()).isEqualTo(200);
 
@@ -2066,7 +2079,7 @@ class ServerIntegrationTest {
         assertThat(adminLongEv.body()).containsExactly(longAbsenceBytes);
 
         // 8. Evidence Immutability: duplicate retry MUST NOT replace original bytes!
-        byte[] duplicateRetryBytes = new byte[]{99, 99, 99};
+        byte[] duplicateRetryBytes = testScreenshot("jpeg", 0x0e8ea1);
         HttpResponse<String> duplicateUploadRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", duplicateRetryBytes, "INITIAL");
         assertThat(duplicateUploadRes.statusCode()).isEqualTo(200);
 
@@ -2334,7 +2347,7 @@ class ServerIntegrationTest {
                 "{\"eventType\":\"FOCUS_LOST\",\"clientEventId\":\"" + clientEventId + "\"}");
         int eventId = new ObjectMapper().readTree(eventRes.body()).get("eventId").asInt();
 
-        byte[] initialBytes = new byte[]{1, 2, 3, 4};
+        byte[] initialBytes = testScreenshot("jpeg", 0x23338a);
         HttpResponse<String> initUploadRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", initialBytes, "INITIAL");
         assertThat(initUploadRes.statusCode()).isEqualTo(200);
 
@@ -2393,6 +2406,16 @@ class ServerIntegrationTest {
         // Proctor evidence on non-FOCUS_LOST event -> 400 Bad Request
         HttpResponse<String> evRes = sendMultipartEvidence(client, attemptId, eventId, "token-stu1", new byte[]{10, 20}, "INITIAL");
         assertThat(evRes.statusCode()).isEqualTo(400);
+    }
+
+    private static byte[] testScreenshot(String format, int color) throws Exception {
+        var image = new java.awt.image.BufferedImage(8, 8, java.awt.image.BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) image.setRGB(x, y, color);
+        }
+        var bytes = new ByteArrayOutputStream();
+        assertThat(javax.imageio.ImageIO.write(image, format, bytes)).isTrue();
+        return bytes.toByteArray();
     }
 
     private static HttpResponse<String> sendMultipartEvidence(

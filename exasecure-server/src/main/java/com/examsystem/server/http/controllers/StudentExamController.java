@@ -226,19 +226,9 @@ public class StudentExamController {
         var uploadedFile = ctx.uploadedFile("screenshot");
         if (uploadedFile == null) throw new BadRequestResponse("Missing screenshot");
 
-        if (uploadedFile.size() > 5 * 1024 * 1024) throw new BadRequestResponse("Screenshot too large (max 5MB)");
-        String contentType = uploadedFile.contentType();
-        if (contentType == null || (!contentType.equals("image/jpeg") && !contentType.equals("image/png"))) {
-            throw new BadRequestResponse("Invalid content type, must be image/jpeg or image/png");
-        }
-
-        try {
-            byte[] data = uploadedFile.content().readAllBytes();
-            proctorRepository.saveEvidence(eventId, data, contentType, java.time.Instant.now(), effectiveType);
-            ctx.status(200);
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to save evidence", e);
-        }
+        byte[] data = EvidenceUploadImage.read(uploadedFile);
+        proctorRepository.saveEvidence(eventId, data, uploadedFile.contentType(), java.time.Instant.now(clock), effectiveType);
+        ctx.status(200);
     }
 
     public void recordReturn(Context ctx) {

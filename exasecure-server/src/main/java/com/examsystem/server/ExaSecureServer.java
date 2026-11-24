@@ -20,6 +20,7 @@ import com.examsystem.server.http.controllers.StudentExamController;
 import com.examsystem.server.http.controllers.AdminController;
 import com.examsystem.server.http.exceptions.GlobalExceptionHandler;
 import io.javalin.Javalin;
+import io.javalin.config.SizeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -79,6 +80,8 @@ public class ExaSecureServer {
         // App init
         app = Javalin.create(javalinConfig -> {
             javalinConfig.startup.showJavalinBanner = false;
+            javalinConfig.jetty.multipartConfig.maxFileSize(5, SizeUnit.MB);
+            javalinConfig.jetty.multipartConfig.maxTotalRequestSize(6, SizeUnit.MB);
             
             javalinConfig.routes.apiBuilder(() -> {
                 io.javalin.apibuilder.ApiBuilder.get("/health", ctx -> ctx.result("OK"));
