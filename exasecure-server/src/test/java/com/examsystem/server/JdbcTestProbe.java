@@ -9,6 +9,7 @@ final class JdbcTestProbe {
     interface Probe { void at(String sql, boolean after) throws Exception; }
     static DataSource wrap(DataSource source, Probe probe) {
         return (DataSource) Proxy.newProxyInstance(DataSource.class.getClassLoader(), new Class<?>[]{DataSource.class}, (proxy, method, args) -> {
+            if (method.getName().equals("getConnection")) probe.at("CONNECT", false);
             Object result = invoke(source, method, args);
             if (result instanceof Connection conn) return connection(conn, probe);
             return result;

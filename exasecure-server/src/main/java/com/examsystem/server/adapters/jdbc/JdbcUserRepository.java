@@ -2,11 +2,13 @@ package com.examsystem.server.adapters.jdbc;
 
 import com.examsystem.application.ports.UserRepository;
 import com.examsystem.domain.models.User;
+import com.examsystem.server.db.DatabaseUnavailableException;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Optional;
 
 public class JdbcUserRepository implements UserRepository {
@@ -34,8 +36,8 @@ public class JdbcUserRepository implements UserRepository {
                     ));
                 }
             }
-        } catch (Exception e) {
-            throw new RuntimeException("DB error", e);
+        } catch (SQLException e) {
+            throw new DatabaseUnavailableException("read login account", e);
         }
         return Optional.empty();
     }
@@ -50,8 +52,8 @@ public class JdbcUserRepository implements UserRepository {
                     return Optional.of(rs.getString("password"));
                 }
             }
-        } catch (Exception e) {
-            throw new RuntimeException("DB error", e);
+        } catch (SQLException e) {
+            throw new DatabaseUnavailableException("read login account", e);
         }
         return Optional.empty();
     }

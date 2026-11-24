@@ -545,6 +545,42 @@ class ServerIntegrationTest {
         }
     }
 
+    @Test
+    void authenticationAndReadinessRecoverAfterDatabaseAccessReturns() throws Exception {
+        int port;
+        try (var socket = new java.net.ServerSocket(0)) {
+            port = socket.getLocalPort();
+        }
+        var offline = new java.util.concurrent.atomic.AtomicBoolean();
+        var source = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (sql.equals("CONNECT") && offline.get()) throw new SQLException("injected database access failure", "08006");
+        });
+        var probeServer = new ExaSecureServer(new AppConfig(port, dbUrl, dbUser, dbPassword) {
+            @Override public javax.sql.DataSource createDataSource() { return source; }
+        });
+        probeServer.start();
+        try (var client = HttpClient.newHttpClient()) {
+            offline.set(true);
+            var unavailable = outageTestGet(client, port, "/api/v1/student/history", "token-stu1");
+            assertThat(unavailable.statusCode()).as(unavailable.body()).isEqualTo(503);
+            assertThat(unavailable.body()).contains("DATABASE_UNAVAILABLE").doesNotContain("injected");
+            assertThat(outageTestGet(client, port, "/health", null).statusCode()).isEqualTo(200);
+            assertThat(outageTestGet(client, port, "/ready", null).statusCode()).isEqualTo(503);
+            offline.set(false);
+            assertThat(outageTestGet(client, port, "/ready", null).statusCode()).isEqualTo(200);
+            assertThat(outageTestGet(client, port, "/api/v1/student/history", "token-stu1").statusCode()).isEqualTo(200);
+            assertThat(outageTestGet(client, port, "/api/v1/student/history", "unknown-token").statusCode()).isEqualTo(401);
+        } finally {
+            probeServer.stop();
+        }
+    }
+
+    private static HttpResponse<String> outageTestGet(HttpClient client, int port, String path, String token) throws Exception {
+        var request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path)).timeout(Duration.ofSeconds(8));
+        if (token != null) request.header("Authorization", "Bearer " + token);
+        return client.send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
+    }
+
     @Test void atomicSameKeyContentionStartingAtZero() throws Exception { atomicContention(0); }
     @Test void atomicSameKeyContentionStartingAtOne() throws Exception { atomicContention(1); }
     @Test void atomicSameKeyContentionStartingAtTwo() throws Exception { atomicContention(2); }

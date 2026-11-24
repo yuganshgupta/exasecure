@@ -72,7 +72,7 @@ Run each application from the repository root in a separate terminal:
 .\mvnw.cmd exec:java -pl exasecure-launcher
 ```
 
-Start the Server before the clients; `http://localhost:8089/health` returns HTTP 200 when ready. The Control Center can start and stop its own development application processes.
+Start the Server before the clients. `http://localhost:8089/health` checks that the process is responding. Use `http://localhost:8089/ready` to check that the Server can also reach its database. The Control Center can start and stop its own development application processes.
 
 ## Testing
 

@@ -1,13 +1,13 @@
 package com.examsystem.server.auth;
 
 import com.examsystem.domain.models.User;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import com.examsystem.server.db.DatabaseUnavailableException;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -15,7 +15,6 @@ import java.util.Optional;
 import java.util.UUID;
 
 public class SessionManager {
-    private static final Logger log = LoggerFactory.getLogger(SessionManager.class);
     private final DataSource dataSource;
 
     public SessionManager(DataSource dataSource) {
@@ -33,9 +32,8 @@ public class SessionManager {
             ps.setTimestamp(3, Timestamp.from(expiresAt));
             ps.executeUpdate();
             return token;
-        } catch (Exception e) {
-            log.error("Failed to create session", e);
-            throw new RuntimeException("Could not create session");
+        } catch (SQLException e) {
+            throw new DatabaseUnavailableException("create session", e);
         }
     }
 
@@ -62,8 +60,8 @@ public class SessionManager {
                     ));
                 }
             }
-        } catch (Exception e) {
-            log.error("Failed to authenticate session", e);
+        } catch (SQLException e) {
+            throw new DatabaseUnavailableException("read session", e);
         }
         return Optional.empty();
     }
@@ -73,8 +71,8 @@ public class SessionManager {
              PreparedStatement ps = conn.prepareStatement("DELETE FROM server_sessions WHERE token = ?")) {
             ps.setString(1, token);
             ps.executeUpdate();
-        } catch (Exception e) {
-            log.error("Failed to invalidate session", e);
+        } catch (SQLException e) {
+            throw new DatabaseUnavailableException("revoke session", e);
         }
     }
 }

@@ -14,6 +14,7 @@ import com.examsystem.server.auth.AuthMiddleware;
 import com.examsystem.server.auth.SessionManager;
 import com.examsystem.server.config.AppConfig;
 import com.examsystem.server.db.DatabaseMigrator;
+import com.examsystem.server.db.DatabaseReadiness;
 import com.examsystem.server.http.controllers.AuthController;
 import com.examsystem.server.http.controllers.StudentExamController;
 import com.examsystem.server.http.controllers.AdminController;
@@ -73,12 +74,18 @@ public class ExaSecureServer {
                 adminQueryPort, adminUserMutationUseCase, adminExamDefinitionUseCase, questionRepository, attemptRepository);
         AuthMiddleware authMiddleware = new AuthMiddleware(sessionManager);
 
+        var readiness = new DatabaseReadiness(dataSource);
+
         // App init
         app = Javalin.create(javalinConfig -> {
             javalinConfig.startup.showJavalinBanner = false;
             
             javalinConfig.routes.apiBuilder(() -> {
                 io.javalin.apibuilder.ApiBuilder.get("/health", ctx -> ctx.result("OK"));
+                io.javalin.apibuilder.ApiBuilder.get("/ready", ctx -> {
+                    if (readiness.isReady()) ctx.result("OK");
+                    else ctx.status(503).result("NOT READY");
+                });
                 
                 io.javalin.apibuilder.ApiBuilder.path("/api/v1", () -> {
                     io.javalin.apibuilder.ApiBuilder.before("/*", authMiddleware::enforceAuthentication);

@@ -1,6 +1,7 @@
 package com.examsystem.server.http.exceptions;
 
 import com.examsystem.contracts.ErrorResponseDto;
+import com.examsystem.server.db.DatabaseUnavailableException;
 import io.javalin.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +12,11 @@ public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
     public static void register(io.javalin.config.JavalinConfig config) {
+        config.routes.exception(DatabaseUnavailableException.class, (e, ctx) -> {
+            String requestId = UUID.randomUUID().toString();
+            log.warn("Database unavailable during {} [{}]", e.operation(), requestId);
+            ctx.status(503).json(new ErrorResponseDto(503, e.getMessage(), requestId, "DATABASE_UNAVAILABLE"));
+        });
         config.routes.exception(com.examsystem.application.ports.DeadlineNotReachedException.class, (e, ctx) -> {
             ctx.status(409).json(new ErrorResponseDto(409, e.getMessage(), UUID.randomUUID().toString(),
                     "ATTEMPT_DEADLINE_NOT_REACHED"));
