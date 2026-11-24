@@ -108,6 +108,12 @@ public final class AtomicProperties {
         if (acl == null) throw new IOException("Filesystem cannot enforce owner-only configuration permissions.");
         UserPrincipal current = path.getFileSystem().getUserPrincipalLookupService()
                 .lookupPrincipalByName(System.getProperty("user.name"));
+        if (!acl.getOwner().equals(current)) {
+            try {
+                acl.setOwner(current);
+            } catch (IOException | SecurityException ignored) {
+            }
+        }
         if (!acl.getOwner().equals(current)) throw new IOException("Configuration must be owned by the current OS account.");
         List<AclEntry> expected = ownerAcl(current);
         acl.setAcl(expected);
