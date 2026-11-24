@@ -3,6 +3,7 @@ package com.examsystem.client.student.views;
 import com.examsystem.client.api.ApiClient;
 import com.examsystem.client.api.ApiException;
 import com.examsystem.client.async.AsyncRunner;
+import com.examsystem.client.proctor.ScreenCaptureService;
 import com.examsystem.client.student.StudentApp;
 import com.examsystem.client.ui.UiFeedback;
 import com.examsystem.contracts.StudentAttemptDto;
@@ -166,6 +167,7 @@ public class StudentDashboardView {
         VBox info = new VBox(6);
         Label title = new Label(exam.title());
         title.getStyleClass().add("exam-title");
+        title.setWrapText(true);
 
         HBox meta = new HBox(12);
         Label durationBadge = new Label("Duration: " + exam.durationMinutes() + " mins");
@@ -193,26 +195,72 @@ public class StudentDashboardView {
     private void promptAndLaunchExam(StudentExamDto exam, Button startBtn) {
         String message = "Examination: " + exam.title() + "\n"
                 + "Duration: " + exam.durationMinutes() + " minutes\n\n"
-                + "SECURITY & EXAMINATION RULES:\n"
-                + "1. This exam environment is actively proctored.\n"
-                + "2. Switching away from the exam or losing window focus records a proctoring violation and captures screenshot evidence.\n"
-                + "3. Your answers are automatically saved to the server in real time.\n"
-                + "4. You can flag questions for review and return to them anytime before submission.\n"
-                + "5. When the countdown timer reaches 00:00, your exam will be automatically finalized.\n\n"
-                + "Click 'OK' to enter the examination environment.";
+                + "1. Read each question carefully. Single-choice questions have one correct answer. "
+                + "Multiple-choice questions may have more than one.\n"
+                + "2. Answers are saved automatically. You can flag questions and revisit them before submission.\n"
+                + "3. Keep the exam window in focus. Leaving it records a proctoring incident and may capture "
+                + "screenshot evidence for administrator review.\n"
+                + "4. Submit before time expires. Any remaining attempt is finalized at the deadline.\n\n"
+                + "On macOS, ExaSecure checks screen capture before starting and discards any test image.";
 
         boolean confirmed = UiFeedback.showConfirmation(
+                app.getPrimaryStage(),
                 "Examination Pre-Flight Check",
                 "Ready to begin: " + exam.title() + "?",
                 message
         );
         if (confirmed) {
-            launchExam(exam, startBtn);
+            view.setDisable(true);
+            startBtn.setText("Checking readiness...");
+            AsyncRunner.runAsync(ScreenCaptureService::checkReadiness,
+                    readiness -> handleCaptureReadiness(exam, startBtn, readiness),
+                    error -> handleCaptureReadiness(exam, startBtn, ScreenCaptureService.Readiness.UNAVAILABLE));
         }
     }
 
+    private void handleCaptureReadiness(StudentExamDto exam, Button startBtn, ScreenCaptureService.Readiness readiness) {
+        switch (readiness) {
+            case READY -> launchExam(exam, startBtn);
+            case CAN_REQUEST -> {
+                boolean request = UiFeedback.showConfirmation(app.getPrimaryStage(), "Screen Recording Permission",
+                        "Allow screenshot evidence for proctored exams",
+                        "ExaSecure Student needs macOS Screen & System Audio Recording permission to capture "
+                                + "evidence when the exam window loses focus. Click OK to request access. "
+                                + "This step does not start the examination.");
+                if (request) {
+                    AsyncRunner.runAsync(ScreenCaptureService::requestMacPermission,
+                            result -> finishPermissionRequest(exam, startBtn, result),
+                            error -> finishPermissionRequest(exam, startBtn, ScreenCaptureService.Readiness.UNAVAILABLE));
+                } else {
+                    restoreStartButton(exam, startBtn);
+                }
+            }
+            case NEEDS_SETTINGS, UNAVAILABLE -> finishPermissionRequest(exam, startBtn, readiness);
+        }
+    }
+
+    private void finishPermissionRequest(StudentExamDto exam, Button startBtn, ScreenCaptureService.Readiness readiness) {
+        restoreStartButton(exam, startBtn);
+        switch (readiness) {
+            case READY -> setStatus("Screen recording is ready. Select the examination to continue.", "status-success");
+            case CAN_REQUEST, NEEDS_SETTINGS -> UiFeedback.showWarning(app.getPrimaryStage(),
+                    "Allow Screen Recording",
+                    "Open System Settings → Privacy & Security → Screen & System Audio Recording and enable "
+                            + "ExaSecure Student. If access is already enabled, quit and reopen this copy of "
+                            + "ExaSecure Student before trying again."
+                            + (exam.resumeOnly() ? " The server deadline for an existing attempt still applies." : ""));
+            case UNAVAILABLE -> UiFeedback.showError(app.getPrimaryStage(), "Screen Capture Unavailable",
+                    "The screen capture service could not start. Reopen ExaSecure Student from Finder and try again. "
+                            + "If the error persists, contact the examination administrator.");
+        }
+    }
+
+    private void restoreStartButton(StudentExamDto exam, Button startBtn) {
+        startBtn.setText(exam.resumeOnly() ? "Resume Existing Attempt" : "Start / Resume Exam");
+        view.setDisable(false);
+    }
+
     private void launchExam(StudentExamDto exam, Button startBtn) {
-        startBtn.setDisable(true);
         startBtn.setText("Connecting...");
 
         AsyncRunner.runAsync(
@@ -223,8 +271,7 @@ public class StudentDashboardView {
                     return new ExamData(attempt, questions, answers);
                 },
                 (ExamData data) -> {
-                    startBtn.setDisable(false);
-                    startBtn.setText("Start / Resume Exam");
+                    restoreStartButton(exam, startBtn);
                     if (data.questions.isEmpty()) {
                         UiFeedback.showError("Exam Notice", "This examination currently has no active questions.");
                         return;
@@ -232,8 +279,7 @@ public class StudentDashboardView {
                     app.showExamTaking(exam, data.attempt, data.questions, data.answers);
                 },
                 (Throwable err) -> {
-                    startBtn.setDisable(false);
-                    startBtn.setText("Start / Resume Exam");
+                    restoreStartButton(exam, startBtn);
                     if (err instanceof ApiException apiEx) {
                         UiFeedback.showError("Cannot Start Examination", apiEx.getServerMessage());
                     } else {

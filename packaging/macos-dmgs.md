@@ -11,7 +11,8 @@ certified. MySQL remains external; no paid Apple identity is required.
 
 Build natively on Apple Silicon using Oracle JDK 25, the repository Maven Wrapper,
 and macOS command-line tools (`jpackage`, `hdiutil`, `codesign`, `lipo`, Xcode
-command-line tools for the DMG icon). Network access is needed for uncached Maven
+command-line tools with the macOS 15.2 SDK or newer for the capture bridge).
+Network access is needed for uncached Maven
 dependencies. Windows remains pinned to Oracle 25.0.1 and WiX 3.14.1.8722.
 
 From the repository root, with no existing `target/r4-package`:
@@ -77,6 +78,7 @@ ExaSecure Student.app/Contents/
   MacOS/ExaSecure Student
   Resources/ExaSecure Student.icns
   app/ExaSecure Student.cfg
+  app/libexasecure-capture.dylib     in-process ARM64 ScreenCaptureKit bridge
   app/lib/                         10 Student-only JARs
   runtime/Contents/Home/           Student's own arm64 Java runtime
 
@@ -140,41 +142,34 @@ an app or ejecting its DMG must not remove external settings or database data.
 
 ## Screen capture and macOS privacy
 
-`ScreenCaptureService` is unchanged: AWT `Robot.createScreenCapture` captures the
-default desktop rectangle and encodes JPEG. This is real display capture, not a
-JavaFX scene snapshot. Oracle 25+37's bundled AWT native library imports
-`CGWindowListCreateImage` (CoreGraphics); this build does not substitute a
-ScreenCaptureKit implementation. `java.desktop` and its native libraries remain
-in each runtime.
+Packaged Student uses ScreenCaptureKit on macOS 14 and later to capture the
+main display. The JNI bridge runs inside the signed Student process. Earlier
+macOS and development runs without the bridge use one AWT Robot per process.
 
-Screen Recording permission is required for desktop proctor screenshots.
-macOS TCC controls access to other applications' screen content. No entitlement
-in this development package grants or bypasses Screen Recording permission.
-The ad-hoc app signature has no entitlement payload. First-use prompts and the
-listed application identity can depend on OS version, existing permissions and
-how the app was launched. Test the copied Student app from Finder so the check
-represents the distributed product rather than Terminal's permission context.
-Use System Settings → Privacy & Security → Screen & System Audio Recording;
-quit and reopen Student after changing permission if requested. See
-[Apple's permission guide](https://support.apple.com/en-ie/guide/mac-help/mchld6aa7d23/26/mac/26).
+Student checks CoreGraphics permission before sending the Server any start or
+resume request, and asks for permission only after the student chooses that
+action, at most once per process. The first successful readiness check exercises
+main-display capture and discards the JPEG locally. An existing attempt retains
+its original Server deadline.
 
-Before permission, capture may fail or return a restricted image (for example,
-without other windows). A nonempty JPEG is not proof of complete capture.
-The existing service returns null on thrown/headless/encoding failure; incident
-recording is independent of evidence success. Permission denial must not erase
-a violation. After permission, manually inspect actual focus-loss evidence in
-Admin and confirm another harmless desktop window appears. Do not use sensitive
-content for this test. Physical C06 testing proved correct real-desktop capture
-on the main display. With multiple displays, capture targets the main/default
-display and may miss the monitor containing the foreground application. This is
-a non-blocking limitation for the accepted developer/demo scope; production
-multi-monitor capture remains future work. No TCC reset, database manipulation,
-silent grant or privacy bypass is part of this build.
+Open the copied app from Finder using a consistent install location. Enable
+Student in System Settings → Privacy & Security → Screen & System Audio
+Recording, then quit and reopen the same bundle if prompted. See
+[Apple’s permission guide](https://support.apple.com/en-ie/guide/mac-help/mchld6aa7d23/26/mac/26).
+
+Permission loss, capture errors and black or empty frames result in missing
+evidence. Incidents are recorded independently. Check the evidence in Admin
+and confirm that the test image contains a harmless foreground window.
+Capture covers the primary display. macOS manages its capture indicators and
+acknowledgment alerts. The legacy AWT API triggered a replayd acknowledgment
+alert on macOS 27 even though TCC already allowed the installed Student app.
 
 ## Signing, Gatekeeper and DMG
 
 With Oracle 25+37, jpackage automatically ad-hoc signs these app-images. This is
-not Developer ID signing or notarization. The driver records actual signing
+not Developer ID signing or notarization. Bundle identifiers are
+`com.examsystem.client.student` and `com.examsystem.launcher`. Ad-hoc designated
+requirements can change with a rebuild. The driver records actual signing
 metadata and requires `codesign --verify --deep --strict` success. No developer
 identity, keychain credential or release secret is requested.
 
@@ -216,16 +211,14 @@ test. Main-display screenshot acceptance and its limits are recorded above.
    `/usr/sbin/lsof -p PID | /usr/bin/grep libjvm` and confirm the loaded library
    comes from the copied app's `Contents/runtime/Contents/Home`. This is also
    the bundled-runtime check for Operator and its children.
-4. On a disposable exam before granting Screen Recording, leave the exam for
-   another harmless window. Record the permission prompt/Settings entry, strike
-   and available/restricted/missing evidence. Confirm evidence failure never
-   removes the violation. Use a fresh attempt as needed to avoid exhausting
-   the three-strike policy.
-5. Manually allow Student in Screen & System Audio Recording, then quit/reopen
-   as macOS requests. On a fresh disposable exam repeat focus loss for >800 ms
-   and >5 seconds; inspect initial and long-absence evidence in Admin. Confirm
-   actual other-window desktop pixels and one incident per departure. Save the
-   manual evidence and actual permission behavior for independent review.
+4. Select a disposable proctored exam before granting permission. Confirm
+   that Student stays at the dashboard while approval is pending.
+5. Manually allow Student in Screen & System Audio Recording and reopen it
+   if requested. Switch to a harmless window for more than five seconds in
+   a disposable exam. Check the initial and long-absence screenshots in
+   Admin and verify one incident. Repeat with a second exam, then quit and
+   reopen the same Student bundle and repeat on another fresh exam. Record
+   any macOS reminders separately from permission requests.
 6. Mount Operator DMG, inspect its app/Applications link, copy Operator beside
    Student, eject and launch Control Center. Confirm icon/UI. Configure a
    reachable external test MySQL database/account and an unused Server port.

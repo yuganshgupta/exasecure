@@ -142,6 +142,13 @@ public class BuildMacDmgs {
     static void auditBundle(BuildImages build, String product) throws Exception {
         Path app = image(build, product), contents = app.resolve("Contents"), lib = contents.resolve("app/lib");
         inventory(app);
+        Path bundleId = build.output.resolve(product + "-bundle-identifier.txt");
+        build.run(List.of("/usr/bin/plutil", "-extract", "CFBundleIdentifier", "raw", "-o", "-",
+                contents.resolve("Info.plist").toString()), bundleId);
+        BuildImages.require(Files.readString(bundleId).trim().equals(BuildImages.macBundleIdentifier(product)),
+                "macOS bundle identifier changed");
+        BuildImages.require(Files.isRegularFile(contents.resolve("app/" + BuildImages.MAC_CAPTURE_LIBRARY))
+                == product.equals("student"), "Only Student should bundle the macOS capture library");
         List<BuildImages.Role> roles = product.equals("student") ? List.of(role(product)) : BuildImages.ROLES.subList(1, 4);
         var expected = new TreeSet<String>();
         for (var role : roles) {

@@ -14,6 +14,7 @@ import javax.imageio.ImageIO;
 public class BuildImages {
     static final String VERSION = "2.0.0-SNAPSHOT";
     static final String NATIVE_VERSION = VERSION.replaceFirst("-SNAPSHOT$", "");
+    static final String MAC_CAPTURE_LIBRARY = "libexasecure-capture.dylib";
     static final String MODULES = "java.se,jdk.unsupported,jdk.crypto.ec,jdk.localedata,jdk.charsets,"
             + "jdk.zipfs,jdk.management,jdk.security.auth,jdk.security.jgss,jdk.httpserver";
     record Role(String id, String module, String name, String main) {
@@ -86,6 +87,13 @@ public class BuildImages {
         return vendor.equals("Oracle Corporation") && (target.windows
                 ? version.version().equals(List.of(25, 0, 1)) : version.feature() == 25);
     }
+    static String macBundleIdentifier(String product) {
+        return switch (product) {
+            case "student" -> "com.examsystem.client.student";
+            case "operator" -> "com.examsystem.launcher";
+            default -> throw new IllegalArgumentException("Unknown macOS product: " + product);
+        };
+    }
     SortedMap<String, Path> resolve(Role role) throws Exception {
         var found = new TreeMap<String, Path>();
         String cp = Files.readString(output.resolve("maven/" + role.module + "/r4-classpath.txt")).trim();
@@ -143,7 +151,9 @@ public class BuildImages {
     static String options(Role role, Collection<String> names, Target target) {
         String cp = String.join(target.windows ? ";" : ":", names.stream().sorted().map(n -> "$APPDIR/lib/" + n).toList());
         return "-Djava.class.path=" + cp + " -Dexasecure.config.mode=installed --enable-native-access=ALL-UNNAMED"
-                + (role.id.equals("operator") ? " -Dexasecure.app.dir=$APPDIR/.." : "");
+                + (role.id.equals("operator") ? " -Dexasecure.app.dir=$APPDIR/.." : "")
+                + (!target.windows && role.id.equals("student")
+                        ? " -Dexasecure.macos.capture.library=$APPDIR/" + MAC_CAPTURE_LIBRARY : "");
     }
     void image(String product, Path runtime, Path icon) throws Exception {
         List<Role> roles = product.equals("student") ? List.of(ROLES.getFirst()) : ROLES.subList(1, 4);
@@ -155,6 +165,14 @@ public class BuildImages {
             require(previous == null || Files.mismatch(previous, entry.getValue()) == -1, "Conflicting shared JAR");
         }
         for (var entry : union.entrySet()) Files.copy(entry.getValue(), lib.resolve(entry.getKey()));
+        if (!target.windows && product.equals("student")) {
+            run(List.of("/usr/bin/xcrun", "clang", "-arch", "arm64", "-dynamiclib", "-fobjc-arc",
+                    "-mmacosx-version-min=11.0", "-Werror=unguarded-availability",
+                    "-I" + jdk.resolve("include"), "-I" + jdk.resolve("include/darwin"),
+                    "-framework", "Foundation", "-framework", "CoreGraphics", "-framework", "ImageIO",
+                    "-weak_framework", "ScreenCaptureKit", root.resolve("packaging/MacScreenCapture.m").toString(),
+                    "-o", input.resolve(MAC_CAPTURE_LIBRARY).toString()), output.resolve("student-native-capture.log"));
+        }
         var manifest = new ArrayList<String>();
         for (var entry : union.entrySet()) manifest.add(sha256(entry.getValue()) + "  lib/" + entry.getKey());
         Files.write(output.resolve(product + "-input.sha256"), manifest);
@@ -168,6 +186,7 @@ public class BuildImages {
         var command = new ArrayList<>(List.of(tool("jpackage").toString(), "--type", "app-image", "--name", main.name,
                 "--app-version", NATIVE_VERSION, "--vendor", "ExaSecure", "--input", input.toString(), "--dest", output.resolve("images").toString(),
                 "--runtime-image", runtime.toString(), "--main-jar", "lib/" + main.jar(), "--main-class", main.main, "--icon", icon.toString()));
+        if (!target.windows) command.addAll(List.of("--mac-package-identifier", macBundleIdentifier(product)));
         // Separate java-options arguments avoid platform shell quoting entirely.
         for (String option : options(main, artifacts.get(main.id).keySet(), target).split(" ")) command.addAll(List.of("--java-options", option));
         for (Role role : roles.subList(1, roles.size())) {
@@ -180,6 +199,12 @@ public class BuildImages {
         }
         run(command, output.resolve(product + "-jpackage.log"));
         Path image = output.resolve("images/" + main.name + target.appSuffix());
+        if (!target.windows && product.equals("student")) {
+            Path bridge = image.resolve(target.appDirectory()).resolve(MAC_CAPTURE_LIBRARY);
+            require(Files.isRegularFile(bridge), "Missing packaged macOS capture library");
+            run(List.of("/usr/bin/lipo", "-verify_arch", "arm64", bridge.toString()),
+                    output.resolve("student-native-capture-architecture.log"));
+        }
         for (Role role : roles) {
             require(Files.isRegularFile(image.resolve(target.launcher(role.name))), "Missing native launcher " + role.name);
             Path cfg = image.resolve(target.appDirectory()).resolve(role.name + ".cfg");

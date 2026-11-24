@@ -70,11 +70,14 @@ products into DMGs. No cross-compilation from Windows.
 - JavaFX 25.0.2 provides `mac-aarch64` classified native JARs.
 - The `BuildImages` driver auto-detects `aarch64` and uses the correct
   classifier. No manual platform override is needed.
-- Screen Recording permission is required for proctoring screenshot capture.
-  Grant it to the JDK `java` binary or the packaged app bundle in
-  System Settings → Privacy & Security → Screen Recording.
-- Without the permission, `ScreenCaptureService` returns `null` safely;
-  proctoring incidents still record but without screenshot evidence.
+- Student checks recording permission and capture readiness before any exam
+  start or resume request. Enable the final Student bundle in System Settings
+  → Privacy & Security → Screen & System Audio Recording. Reopen the same app
+  if prompted.
+- The packaged app uses ScreenCaptureKit on macOS 14 and later. Direct Maven
+  runs use AWT. Use `MAVEN_OPTS=--enable-native-access=ALL-UNNAMED` to enable native
+  access for Student development on macOS. Permission loss during an attempt
+  can prevent capture. The proctoring incident remains recorded.
 
 ## MySQL Setup on macOS
 
@@ -95,8 +98,8 @@ local credentials. Keep real credentials out of Git.
 
 ## Known Platform-Specific Issues
 
-1. **Screen Recording permission**: Must be granted before proctoring
-   screenshots work. First-run macOS prompts may interrupt the exam flow.
+1. **Screen Recording permission**: Complete the initial readiness check
+   before starting the demonstration. macOS can display capture indicators.
 2. **Symlink tests**: The launcher's symlink escape test may behave
    differently on APFS vs NTFS junctions.
 3. **Window focus**: macOS full-screen behavior and focus-loss detection
