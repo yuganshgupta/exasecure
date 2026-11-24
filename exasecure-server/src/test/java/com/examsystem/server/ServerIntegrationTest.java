@@ -582,6 +582,28 @@ class ServerIntegrationTest {
     }
 
     @Test
+    void startupFailureClosesThePoolAndRepeatedStopIsSafe() throws Exception {
+        var settings = new com.zaxxer.hikari.HikariConfig();
+        settings.setJdbcUrl(dbUrl);
+        settings.setUsername(dbUser);
+        settings.setPassword(dbPassword);
+        try (var pool = new com.zaxxer.hikari.HikariDataSource(settings) {
+            @Override public java.sql.Connection getConnection() throws SQLException {
+                throw new SQLException("injected startup connection failure", "08006");
+            }
+        }) {
+            var starting = new ExaSecureServer(new AppConfig(0, dbUrl, dbUser, dbPassword) {
+                @Override public javax.sql.DataSource createDataSource() { return pool; }
+            });
+            assertThatThrownBy(starting::start).hasRootCauseMessage("injected startup connection failure");
+            assertThat(pool.isClosed()).isTrue();
+            starting.stop();
+            starting.stop();
+            assertThat(starting.getDataSource()).isNull();
+        }
+    }
+
+    @Test
     void legacyCleanupFailureRollsBackAttemptDeletion() throws Exception {
         var fixture = createDeadlineAnswerFixture();
         try (var conn = server.getDataSource().getConnection(); var stmt = conn.createStatement()) {

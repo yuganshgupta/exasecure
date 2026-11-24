@@ -36,8 +36,22 @@ public class ExaSecureServer {
         this.config = config;
     }
 
-    public void start() {
+    public synchronized void start() {
+        if (dataSource != null) throw new IllegalStateException("Server already started");
         dataSource = config.createDataSource();
+        try {
+            startHttp();
+        } catch (RuntimeException | Error failure) {
+            try {
+                stop();
+            } catch (RuntimeException | Error cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
+    }
+
+    private void startHttp() {
         
         // Migrate DB
         new DatabaseMigrator(dataSource).migrate();
@@ -149,12 +163,15 @@ public class ExaSecureServer {
         log.info("ExaSecure Server running on port {}", config.port);
     }
 
-    public void stop() {
-        if (app != null) {
-            app.stop();
-        }
-        if (dataSource instanceof com.zaxxer.hikari.HikariDataSource) {
-            ((com.zaxxer.hikari.HikariDataSource) dataSource).close();
+    public synchronized void stop() {
+        Javalin running = app;
+        DataSource pool = dataSource;
+        app = null;
+        dataSource = null;
+        try {
+            if (running != null) running.stop();
+        } finally {
+            if (pool instanceof com.zaxxer.hikari.HikariDataSource hikari) hikari.close();
         }
     }
 
@@ -171,7 +188,9 @@ public class ExaSecureServer {
         if ("1".equals(System.getenv("EXASECURE_PROCESS_CONTROL"))) {
             com.examsystem.server.bootstrap.ManagedServerControl.run(config);
         } else {
-            new ExaSecureServer(config).start();
+            var server = new ExaSecureServer(config);
+            Runtime.getRuntime().addShutdownHook(new Thread(server::stop, "exasecure-server-shutdown"));
+            server.start();
         }
     }
 }
