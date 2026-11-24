@@ -988,6 +988,52 @@ class ServerIntegrationTest {
     }
 
     @Test
+    void loginStoresOnlyAVerifierAndLogoutRevokesTheBearer() throws Exception {
+        var mapper = new ObjectMapper();
+        String password = UUID.randomUUID().toString();
+        try (var client = HttpClient.newHttpClient()) {
+            var creation = sendJson(client, "POST", "/api/v1/admin/users", "token-admin1", """
+                    {"username":"session-storage-student","password":"%s",
+                     "fullName":"Session Storage Student","enrollmentNumber":"SESSION-ONE",
+                     "section":"A","role":"STUDENT"}
+                    """.formatted(password));
+            assertThat(creation.statusCode()).isEqualTo(201);
+            int userId = mapper.readTree(creation.body()).required("id").asInt();
+
+            var login = sendJson(client, "POST", "/api/v1/auth/login", "", """
+                    {"username":"session-storage-student","password":"%s"}
+                    """.formatted(password));
+            assertThat(login.statusCode()).isEqualTo(200);
+            String token = mapper.readTree(login.body()).required("token").asText();
+            String verifier;
+            try (var conn = server.getDataSource().getConnection();
+                 var query = conn.prepareStatement("SELECT token FROM server_sessions WHERE user_id = ?")) {
+                query.setInt(1, userId);
+                try (var rows = query.executeQuery()) {
+                    assertThat(rows.next()).isTrue();
+                    verifier = rows.getString("token");
+                    assertThat(rows.next()).isFalse();
+                }
+            }
+            assertThat(token.equals(verifier)).as("bearer is absent from session storage").isFalse();
+
+            String history = "/api/v1/student/history";
+            assertThat(sendJson(client, "GET", history, token, null).statusCode()).isEqualTo(200);
+            assertThat(sendJson(client, "GET", history, verifier, null).statusCode()).isEqualTo(401);
+            assertThat(sendJson(client, "POST", "/api/v1/auth/logout", verifier, null).statusCode()).isEqualTo(401);
+            assertThat(sendJson(client, "GET", history, token, null).statusCode()).isEqualTo(200);
+            assertThat(sendJson(client, "POST", "/api/v1/auth/logout", token, null).statusCode()).isEqualTo(204);
+            assertThat(sendJson(client, "GET", history, token, null).statusCode()).isEqualTo(401);
+
+            String oldToken = UUID.randomUUID().toString();
+            insertSession(oldToken, userId);
+            assertThat(sendJson(client, "GET", history, oldToken, null).statusCode()).isEqualTo(200);
+            assertThat(sendJson(client, "POST", "/api/v1/auth/logout", oldToken, null).statusCode()).isEqualTo(204);
+            assertThat(sendJson(client, "GET", history, oldToken, null).statusCode()).isEqualTo(401);
+        }
+    }
+
+    @Test
     void nonImageEvidenceIsRejectedWithoutRemovingTheAcknowledgedIncident() throws Exception {
         int attemptId = atomicFixture(0);
         var incident = recordIncident(server.getDataSource(), attemptId, UUID.randomUUID().toString());
