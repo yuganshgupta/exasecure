@@ -70,10 +70,7 @@ public class StudentDashboardView {
 
         Button logoutBtn = new Button("Sign Out");
         logoutBtn.getStyleClass().add("btn-danger");
-        logoutBtn.setOnAction(e -> {
-            apiClient.logout();
-            app.showLogin();
-        });
+        logoutBtn.setOnAction(e -> com.examsystem.client.ui.SignOutAction.run(apiClient, view, app::showLogin));
 
         var themeSelector = com.examsystem.client.theme.ThemeManager.getInstance().createThemeSelector();
         topBar.getChildren().addAll(brand, portalBadge, spacer, themeSelector, userLabel, historyBtn, logoutBtn);

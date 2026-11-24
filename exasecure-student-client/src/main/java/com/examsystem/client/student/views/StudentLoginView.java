@@ -103,7 +103,11 @@ public class StudentLoginView {
             spinner.setVisible(true);
 
             AsyncRunner.runAsync(
-                    () -> apiClient.login(u, p),
+                    () -> {
+                        AuthResponseDto reply = apiClient.login(u, p);
+                        if (!"STUDENT".equalsIgnoreCase(reply.role())) apiClient.logout();
+                        return reply;
+                    },
                     (AuthResponseDto res) -> {
                         spinner.setVisible(false);
                         loginBtn.setDisable(false);
@@ -111,7 +115,6 @@ public class StudentLoginView {
                         passwordField.setDisable(false);
 
                         if (!"STUDENT".equalsIgnoreCase(res.role())) {
-                            apiClient.logout();
                             app.authenticationFailed();
                             changeServer.setDisable(!app.canConfigureServer());
                             errorLabel.setText("Access denied: This account has the " + res.role() + " role. Please use the Admin Console.");

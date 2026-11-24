@@ -87,14 +87,22 @@ public class ApiClient {
     }
 
     public void logout() {
+        logoutSession(sessionState.get());
+    }
+
+    public boolean logoutSession(SessionState.UserSession session) {
+        if (session == null) return true;
         try {
-            if (sessionState.isAuthenticated()) {
-                postEmpty("/auth/logout", true);
-            }
-        } catch (Exception ignored) {
-            // Best effort logout on server
+            var request = HttpRequest.newBuilder(URI.create(config.apiV1Url() + "/auth/logout"))
+                    .timeout(Duration.ofSeconds(10))
+                    .header("Authorization", "Bearer " + session.token())
+                    .POST(HttpRequest.BodyPublishers.noBody()).build();
+            int status = send(request).statusCode();
+            return status == 401 || (status >= 200 && status < 300);
+        } catch (ApiException unavailable) {
+            return false;
         } finally {
-            sessionState.clear();
+            sessionState.clearIfCurrent(session);
         }
     }
 

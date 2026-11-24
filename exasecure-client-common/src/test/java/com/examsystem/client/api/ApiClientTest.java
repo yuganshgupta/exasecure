@@ -44,6 +44,50 @@ class ApiClientTest {
     }
 
     @Test
+    void delayedLogoutSendsOnlyTheCapturedTokenAndLeavesNewerLoginIntact() throws Exception {
+        var requestStarted = new java.util.concurrent.CountDownLatch(1);
+        var release = new java.util.concurrent.CountDownLatch(1);
+        var authorization = new AtomicReference<String>();
+        server.createContext("/api/v1/auth/logout", exchange -> {
+            try (exchange) {
+                authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+                requestStarted.countDown();
+                if (!release.await(5, java.util.concurrent.TimeUnit.SECONDS)) throw new IOException("fixture timed out");
+                exchange.sendResponseHeaders(401, -1);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException(e);
+            }
+        });
+        sessionState.setSession("old", "Old", "ADMIN", "fixture-old-token");
+        var captured = sessionState.get();
+        try (var worker = java.util.concurrent.Executors.newSingleThreadExecutor()) {
+            var logout = worker.submit(() -> client.logoutSession(captured));
+            try {
+                assertThat(requestStarted.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+                sessionState.setSession("new", "New", "ADMIN", "fixture-new-token");
+            } finally {
+                release.countDown();
+            }
+            assertThat(logout.get(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        }
+        assertThat(authorization).hasValue("Bearer fixture-old-token");
+        assertThat(sessionState.token()).isEqualTo("fixture-new-token");
+    }
+
+    @Test
+    void failedRevocationReportsUnconfirmedAndClearsOnlyTheLocalSession() {
+        server.createContext("/api/v1/auth/logout", exchange -> {
+            try (exchange) {
+                exchange.sendResponseHeaders(503, -1);
+            }
+        });
+        sessionState.setSession("old", "Old", "STUDENT", "fixture-token");
+        assertThat(client.logoutSession(sessionState.get())).isFalse();
+        assertThat(sessionState.isAuthenticated()).isFalse();
+    }
+
+    @Test
     void startAndResumeDeserializeActiveAttemptWithExplicitNullResultFields() {
         sessionState.setSession("student", "Student", "STUDENT", "test-token");
         var method = new AtomicReference<String>();

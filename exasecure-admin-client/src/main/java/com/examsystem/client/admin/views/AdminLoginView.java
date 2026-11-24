@@ -94,7 +94,11 @@ public class AdminLoginView {
             spinner.setVisible(true);
 
             AsyncRunner.runAsync(
-                    () -> apiClient.login(u, p),
+                    () -> {
+                        AuthResponseDto reply = apiClient.login(u, p);
+                        if (!"ADMIN".equalsIgnoreCase(reply.role())) apiClient.logout();
+                        return reply;
+                    },
                     (AuthResponseDto res) -> {
                         spinner.setVisible(false);
                         loginBtn.setDisable(false);
@@ -102,7 +106,6 @@ public class AdminLoginView {
                         passwordField.setDisable(false);
 
                         if (!"ADMIN".equalsIgnoreCase(res.role())) {
-                            apiClient.logout();
                             errorLabel.setText("Access denied: Account has " + res.role() + " role. Administrator privileges required.");
                             errorLabel.setVisible(true);
                             return;

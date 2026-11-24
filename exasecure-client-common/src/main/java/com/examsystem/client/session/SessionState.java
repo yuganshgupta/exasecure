@@ -29,6 +29,10 @@ public class SessionState {
         currentSession.set(null);
     }
 
+    public void clearIfCurrent(UserSession expected) {
+        currentSession.compareAndSet(expected, null);
+    }
+
     public boolean isAuthenticated() {
         return currentSession.get() != null;
     }
