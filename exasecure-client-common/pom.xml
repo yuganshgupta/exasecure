@@ -15,7 +15,7 @@
     <description>Shared HTTP API client, session, and UI foundation for desktop clients</description>
 
     <properties>
-        <jackson.version>2.18.2</jackson.version>
+        <jackson.version>2.18.12</jackson.version>
     </properties>
 
     <dependencies>
