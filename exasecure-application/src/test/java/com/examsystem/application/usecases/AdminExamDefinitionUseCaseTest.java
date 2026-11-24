@@ -30,14 +30,48 @@ class AdminExamDefinitionUseCaseTest {
 
     @Test
     void rejectsInvalidCorrectnessMetadataBeforePersistence() {
-        AdminExamDefinitionCommand invalid = new AdminExamDefinitionCommand(
+        AdminExamDefinitionCommand singleMultipleCorrect = new AdminExamDefinitionCommand(
                 "Exam", 30, List.of(new AdminQuestionDefinitionCommand(
                 "Question", "SINGLE", List.of(
                 new AdminOptionDefinitionCommand("A", true),
                 new AdminOptionDefinitionCommand("B", true)))));
+        AdminExamDefinitionCommand singleZeroCorrect = new AdminExamDefinitionCommand(
+                "Exam", 30, List.of(new AdminQuestionDefinitionCommand(
+                "Question", "SINGLE", List.of(
+                new AdminOptionDefinitionCommand("A", false),
+                new AdminOptionDefinitionCommand("B", false)))));
+        AdminExamDefinitionCommand multiZeroCorrect = new AdminExamDefinitionCommand(
+                "Exam", 30, List.of(new AdminQuestionDefinitionCommand(
+                "Question", "MULTI", List.of(
+                new AdminOptionDefinitionCommand("A", false),
+                new AdminOptionDefinitionCommand("B", false)))));
 
-        assertThatIllegalArgumentException().isThrownBy(() -> useCase.createDefinition(invalid, 9));
+        assertThatIllegalArgumentException().isThrownBy(() -> useCase.createDefinition(singleMultipleCorrect, 9));
+        assertThatIllegalArgumentException().isThrownBy(() -> useCase.createDefinition(singleZeroCorrect, 9));
+        assertThatIllegalArgumentException().isThrownBy(() -> useCase.createDefinition(multiZeroCorrect, 9));
+        assertThatIllegalArgumentException().isThrownBy(() -> useCase.reviseDefinition(1, singleMultipleCorrect, 9));
+        assertThatIllegalArgumentException().isThrownBy(() -> useCase.reviseDefinition(1, singleZeroCorrect, 9));
         assertThat(port.calls).isZero();
+    }
+
+    @Test
+    void acceptsMultiQuestionsWithOneOrMoreCorrectOptions() {
+        AdminExamDefinitionCommand multiOneCorrect = new AdminExamDefinitionCommand(
+                "Multi One", 30, List.of(new AdminQuestionDefinitionCommand(
+                "Question", "multi", List.of(
+                new AdminOptionDefinitionCommand("A", true),
+                new AdminOptionDefinitionCommand("B", false)))));
+        AdminExamDefinitionCommand multiTwoCorrect = new AdminExamDefinitionCommand(
+                "Multi Two", 30, List.of(new AdminQuestionDefinitionCommand(
+                "Question", "MULTI", List.of(
+                new AdminOptionDefinitionCommand("A", true),
+                new AdminOptionDefinitionCommand("B", true),
+                new AdminOptionDefinitionCommand("C", false)))));
+
+        assertThat(useCase.createDefinition(multiOneCorrect, 9)).isEqualTo(new AdminExamMutationResult(51, 1));
+        assertThat(port.definition.questions().getFirst().type()).isEqualTo("MULTI");
+        assertThat(useCase.createDefinition(multiTwoCorrect, 9)).isEqualTo(new AdminExamMutationResult(51, 1));
+        assertThat(port.calls).isEqualTo(2);
     }
 
     @Test

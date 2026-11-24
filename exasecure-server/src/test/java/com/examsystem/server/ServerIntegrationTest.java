@@ -1274,6 +1274,101 @@ class ServerIntegrationTest {
     }
 
     @Test
+    void adminExamDefinitionValidationRejectsInvalidAnswerCardinality() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        int examCountBefore;
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var stmt = conn.createStatement();
+             var rs = stmt.executeQuery("SELECT COUNT(*) FROM exams")) {
+            rs.next();
+            examCountBefore = rs.getInt(1);
+        }
+
+        String singleMultipleCorrect = """
+                {
+                  "title": "Invalid Single Two Correct",
+                  "durationMinutes": 30,
+                  "questions": [
+                    {
+                      "text": "Pick one",
+                      "type": "SINGLE",
+                      "options": [
+                        {"text": "Option A", "correct": true},
+                        {"text": "Option B", "correct": true}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        String singleZeroCorrect = """
+                {
+                  "title": "Invalid Single Zero Correct",
+                  "durationMinutes": 30,
+                  "questions": [
+                    {
+                      "text": "Pick one",
+                      "type": "SINGLE",
+                      "options": [
+                        {"text": "Option A", "correct": false},
+                        {"text": "Option B", "correct": false}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        String multiZeroCorrect = """
+                {
+                  "title": "Invalid Multi Zero Correct",
+                  "durationMinutes": 30,
+                  "questions": [
+                    {
+                      "text": "Pick many",
+                      "type": "MULTI",
+                      "options": [
+                        {"text": "Option A", "correct": false},
+                        {"text": "Option B", "correct": false}
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+        assertThat(sendJson(client, "POST", "/api/v1/admin/exams", "token-admin1", singleMultipleCorrect).statusCode())
+                .isEqualTo(400);
+        assertThat(sendJson(client, "POST", "/api/v1/admin/exams", "token-admin1", singleZeroCorrect).statusCode())
+                .isEqualTo(400);
+        assertThat(sendJson(client, "POST", "/api/v1/admin/exams", "token-admin1", multiZeroCorrect).statusCode())
+                .isEqualTo(400);
+
+        assertThat(sendJson(client, "POST", "/api/v1/admin/exams/1/revisions", "token-admin1", singleMultipleCorrect)
+                .statusCode()).isEqualTo(400);
+        assertThat(sendJson(client, "POST", "/api/v1/admin/exams/1/revisions", "token-admin1", singleZeroCorrect)
+                .statusCode()).isEqualTo(400);
+
+        assertDatabaseCount("SELECT COUNT(*) FROM exams", examCountBefore);
+
+        String multiSingleCorrect = """
+                {
+                  "title": "Valid Multi Single Correct",
+                  "durationMinutes": 30,
+                  "questions": [
+                    {
+                      "text": "Select applicable protocols",
+                      "type": "MULTI",
+                      "options": [
+                        {"text": "TCP", "correct": true},
+                        {"text": "ARP", "correct": false}
+                      ]
+                    }
+                  ]
+                }
+                """;
+        HttpResponse<String> validMulti = sendJson(
+                client, "POST", "/api/v1/admin/exams", "token-admin1", multiSingleCorrect);
+        assertThat(validMulti.statusCode()).isEqualTo(201);
+    }
+
+    @Test
     void sessionAndStudentObjectAuthorizationNegativesWriteNothing() throws Exception {
         HttpClient client = HttpClient.newHttpClient();
 

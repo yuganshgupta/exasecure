@@ -3,7 +3,6 @@ package com.examsystem.client.admin.views;
 import com.examsystem.client.ui.UiFeedback;
 import com.examsystem.contracts.admin.AdminExamDefinitionRequestDto;
 import com.examsystem.contracts.admin.AdminExamDto;
-import com.examsystem.contracts.admin.AdminOptionDefinitionDto;
 import com.examsystem.contracts.admin.AdminQuestionDefinitionDto;
 import javafx.geometry.Insets;
 import javafx.geometry.Pos;
@@ -18,6 +17,8 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
     private final TextField durationField = new TextField();
     private final VBox questionsContainer = new VBox(16);
     private final List<QuestionCard> questionCards = new ArrayList<>();
+
+    private AdminExamDefinitionRequestDto validatedResult;
 
     public ExamDefinitionBuilderDialog(String title, String header, AdminExamDto existingExam, List<AdminQuestionDefinitionDto> existingQuestions) {
         setTitle(title);
@@ -89,9 +90,17 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
             addQuestionCard(null); // At least one empty question
         }
 
+        Button saveButton = (Button) getDialogPane().lookupButton(saveBtnType);
+        saveButton.addEventFilter(javafx.event.ActionEvent.ACTION, event -> {
+            validatedResult = validateAndBuild();
+            if (validatedResult == null) {
+                event.consume();
+            }
+        });
+
         setResultConverter(dialogButton -> {
             if (dialogButton == saveBtnType) {
-                return validateAndBuild();
+                return validatedResult != null ? validatedResult : validateAndBuild();
             }
             return null;
         });
@@ -157,13 +166,20 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
     // ==========================================
 
     public static class QuestionCard extends VBox {
+        private final QuestionEditorState state;
+        private final ToggleGroup singleToggleGroup = new ToggleGroup();
         private final Label numberLabel;
         private final TextField textField = new TextField();
         private final ComboBox<String> typeCombo = new ComboBox<>();
+        private final Label optLabel = new Label();
+        private final Label noticeLabel = new Label();
         private final VBox optionsContainer = new VBox(8);
         private final List<OptionRow> optionRows = new ArrayList<>();
+        private boolean syncingControls;
 
         public QuestionCard(ExamDefinitionBuilderDialog parent, int index, AdminQuestionDefinitionDto existing) {
+            this.state = QuestionEditorState.fromExisting(existing);
+
             setSpacing(10);
             setPadding(new Insets(12));
             getStyleClass().add("theme-card");
@@ -174,8 +190,16 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
             numberLabel = new Label("Question " + index);
             numberLabel.getStyleClass().add("question-number-small");
 
-            typeCombo.getItems().addAll("SINGLE", "MULTI");
-            typeCombo.setValue(existing != null && "MULTI".equalsIgnoreCase(existing.type()) ? "MULTI" : "SINGLE");
+            typeCombo.getItems().addAll(QuestionEditorState.TYPE_SINGLE, QuestionEditorState.TYPE_MULTI);
+            typeCombo.setValue(state.type());
+            typeCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
+                if (syncingControls || newVal == null) {
+                    return;
+                }
+                state.changeType(newVal);
+                syncSelectionControls();
+                refreshNotice();
+            });
 
             Region spacer = new Region();
             HBox.setHgrow(spacer, Priority.ALWAYS);
@@ -187,13 +211,11 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
             header.getChildren().addAll(numberLabel, new Label("Type:"), typeCombo, spacer, removeQBtn);
 
             textField.setPromptText("Enter question prompt / text");
-            if (existing != null) {
-                textField.setText(existing.text());
-            }
+            textField.setText(state.text());
+            textField.textProperty().addListener((obs, oldVal, newVal) -> state.setText(newVal));
 
             HBox optionsHeader = new HBox(8);
             optionsHeader.setAlignment(Pos.CENTER_LEFT);
-            Label optLabel = new Label("Options (Check box to mark correct):");
             optLabel.getStyleClass().addAll("secondary-text", "small-text");
 
             Region optSpacer = new Region();
@@ -201,103 +223,175 @@ public class ExamDefinitionBuilderDialog extends Dialog<AdminExamDefinitionReque
 
             Button addOptBtn = new Button("+ Add Option");
             addOptBtn.getStyleClass().add("btn-secondary");
-            addOptBtn.setOnAction(e -> addOptionRow(null));
+            addOptBtn.setOnAction(e -> addNewOptionRow());
 
             optionsHeader.getChildren().addAll(optLabel, optSpacer, addOptBtn);
 
-            getChildren().addAll(header, textField, optionsHeader, optionsContainer);
+            noticeLabel.getStyleClass().addAll("status-warning", "small-text");
+            noticeLabel.setWrapText(true);
+            noticeLabel.managedProperty().bind(noticeLabel.visibleProperty());
 
-            if (existing != null && existing.options() != null && !existing.options().isEmpty()) {
-                for (AdminOptionDefinitionDto opt : existing.options()) {
-                    addOptionRow(opt);
-                }
-            } else {
-                addOptionRow(new AdminOptionDefinitionDto("Option A", true));
-                addOptionRow(new AdminOptionDefinitionDto("Option B", false));
+            getChildren().addAll(header, textField, optionsHeader, noticeLabel, optionsContainer);
+
+            for (QuestionEditorState.OptionState optState : state.options()) {
+                appendOptionRow(optState);
             }
+            syncSelectionControls();
+            refreshNotice();
         }
 
         public void updateNumber(int index) {
             numberLabel.setText("Question " + index);
         }
 
-        private void addOptionRow(AdminOptionDefinitionDto existing) {
-            OptionRow row = new OptionRow(this, existing);
+        private void addNewOptionRow() {
+            QuestionEditorState.OptionState optState = state.addOption("");
+            appendOptionRow(optState);
+            syncSelectionControls();
+        }
+
+        private void appendOptionRow(QuestionEditorState.OptionState optState) {
+            OptionRow row = new OptionRow(this, optState);
             optionRows.add(row);
             optionsContainer.getChildren().add(row);
         }
 
         public void removeOptionRow(OptionRow row) {
-            if (optionRows.size() <= 2) {
+            if (!state.removeOption(row.optionState)) {
                 UiFeedback.showError("Notice", "Each question must have at least 2 options.");
                 return;
             }
+            row.detachFromToggleGroup();
             optionRows.remove(row);
             optionsContainer.getChildren().remove(row);
+            refreshNotice();
+        }
+
+        private void onOptionSelectionChanged(OptionRow row, boolean selected) {
+            state.setOptionCorrect(row.optionState, selected);
+            if (state.isSingle() && selected) {
+                syncingControls = true;
+                try {
+                    for (OptionRow r : optionRows) {
+                        r.reflectState(true);
+                    }
+                } finally {
+                    syncingControls = false;
+                }
+            }
+            refreshNotice();
+        }
+
+        private void syncSelectionControls() {
+            syncingControls = true;
+            try {
+                optLabel.setText(state.isSingle()
+                        ? "Options (Select exactly one correct answer):"
+                        : "Options (Check one or more correct answers):");
+                for (OptionRow row : optionRows) {
+                    row.configureControl(state.isSingle(), singleToggleGroup);
+                }
+            } finally {
+                syncingControls = false;
+            }
+        }
+
+        private void refreshNotice() {
+            String notice = state.notice();
+            boolean hasNotice = notice != null && !notice.isBlank();
+            noticeLabel.setText(hasNotice ? notice : "");
+            noticeLabel.setVisible(hasNotice);
         }
 
         public AdminQuestionDefinitionDto buildDto() {
-            String text = textField.getText().trim();
-            if (text.isEmpty()) {
-                UiFeedback.showError("Validation Error", numberLabel.getText() + " text cannot be blank.");
-                return null;
-            }
-
-            if (optionRows.size() < 2) {
-                UiFeedback.showError("Validation Error", numberLabel.getText() + " must have at least 2 options.");
-                return null;
-            }
-
-            List<AdminOptionDefinitionDto> options = new ArrayList<>();
-            int correctCount = 0;
+            state.setText(textField.getText());
             for (OptionRow row : optionRows) {
-                AdminOptionDefinitionDto opt = row.buildDto();
-                if (opt == null) return null;
-                options.add(opt);
-                if (opt.correct()) correctCount++;
+                row.flushTextToState();
             }
-
-            if (correctCount == 0) {
-                UiFeedback.showError("Validation Error", numberLabel.getText() + " must have at least one correct option checked.");
+            QuestionEditorState.ValidationResult result = state.validateAndBuild(numberLabel.getText());
+            if (!result.isValid()) {
+                UiFeedback.showError("Validation Error", result.errorMessage());
                 return null;
             }
-
-            return new AdminQuestionDefinitionDto(text, typeCombo.getValue(), options);
+            return result.dto();
         }
     }
 
     public static class OptionRow extends HBox {
         private final QuestionCard card;
-        private final CheckBox correctBox = new CheckBox("Correct");
+        private final QuestionEditorState.OptionState optionState;
+        private final StackPane selectorContainer = new StackPane();
         private final TextField textField = new TextField();
+        private RadioButton radioButton;
+        private CheckBox checkBox;
 
-        public OptionRow(QuestionCard card, AdminOptionDefinitionDto existing) {
+        public OptionRow(QuestionCard card, QuestionEditorState.OptionState optionState) {
             this.card = card;
+            this.optionState = optionState;
             setSpacing(8);
             setAlignment(Pos.CENTER_LEFT);
 
+            selectorContainer.setAlignment(Pos.CENTER_LEFT);
+
             textField.setPromptText("Enter option text");
             textField.setMaxWidth(Double.MAX_VALUE);
+            textField.setText(optionState.text());
+            textField.textProperty().addListener((obs, oldVal, newVal) -> optionState.setText(newVal));
             HBox.setHgrow(textField, Priority.ALWAYS);
-            if (existing != null) {
-                textField.setText(existing.text());
-                correctBox.setSelected(existing.correct());
-            }
 
             Button removeBtn = new Button("✕");
             removeBtn.getStyleClass().add("btn-secondary");
             removeBtn.setOnAction(e -> card.removeOptionRow(this));
 
-            getChildren().addAll(correctBox, textField, removeBtn);
+            getChildren().addAll(selectorContainer, textField, removeBtn);
         }
 
-        public AdminOptionDefinitionDto buildDto() {
-            String text = textField.getText().trim();
-            if (text.isEmpty()) {
-                UiFeedback.showError("Validation Error", "Option text cannot be blank in " + card.numberLabel.getText());
-                return null;
+        private void configureControl(boolean singleMode, ToggleGroup toggleGroup) {
+            if (singleMode) {
+                if (radioButton == null) {
+                    radioButton = new RadioButton("Correct");
+                    radioButton.selectedProperty().addListener((obs, oldVal, newVal) -> {
+                        if (!card.syncingControls && Boolean.TRUE.equals(newVal)) {
+                            card.onOptionSelectionChanged(this, true);
+                        }
+                    });
+                }
+                if (radioButton.getToggleGroup() != toggleGroup) {
+                    radioButton.setToggleGroup(toggleGroup);
+                }
+                radioButton.setSelected(optionState.correct());
+                selectorContainer.getChildren().setAll(radioButton);
+            } else {
+                detachFromToggleGroup();
+                if (checkBox == null) {
+                    checkBox = new CheckBox("Correct");
+                    checkBox.selectedProperty().addListener((obs, oldVal, newVal) -> {
+                        if (!card.syncingControls) {
+                            card.onOptionSelectionChanged(this, Boolean.TRUE.equals(newVal));
+                        }
+                    });
+                }
+                checkBox.setSelected(optionState.correct());
+                selectorContainer.getChildren().setAll(checkBox);
             }
-            return new AdminOptionDefinitionDto(text, correctBox.isSelected());
+        }
+
+        private void reflectState(boolean singleMode) {
+            if (singleMode && radioButton != null) {
+                radioButton.setSelected(optionState.correct());
+            } else if (!singleMode && checkBox != null) {
+                checkBox.setSelected(optionState.correct());
+            }
+        }
+
+        private void detachFromToggleGroup() {
+            if (radioButton != null) {
+                radioButton.setToggleGroup(null);
+            }
+        }
+
+        private void flushTextToState() {
+            optionState.setText(textField.getText());
         }
     }
 }
