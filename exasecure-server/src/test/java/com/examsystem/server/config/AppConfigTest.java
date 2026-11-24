@@ -55,6 +55,16 @@ class AppConfigTest {
         assertThatThrownBy(() -> new AppConfig(installed(temp.resolve("missing")), env, temp)).isInstanceOf(IllegalArgumentException.class);
     }
 
+    @Test void explicitLoopbackPolicyWorksWithInstalledAndDevelopmentSettings() throws Exception {
+        Path file = write(temp.resolve("installed.properties"), valid());
+        var enabled = Map.of("EXASECURE_SERVER_LOOPBACK_ONLY", "true");
+        assertThat(new AppConfig(installed(file), enabled, temp).loopbackOnly).isTrue();
+        assertThat(new AppConfig(new Properties(), enabled, temp).loopbackOnly).isTrue();
+        assertThat(new AppConfig(installed(file), Map.of(), temp).loopbackOnly).isFalse();
+        assertThatThrownBy(() -> new AppConfig(installed(file),
+                Map.of("EXASECURE_SERVER_LOOPBACK_ONLY", "invalid"), temp)).isInstanceOf(IllegalArgumentException.class);
+    }
+
     @Test void installedDoesNotSearchCwdOrParentOrUseDefaults() throws Exception {
         Path child = Files.createDirectory(temp.resolve("child"));
         write(temp.resolve("db.properties"), valid());

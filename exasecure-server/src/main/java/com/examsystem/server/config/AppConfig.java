@@ -17,6 +17,7 @@ public class AppConfig {
     public final String dbUrl;
     public final String dbUser;
     public final String dbPassword;
+    public final boolean loopbackOnly;
     private final boolean installed;
 
     public AppConfig() {
@@ -30,6 +31,12 @@ public class AppConfig {
             throw new IllegalArgumentException("Configuration mode must be development or installed.");
         }
         installed = mode.equalsIgnoreCase("installed");
+        String bind = value(system, environment, "exasecure.server.loopbackOnly",
+                "EXASECURE_SERVER_LOOPBACK_ONLY", "false", false);
+        if (!bind.equalsIgnoreCase("true") && !bind.equalsIgnoreCase("false")) {
+            throw new IllegalArgumentException("EXASECURE_SERVER_LOOPBACK_ONLY must be true or false.");
+        }
+        loopbackOnly = Boolean.parseBoolean(bind);
         Properties fileProps;
         if (installed) {
             String reference = value(system, environment, "exasecure.server.config", "EXASECURE_SERVER_CONFIG", "", false);
@@ -70,6 +77,7 @@ public class AppConfig {
 
     public AppConfig(int port, String dbUrl, String dbUser, String dbPassword) {
         this.installed = false;
+        this.loopbackOnly = false;
         this.port = port;
         this.dbUrl = dbUrl;
         this.dbUser = dbUser;

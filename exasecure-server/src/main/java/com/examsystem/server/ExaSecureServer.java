@@ -80,6 +80,7 @@ public class ExaSecureServer {
         // App init
         app = Javalin.create(javalinConfig -> {
             javalinConfig.startup.showJavalinBanner = false;
+            if (config.loopbackOnly) javalinConfig.jetty.host = "127.0.0.1";
             javalinConfig.jetty.multipartConfig.maxFileSize(5, SizeUnit.MB);
             javalinConfig.jetty.multipartConfig.maxTotalRequestSize(6, SizeUnit.MB);
             

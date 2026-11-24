@@ -39,10 +39,15 @@ record LaunchSession(LaunchSpec server, LaunchSpec admin, boolean installed, Pat
         var builder = new ProcessBuilder(spec.command()).directory(spec.workingDirectory().toFile());
         Map<String, String> env = builder.environment();
         if (installed) {
+            String loopbackOnly = env.get("EXASECURE_SERVER_LOOPBACK_ONLY");
             sanitize(env);
             env.put("EXASECURE_CONFIG_MODE", "installed");
-            if (target == LaunchTarget.SERVER) env.put("EXASECURE_SERVER_CONFIG", configFile.toString());
-            else env.put("EXASECURE_SERVER_URL", baseUrl());
+            if (target == LaunchTarget.SERVER) {
+                env.put("EXASECURE_SERVER_CONFIG", configFile.toString());
+                if (loopbackOnly != null) env.put("EXASECURE_SERVER_LOOPBACK_ONLY", loopbackOnly);
+            } else {
+                env.put("EXASECURE_SERVER_URL", baseUrl());
+            }
         }
         // Development command and inherited overrides remain unchanged; only owned Server opts into pipes.
         if (target == LaunchTarget.SERVER) env.put("EXASECURE_PROCESS_CONTROL", "1");

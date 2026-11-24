@@ -79,6 +79,22 @@ Admin URL propagation. OperatorSettings derives the local Admin base URL from
 that port. Installed settings do not change development launch commands.
 Student's LAN-reachable Server URL remains separately configured.
 
+For a TLS gateway running on the same host, set
+`EXASECURE_SERVER_LOOPBACK_ONLY=true` in the environment before starting Server
+or Control Center. Installed Control Center forwards that flag to its Server
+child. Development also accepts the `exasecure.server.loopbackOnly` JVM
+property. The Server then binds IPv4 loopback on the configured port and the
+gateway connects to `127.0.0.1`. Unset the flag to retain the existing LAN bind.
+
+Configure Student and any remote Admin client with the gateway's trusted
+`https://` URL. Use `/ready` to check the gateway-to-database path and test
+that another lab machine cannot connect directly to the backend port. Confirm
+normal client login with the approved certificate and rejection of a hostname
+mismatch or untrusted certificate on a disposable test setup. For a remote
+MySQL server, configure Connector/J with `sslMode=VERIFY_IDENTITY` and a
+trusted CA using the matching DB hostname.
+[Connector/J security properties](https://dev.mysql.com/doc/connector-j/en/connector-j-connp-props-security.html)
+
 Development preserves CWD then parent `db.properties`, existing defaults, and
 the existing nested override order: DB_* property, DB_* environment,
 EXASECURE_DB_* property, EXASECURE_DB_* environment, file, default. SERVER_PORT
