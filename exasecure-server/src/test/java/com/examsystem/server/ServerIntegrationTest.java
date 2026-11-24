@@ -495,6 +495,56 @@ class ServerIntegrationTest {
         assertAttemptStartCount(examId, 101, 0);
     }
 
+    @Test
+    void concurrentDemotionAndDeactivationCannotRemoveBothAdmins() throws Exception {
+        var repository = new com.examsystem.server.adapters.jdbc.JdbcAdminUserMutationPort(server.getDataSource());
+        var admin = com.examsystem.domain.models.User.Role.ADMIN;
+        var student = com.examsystem.domain.models.User.Role.STUDENT;
+        int second = repository.createUser("guard-" + UUID.randomUUID(),
+                BCrypt.hashpw(UUID.randomUUID().toString(), BCrypt.gensalt(4)), "Other administrator", null, null, admin);
+        var start = new CyclicBarrier(2);
+        try {
+            try (var workers = Executors.newFixedThreadPool(2)) {
+                var deactivate = workers.submit(() -> {
+                    start.await(5, SECONDS);
+                    return removalAllowed(() -> repository.deactivateUser(103));
+                });
+                var demote = workers.submit(() -> {
+                    start.await(5, SECONDS);
+                    return removalAllowed(() -> repository.updateUser(second, "guard-secondary", null,
+                            "Other administrator", null, null, student));
+                });
+                assertThat(List.of(deactivate.get(5, SECONDS), demote.get(5, SECONDS)))
+                        .containsExactlyInAnyOrder(true, false);
+            }
+            assertDatabaseCount("SELECT COUNT(*) FROM users WHERE role = 'ADMIN' AND is_active = 1", 1);
+            int remaining;
+            try (var conn = server.getDataSource().getConnection(); var stmt = conn.createStatement();
+                 var row = stmt.executeQuery("SELECT id FROM users WHERE role = 'ADMIN' AND is_active = 1")) {
+                assertThat(row.next()).isTrue();
+                remaining = row.getInt(1);
+            }
+            assertThatThrownBy(() -> repository.deleteUser(remaining)).hasMessageContaining("last active Admin");
+            assertThatThrownBy(() -> repository.deactivateUser(remaining)).hasMessageContaining("last active Admin");
+            String username = remaining == 103 ? "admin1" : "guard-remaining";
+            assertThat(repository.updateUser(remaining, username, null, "Administrator", null, null, admin)).isTrue();
+        } finally {
+            repository.reactivateUser(103);
+            repository.updateUser(103, "admin1", null, "Admin One", null, null, admin);
+            repository.deleteUser(second);
+            insertSession("token-admin1", 103);
+        }
+    }
+
+    private static boolean removalAllowed(java.util.function.BooleanSupplier mutation) {
+        try {
+            return mutation.getAsBoolean();
+        } catch (IllegalStateException e) {
+            assertThat(e).hasMessageContaining("last active Admin");
+            return false;
+        }
+    }
+
     @Test void atomicSameKeyContentionStartingAtZero() throws Exception { atomicContention(0); }
     @Test void atomicSameKeyContentionStartingAtOne() throws Exception { atomicContention(1); }
     @Test void atomicSameKeyContentionStartingAtTwo() throws Exception { atomicContention(2); }

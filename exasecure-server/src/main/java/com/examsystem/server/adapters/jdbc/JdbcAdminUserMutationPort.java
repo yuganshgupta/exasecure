@@ -56,8 +56,10 @@ public class JdbcAdminUserMutationPort implements AdminUserMutationPort {
                 ? "UPDATE users SET username = ?, full_name = ?, enrollment_number = ?, section = ?, role = ? WHERE id = ?"
                 : "UPDATE users SET username = ?, password = ?, full_name = ?, enrollment_number = ?, section = ?, role = ? WHERE id = ?";
         try (Connection connection = dataSource.getConnection()) {
+            connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             connection.setAutoCommit(false);
             try {
+                if (role != User.Role.ADMIN) requireAnotherAdmin(connection, id);
                 int updated;
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     int index = 1;
@@ -77,9 +79,13 @@ public class JdbcAdminUserMutationPort implements AdminUserMutationPort {
                 }
                 connection.commit();
                 return updated > 0;
-            } catch (SQLException exception) {
-                connection.rollback();
-                throw exception;
+            } catch (SQLException | RuntimeException | Error failure) {
+                try {
+                    connection.rollback();
+                } catch (SQLException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+                throw failure;
             }
         } catch (SQLException exception) {
             throw translate(exception);
@@ -89,8 +95,10 @@ public class JdbcAdminUserMutationPort implements AdminUserMutationPort {
     @Override
     public boolean deactivateUser(int id) {
         try (Connection connection = dataSource.getConnection()) {
+            connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             connection.setAutoCommit(false);
             try {
+                requireAnotherAdmin(connection, id);
                 int updated;
                 try (PreparedStatement statement = connection.prepareStatement(
                         "UPDATE users SET is_active = 0 WHERE id = ? AND is_active = 1")) {
@@ -102,9 +110,13 @@ public class JdbcAdminUserMutationPort implements AdminUserMutationPort {
                 }
                 connection.commit();
                 return updated > 0;
-            } catch (SQLException exception) {
-                connection.rollback();
-                throw exception;
+            } catch (SQLException | RuntimeException | Error failure) {
+                try {
+                    connection.rollback();
+                } catch (SQLException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+                throw failure;
             }
         } catch (SQLException exception) {
             throw translate(exception);
@@ -126,8 +138,10 @@ public class JdbcAdminUserMutationPort implements AdminUserMutationPort {
     @Override
     public boolean deleteUser(int id) {
         try (Connection connection = dataSource.getConnection()) {
+            connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
             connection.setAutoCommit(false);
             try {
+                requireAnotherAdmin(connection, id);
                 // 1. Verify user exists
                 try (PreparedStatement check = connection.prepareStatement("SELECT id FROM users WHERE id = ? FOR UPDATE")) {
                     check.setInt(1, id);
@@ -175,15 +189,27 @@ public class JdbcAdminUserMutationPort implements AdminUserMutationPort {
 
                 connection.commit();
                 return deleted > 0;
-            } catch (IllegalStateException exception) {
-                connection.rollback();
-                throw exception;
-            } catch (SQLException exception) {
-                connection.rollback();
-                throw exception;
+            } catch (SQLException | RuntimeException | Error failure) {
+                try {
+                    connection.rollback();
+                } catch (SQLException rollbackFailure) {
+                    failure.addSuppressed(rollbackFailure);
+                }
+                throw failure;
             }
         } catch (SQLException exception) {
             throw translate(exception);
+        }
+    }
+
+    private static void requireAnotherAdmin(Connection connection, int targetId) throws SQLException {
+        // Every Admin removal locks the same ordered active rows before touching its target.
+        try (PreparedStatement guard = connection.prepareStatement(
+                "SELECT id FROM users WHERE role = 'ADMIN' AND is_active = 1 ORDER BY id LIMIT 2 FOR UPDATE");
+             ResultSet admins = guard.executeQuery()) {
+            if (admins.next() && admins.getInt(1) == targetId && !admins.next()) {
+                throw new IllegalStateException("Cannot remove the last active Admin.");
+            }
         }
     }
 
