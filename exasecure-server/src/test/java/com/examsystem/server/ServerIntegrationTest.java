@@ -436,6 +436,65 @@ class ServerIntegrationTest {
         }
     }
 
+    @Test
+    void revisedExamRemainsVisibleAndResumableOnlyToTheAttemptOwner() throws Exception {
+        int predecessor = createAttemptStartExam();
+        try (var client = HttpClient.newHttpClient()) {
+            int attemptId = startAttemptOverHttp(client, predecessor, "token-stu1");
+            String revision = """
+                    {"title":"Revised exam","durationMinutes":60,"questions":[{"text":"Revised question",
+                    "type":"SINGLE","options":[{"text":"A","correct":true},{"text":"B","correct":false}]}]}
+                    """;
+            var revised = sendJson(client, "POST", "/api/v1/admin/exams/" + predecessor + "/revisions", "token-admin1", revision);
+            assertThat(revised.statusCode()).as(revised.body()).isEqualTo(201);
+            int successor = new ObjectMapper().readTree(revised.body()).required("id").asInt();
+            try (var reconnected = HttpClient.newHttpClient()) {
+                assertThat(startAttemptOverHttp(reconnected, predecessor, "token-stu1")).isEqualTo(attemptId);
+                var owner = listedStudentExam(reconnected, "token-stu1", predecessor);
+                assertThat(owner).isPresent();
+                assertThat(owner.orElseThrow().required("resumeOnly").asBoolean()).isTrue();
+                assertThat(listedStudentExam(reconnected, "token-stu2", predecessor)).isEmpty();
+                assertThat(listedStudentExam(reconnected, "token-stu2", successor)).isPresent();
+                assertThat(sendJson(reconnected, "POST", "/api/v1/student/exams/" + predecessor + "/attempts",
+                        "token-stu2", null).statusCode()).isEqualTo(403);
+            }
+            assertAttemptStillUsesDefinition(attemptId, predecessor);
+        }
+    }
+
+    private static java.util.Optional<com.fasterxml.jackson.databind.JsonNode> listedStudentExam(
+            HttpClient client, String token, int examId) throws Exception {
+        var response = sendJson(client, "GET", "/api/v1/student/exams", token, null);
+        assertThat(response.statusCode()).isEqualTo(200);
+        var exams = new ObjectMapper().readTree(response.body());
+        return java.util.stream.StreamSupport.stream(exams.spliterator(), false)
+                .filter(exam -> exam.required("id").asInt() == examId).findFirst();
+    }
+
+    @Test
+    void startWaitingOnExamDeactivationCannotEnrollAStudent() throws Exception {
+        int examId = createAttemptStartExam();
+        var reachedEnrollment = new CountDownLatch(1);
+        var source = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (!after && sql.contains("FROM exams WHERE id = ? FOR SHARE")) reachedEnrollment.countDown();
+        });
+        var attempts = new JdbcExamAttemptRepository(source);
+        try (var worker = Executors.newSingleThreadExecutor()) {
+            Future<?> started;
+            try (var closer = server.getDataSource().getConnection();
+                 var deactivate = closer.prepareStatement("UPDATE exams SET is_active = 0 WHERE id = ?")) {
+                closer.setAutoCommit(false);
+                deactivate.setInt(1, examId);
+                assertThat(deactivate.executeUpdate()).isEqualTo(1);
+                started = worker.submit(() -> attempts.startOrResumeAttempt(101, examId, Instant.now(), Duration.ofHours(1)));
+                assertThat(reachedEnrollment.await(5, SECONDS)).isTrue();
+                closer.commit();
+            }
+            assertThatThrownBy(() -> started.get(5, SECONDS)).hasCauseInstanceOf(SecurityException.class);
+        }
+        assertAttemptStartCount(examId, 101, 0);
+    }
+
     @Test void atomicSameKeyContentionStartingAtZero() throws Exception { atomicContention(0); }
     @Test void atomicSameKeyContentionStartingAtOne() throws Exception { atomicContention(1); }
     @Test void atomicSameKeyContentionStartingAtTwo() throws Exception { atomicContention(2); }

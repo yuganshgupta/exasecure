@@ -183,7 +183,7 @@ public class StudentDashboardView {
         Region spacer = new Region();
         HBox.setHgrow(spacer, Priority.ALWAYS);
 
-        Button startBtn = new Button("Start / Resume Exam");
+        Button startBtn = new Button(exam.resumeOnly() ? "Resume Existing Attempt" : "Start / Resume Exam");
         startBtn.setPrefHeight(38);
         startBtn.getStyleClass().add("btn-primary");
 

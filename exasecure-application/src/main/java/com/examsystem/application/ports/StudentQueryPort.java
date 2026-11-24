@@ -6,5 +6,5 @@ import java.util.List;
 
 public interface StudentQueryPort {
     List<StudentAttemptHistoryResult> listHistory(int studentId);
-    List<StudentExamResult> listAvailableExams();
+    List<StudentExamResult> listAvailableExams(int studentId);
 }

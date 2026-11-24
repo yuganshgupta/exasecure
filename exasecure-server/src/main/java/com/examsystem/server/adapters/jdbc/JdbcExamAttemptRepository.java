@@ -139,6 +139,7 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
                     var questions = JdbcQuestionRepository.findByExamId(conn, examId);
                     JdbcAttemptFinalizer.finalizeLocked(conn, latestId, deadline, answers -> GradingPolicy.score(questions, answers));
                 } else {
+                    requireOpenEnrollment(conn, examId);
                     try (PreparedStatement insert = conn.prepareStatement(
                             "INSERT INTO exam_attempts (exam_id, student_id, start_time, status) VALUES (?, ?, ?, 'ACTIVE')",
                             java.sql.Statement.RETURN_GENERATED_KEYS)) {
@@ -172,6 +173,17 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
             query.setInt(2, examId);
             try (ResultSet row = query.executeQuery()) {
                 return row.next() ? row.getInt(1) : null;
+            }
+        }
+    }
+
+    private static void requireOpenEnrollment(Connection conn, int examId) throws SQLException {
+        // Revision and deactivation update this row. Shared locking permits independent student starts.
+        try (PreparedStatement query = conn.prepareStatement("SELECT is_active FROM exams WHERE id = ? FOR SHARE")) {
+            query.setInt(1, examId);
+            try (ResultSet exam = query.executeQuery()) {
+                if (!exam.next()) throw new java.util.NoSuchElementException("Exam not found");
+                if (!exam.getBoolean(1)) throw new SecurityException("Exam is not active");
             }
         }
     }

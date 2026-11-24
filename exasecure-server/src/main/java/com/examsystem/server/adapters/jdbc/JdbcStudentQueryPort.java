@@ -47,17 +47,27 @@ public class JdbcStudentQueryPort implements StudentQueryPort {
     }
 
     @Override
-    public List<StudentExamResult> listAvailableExams() {
+    public List<StudentExamResult> listAvailableExams(int studentId) {
         List<StudentExamResult> exams = new ArrayList<>();
         try (Connection conn = dataSource.getConnection();
-             PreparedStatement ps = conn.prepareStatement(
-                     "SELECT id, title, duration_minutes FROM exams WHERE is_active = 1 ORDER BY id ASC")) {
+             PreparedStatement ps = conn.prepareStatement("""
+                     SELECT e.id, e.title, e.duration_minutes, e.is_active
+                     FROM exams e
+                     WHERE e.is_active = 1 OR (
+                         SELECT a.status FROM exam_attempts a
+                         WHERE a.exam_id = e.id AND a.student_id = ?
+                         ORDER BY a.id DESC LIMIT 1
+                     ) = 'ACTIVE'
+                     ORDER BY e.id
+                     """)) {
+            ps.setInt(1, studentId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     exams.add(new StudentExamResult(
                             rs.getInt("id"),
                             rs.getString("title"),
-                            rs.getInt("duration_minutes")));
+                            rs.getInt("duration_minutes"),
+                            !rs.getBoolean("is_active")));
                 }
             }
         } catch (Exception e) {

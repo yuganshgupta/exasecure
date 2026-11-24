@@ -75,8 +75,9 @@ public class StudentExamController {
     }
 
     public void listAvailableExams(Context ctx) {
-        ctx.json(studentQueryPort.listAvailableExams().stream()
-                .map(e -> new StudentExamDto(e.id(), e.title(), e.durationMinutes()))
+        User user = ctx.attribute("user");
+        ctx.json(studentQueryPort.listAvailableExams(user.id()).stream()
+                .map(e -> new StudentExamDto(e.id(), e.title(), e.durationMinutes(), e.resumeOnly()))
                 .toList());
     }
 
@@ -91,8 +92,6 @@ public class StudentExamController {
         User user = ctx.attribute("user");
         int examId = Integer.parseInt(ctx.pathParam("examId"));
         Exam exam = examRepository.findById(examId).orElseThrow(() -> new NotFoundResponse("Exam not found"));
-        if (!exam.isActive()) throw new ForbiddenResponse("Exam is not active");
-
         ExamAttempt attempt = startUseCase.startOrResume(user.id(), examId, exam.duration());
         ctx.json(StudentContractMapper.toAttemptDto(attempt));
     }
