@@ -69,7 +69,7 @@ public final class AtomicProperties {
         }
         AclFileAttributeView acl = Files.getFileAttributeView(file, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
         if (acl != null) {
-            if (!acl.getOwner().equals(current)) {
+            if (!isAccountOwner(acl.getOwner(), current, file.getFileSystem().getUserPrincipalLookupService())) {
                 throw new IOException("Configuration file must be owned by the current OS account.");
             }
         }
@@ -129,17 +129,53 @@ public final class AtomicProperties {
         }
         AclFileAttributeView acl = Files.getFileAttributeView(path, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
         if (acl == null) throw new IOException("Filesystem cannot enforce owner-only configuration permissions.");
-        UserPrincipal current = path.getFileSystem().getUserPrincipalLookupService()
-                .lookupPrincipalByName(System.getProperty("user.name"));
+        UserPrincipalLookupService lookup = path.getFileSystem().getUserPrincipalLookupService();
+        UserPrincipal current = lookup.lookupPrincipalByName(System.getProperty("user.name"));
         if (created && !acl.getOwner().equals(current)) {
             try {
                 acl.setOwner(current);
             } catch (IOException | SecurityException ignored) {
             }
         }
-        if (!acl.getOwner().equals(current)) throw new IOException("Configuration must be owned by the current OS account.");
+        if (!isAccountOwner(acl.getOwner(), current, lookup)) {
+            throw new IOException("Configuration must be owned by the current OS account.");
+        }
         List<AclEntry> expected = ownerAcl(current);
         acl.setAcl(expected);
         if (!acl.getAcl().equals(expected)) throw new IOException("Owner-only ACL could not be verified.");
+    }
+
+    private static boolean isAccountOwner(UserPrincipal owner, UserPrincipal current, UserPrincipalLookupService lookup) {
+        if (owner.equals(current)) {
+            return true;
+        }
+        if (isWindowsAdmin()) {
+            try {
+                UserPrincipal adminGroup = lookup.lookupPrincipalByName("BUILTIN\\Administrators");
+                if (owner.equals(adminGroup)) {
+                    return true;
+                }
+            } catch (IOException ignored) {
+            }
+            String name = owner.getName();
+            return name.equalsIgnoreCase("BUILTIN\\Administrators") || name.equalsIgnoreCase("Administrators");
+        }
+        return false;
+    }
+
+    private static boolean isWindowsAdmin() {
+        try {
+            com.sun.security.auth.module.NTSystem nt = new com.sun.security.auth.module.NTSystem();
+            String[] groups = nt.getGroupIDs();
+            if (groups != null) {
+                for (String sid : groups) {
+                    if ("S-1-5-32-544".equals(sid)) {
+                        return true;
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return false;
     }
 }
