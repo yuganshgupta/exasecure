@@ -1,0 +1,90 @@
+name: Verify ExaSecure V2
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows reactor and native image contracts
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: oracle
+          java-version: '25.0.1'
+      # The gated MySQL suites run in the separate disposable database job.
+      - name: Verify Maven reactor
+        run: .\mvnw.cmd -B -ntp clean verify
+      - name: Build and verify native app images
+        run: |
+          java packaging/BuildImages.java
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force target/r4-tool-tests | Out-Null
+          javac -d target/r4-tool-tests packaging/BuildImages.java packaging/BuildImagesTest.java
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          java -cp target/r4-tool-tests BuildImagesTest
+          exit $LASTEXITCODE
+
+  mysql:
+    name: MySQL 8.0 integration and migration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: oracle
+          java-version: '25.0.1'
+      - name: Run guarded suites against a disposable database
+        shell: bash
+        run: |
+          set -euo pipefail
+          export MYSQL_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$MYSQL_PASSWORD"
+          container="$(docker run --detach --rm --publish 127.0.0.1:3306:3306 \
+            --env MYSQL_RANDOM_ROOT_PASSWORD=yes --env MYSQL_DATABASE=exasecure_test \
+            --env MYSQL_USER=exasecure_test_runner --env MYSQL_PASSWORD mysql:8.0.44)"
+          trap 'docker stop "$container" >/dev/null' EXIT
+
+          ready=false
+          for attempt in {1..60}; do
+            if docker exec "$container" sh -c 'MYSQL_PWD="$MYSQL_PASSWORD" mysql --protocol=TCP -h127.0.0.1 -u "$MYSQL_USER" exasecure_test -e "SELECT 1"' >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" != true ]; then
+            echo 'The disposable MySQL database did not become ready.' >&2
+            exit 1
+          fi
+
+          export EXASECURE_MYSQL_TEST_URL='jdbc:mysql://localhost:3306/exasecure_test?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true'
+          export EXASECURE_MYSQL_TEST_USER=exasecure_test_runner
+          export EXASECURE_MYSQL_TEST_PASSWORD="$MYSQL_PASSWORD"
+          /bin/sh mvnw -B -ntp -pl exasecure-server -am clean verify \
+            -Dtest=ServerIntegrationTest,MySqlMigrationIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          reports = Path("exasecure-server/target/surefire-reports")
+          for suite in ("ServerIntegrationTest", "MySqlMigrationIntegrationTest"):
+              result = ET.parse(reports / f"TEST-com.examsystem.server.{suite}.xml").getroot()
+              if int(result.attrib["tests"]) == 0 or any(int(result.attrib[key]) for key in ("skipped", "errors", "failures")):
+                  raise SystemExit(f"{suite} did not run all of its tests successfully")
+              print(f"{suite}: {result.attrib['tests']} tests")
+          PY

@@ -45,7 +45,7 @@ Install JDK 25 and run the Maven Wrapper from the repository root:
 .\mvnw.cmd clean verify
 ```
 
-On macOS/Linux, use `/bin/sh mvnw` in place of `.\mvnw.cmd`. The active reactor contains the parent and eight V2 modules.
+On macOS/Linux, use `/bin/sh mvnw` in place of `.\mvnw.cmd` and have `unzip` available. The wrapper verifies the pinned Maven distribution ZIP. The active reactor contains the parent and eight V2 modules.
 
 ## Configuration
 
@@ -79,6 +79,8 @@ Start the Server before the clients. `http://localhost:8089/health` checks that 
 `clean verify` runs unit, HTTP, migration, and architecture tests. Real MySQL tests require `EXASECURE_MYSQL_TEST_URL`, `EXASECURE_MYSQL_TEST_USER`, and `EXASECURE_MYSQL_TEST_PASSWORD`; without the URL, those tests are skipped.
 
 Use only the disposable database `exasecure_test` at `localhost:3306` for destructive MySQL fixtures. Construct the test URL explicitly, verify its database name before running, and supply credentials privately. Never point these tests at the application database or data you need to retain. Exercising the full automated MySQL coverage requires those tests to run without skips.
+
+The [V2 verification workflow](.github/workflows/verify-v2.yml) runs the Windows reactor and native app-image contracts, plus a dedicated MySQL job that fails if the Server or migration integration suites skip tests. Require both checks before a release candidate proceeds to the physical acceptance steps in the packaging guides.
 
 Accepted Mac C06 automated verification reported **262 tests, 0 failures, 0 errors, and 55 skipped (207 non-skipped)**. The skips were environment-dependent gates: 39 Server integration tests and 16 MySQL migration integration tests. Later physical C06 validation separately proved fresh MySQL migration, packaged Server → MySQL connectivity, and packaged Admin and Student authentication. This is complementary evidence; it does not turn every skipped automated test into a pass.
 
