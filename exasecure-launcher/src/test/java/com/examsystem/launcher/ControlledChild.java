@@ -45,7 +45,7 @@ public final class ControlledChild {
                 try (var output = exchange.getResponseBody()) { output.write(body); }
             });
             server.start();
-            publish(marker, "external-ready");
+            publish(marker, Integer.toString(server.getAddress().getPort()));
             System.in.read();
             server.stop(0);
             return;

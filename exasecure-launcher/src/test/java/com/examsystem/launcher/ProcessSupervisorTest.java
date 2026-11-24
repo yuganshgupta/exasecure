@@ -4,7 +4,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
-import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -53,11 +52,17 @@ class ProcessSupervisorTest {
         assertThat(supervisor.stopServer().get(5, TimeUnit.SECONDS).server()).isEqualTo(STOPPED);
     }
 
-    @Test void externalHealthyServerIsNeverAdoptedAndSurvivesStopAndClose() throws Exception {
-        int port;
-        try (var socket = new ServerSocket(0)) { port = socket.getLocalPort(); }
-        Process external = external("external", "external", port);
-        await(() -> Files.exists(directory.resolve("external")));
+    @Test @Timeout(30)
+    void externalHealthyServerIsNeverAdoptedAndSurvivesStopAndClose() throws Exception {
+        Path marker = directory.resolve("external");
+        Process external = external("external", "external", 0);
+        long fixtureDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15);
+        while (!Files.exists(marker) && external.isAlive() && System.nanoTime() < fixtureDeadline) {
+            TimeUnit.MILLISECONDS.sleep(10);
+        }
+        assertThat(Files.exists(marker)).as("external Server startup, stderr: %s",
+                Files.readString(directory.resolve("external.stderr"))).isTrue();
+        int port = Integer.parseInt(Files.readString(marker));
         var supervisor = supervisor(() -> session("ready", port), ProcessSupervisor::probeHealth);
         assertThat(supervisor.startServer().get(5, TimeUnit.SECONDS).server()).isEqualTo(EXTERNAL_AVAILABLE);
         assertThat(supervisor.snapshot().serverPid()).isNull();
@@ -271,10 +276,13 @@ class ProcessSupervisorTest {
     }
     private LaunchSpec spec(String mode, String marker, int port) {
         List<String> command = ControlledChild.command(mode, directory.resolve(marker), port);
-        return new LaunchSpec(Path.of(command.getFirst()), command.subList(1, command.size()), directory);
+        // The marker directory is owned by JUnit. A descendant can keep its cwd open on Windows.
+        Path workingDirectory = "descendant".equals(mode) ? Path.of("").toAbsolutePath() : directory;
+        return new LaunchSpec(Path.of(command.getFirst()), command.subList(1, command.size()), workingDirectory);
     }
     private Process external(String mode, String marker, int port) throws Exception {
-        Process process = new ProcessBuilder(ControlledChild.command(mode, directory.resolve(marker), port)).start();
+        Process process = new ProcessBuilder(ControlledChild.command(mode, directory.resolve(marker), port))
+                .redirectError(directory.resolve(marker + ".stderr").toFile()).start();
         testOwned.add(process);
         return process;
     }
