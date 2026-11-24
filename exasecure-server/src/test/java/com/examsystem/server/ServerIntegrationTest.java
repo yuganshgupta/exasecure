@@ -1266,6 +1266,19 @@ class ServerIntegrationTest {
     }
 
     @Test
+    void fractionalFirstStartAndResumeReturnTheSamePersistedTime() throws Exception {
+        int examId = createAttemptStartExam();
+        Instant sampled = Instant.parse("2025-01-01T10:00:00.123456789Z");
+        var attempts = new JdbcExamAttemptRepository(server.getDataSource(), () -> sampled.plusSeconds(1));
+        var started = attempts.startOrResumeAttempt(101, examId, sampled, Duration.ofHours(1));
+        var persisted = attempts.findById(started.id()).orElseThrow();
+        var resumed = attempts.startOrResumeAttempt(101, examId, sampled.plusSeconds(1), Duration.ofHours(1));
+        assertThat(started.startTime()).isEqualTo(persisted.startTime());
+        assertThat(resumed.startTime()).isEqualTo(persisted.startTime());
+        assertThat(persisted.startTime()).isEqualTo(sampled.truncatedTo(ChronoUnit.SECONDS));
+    }
+
+    @Test
     void attemptStart_twoFirstRequestsShareOneAttempt() throws Exception {
         int examId = createAttemptStartExam();
         Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);

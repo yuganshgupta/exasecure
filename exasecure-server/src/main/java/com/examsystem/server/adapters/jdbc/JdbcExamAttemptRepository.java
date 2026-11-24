@@ -151,12 +151,15 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
                         insert.setInt(2, studentId);
                         insert.setTimestamp(3, Timestamp.from(now));
                         insert.executeUpdate();
+                        int id;
                         try (ResultSet keys = insert.getGeneratedKeys()) {
                             if (!keys.next()) throw new SQLException("Attempt ID was not generated");
-                            int id = keys.getInt(1);
-                            conn.commit();
-                            return new ExamAttempt(id, examId, studentId, now, null, null, false);
+                            id = keys.getInt(1);
                         }
+                        var inserted = lockAttempt(conn, id);
+                        if (inserted == null) throw new SQLException("Attempt start time could not be read");
+                        conn.commit();
+                        return new ExamAttempt(id, examId, studentId, inserted.start(), null, null, false);
                     }
                 }
                 conn.commit();
