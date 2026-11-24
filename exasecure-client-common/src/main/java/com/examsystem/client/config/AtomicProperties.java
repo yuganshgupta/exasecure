@@ -30,13 +30,16 @@ public final class AtomicProperties {
         Path file = destination.toAbsolutePath().normalize();
         Path parent = file.getParent();
         createParents(parent);
-        restrict(parent, true);
-        if (Files.exists(file, LinkOption.NOFOLLOW_LINKS) && !Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
-            throw new IOException("Configuration destination must be a regular file.");
+        restrict(parent, true, false);
+        if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
+            if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("Configuration destination must be a regular file.");
+            }
+            verifyOwner(file);
         }
         Path temp = Files.createTempFile(parent, ".config-", ".tmp", attributes(parent, false));
         try {
-            restrict(temp, false);
+            restrict(temp, false, true);
             try (FileChannel channel = FileChannel.open(temp, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
                 OutputStream output = Channels.newOutputStream(channel);
                 values.store(output, "ExaSecure configuration");
@@ -54,6 +57,24 @@ public final class AtomicProperties {
         }
     }
 
+    private static void verifyOwner(Path file) throws IOException {
+        UserPrincipal current = file.getFileSystem().getUserPrincipalLookupService()
+                .lookupPrincipalByName(System.getProperty("user.name"));
+        PosixFileAttributeView posix = Files.getFileAttributeView(file, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+        if (posix != null) {
+            if (!posix.readAttributes().owner().equals(current)) {
+                throw new IOException("Configuration file must be owned by the current OS account.");
+            }
+            return;
+        }
+        AclFileAttributeView acl = Files.getFileAttributeView(file, AclFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
+        if (acl != null) {
+            if (!acl.getOwner().equals(current)) {
+                throw new IOException("Configuration file must be owned by the current OS account.");
+            }
+        }
+    }
+
     private static void createParents(Path directory) throws IOException {
         if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) {
             if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
@@ -66,12 +87,14 @@ public final class AtomicProperties {
             return;
         }
         createParents(directory.getParent());
+        boolean created = false;
         try {
             Files.createDirectory(directory, attributes(directory.getParent(), true));
+            created = true;
         } catch (FileAlreadyExistsException e) {
             if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) throw e;
         }
-        restrict(directory, true);
+        restrict(directory, true, created);
     }
 
     private static FileAttribute<?>[] attributes(Path existing, boolean directory) throws IOException {
@@ -96,7 +119,7 @@ public final class AtomicProperties {
                 .setPermissions(EnumSet.allOf(AclEntryPermission.class)).build());
     }
 
-    private static void restrict(Path path, boolean directory) throws IOException {
+    private static void restrict(Path path, boolean directory, boolean created) throws IOException {
         PosixFileAttributeView posix = Files.getFileAttributeView(path, PosixFileAttributeView.class, LinkOption.NOFOLLOW_LINKS);
         if (posix != null) {
             var permissions = PosixFilePermissions.fromString(directory ? "rwx------" : "rw-------");
@@ -108,7 +131,7 @@ public final class AtomicProperties {
         if (acl == null) throw new IOException("Filesystem cannot enforce owner-only configuration permissions.");
         UserPrincipal current = path.getFileSystem().getUserPrincipalLookupService()
                 .lookupPrincipalByName(System.getProperty("user.name"));
-        if (!acl.getOwner().equals(current)) {
+        if (created && !acl.getOwner().equals(current)) {
             try {
                 acl.setOwner(current);
             } catch (IOException | SecurityException ignored) {
