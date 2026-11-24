@@ -71,7 +71,7 @@ jobs:
             exit 1
           fi
 
-          docker exec -e MYSQL_PWD="$MYSQL_PASSWORD" "$container" mysql -uroot -e "GRANT ALL PRIVILEGES ON *.* TO 'exasecure_test_runner'@'%'; FLUSH PRIVILEGES;"
+          docker exec -e MYSQL_PWD="$MYSQL_PASSWORD" "$container" mysql -uroot -e "GRANT SELECT ON performance_schema.* TO 'exasecure_test_runner'@'%'; FLUSH PRIVILEGES;"
 
           export EXASECURE_MYSQL_TEST_URL='jdbc:mysql://localhost:3306/exasecure_test?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true'
           export EXASECURE_MYSQL_TEST_USER=exasecure_test_runner
