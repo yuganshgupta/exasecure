@@ -1362,7 +1362,8 @@ public class AdminDashboardView {
                             String score = a.score() != null ? String.valueOf(a.score()) : "";
                             String violations = String.valueOf(a.focusLostCount());
                             String flagged = String.valueOf(a.flagged());
-                            String proctoringStatus = escapeCsvCell(a.proctoringStatus() != null ? a.proctoringStatus() : "CLEAN");
+                            String proctoringStatus = escapeCsvCell(
+                                    a.proctoringStatus() != null ? a.proctoringStatus() : (a.flagged() ? "FLAGGED" : "CLEAN"));
                             writer.write(String.format("%d,%d,%s,%s,%s,%s,%s,%s,%s,%s\n",
                                     a.id(),
                                     a.studentId(),

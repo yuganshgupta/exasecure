@@ -3101,4 +3101,98 @@ class ServerIntegrationTest {
                 client, "GET", "/api/v1/admin/attempts/" + attemptId + "/details", "token-admin1", null);
         assertThat(adminDetails.statusCode()).isEqualTo(200);
     }
+
+    @Test
+    void acknowledgedProctoringViolationsClassifyAttemptsAsFlaggedAcrossStudentAndAdmin() throws Exception {
+        HttpClient client = HttpClient.newHttpClient();
+        ObjectMapper mapper = new ObjectMapper();
+
+        int cleanAttemptId = 296;
+        int oneStrikeNoEvidenceId = 297;
+        int twoStrikesWithRetryId = 298;
+        int historicalFlaggedId = 300;
+        int rejectedOnlyId = 301;
+
+        try (var conn = DriverManager.getConnection(dbUrl, dbUser, dbPassword);
+             var stmt = conn.createStatement()) {
+            stmt.executeUpdate("DELETE FROM exam_attempts WHERE id IN ("
+                    + cleanAttemptId + "," + oneStrikeNoEvidenceId + "," + twoStrikesWithRetryId + ","
+                    + historicalFlaggedId + "," + rejectedOnlyId + ")");
+            for (int id : new int[]{cleanAttemptId, oneStrikeNoEvidenceId, twoStrikesWithRetryId, rejectedOnlyId}) {
+                stmt.executeUpdate("INSERT INTO exam_attempts "
+                        + "(id, exam_id, student_id, start_time, status, focus_lost_count, is_flagged, proctoring_status) "
+                        + "VALUES (" + id + ", 5, 101, UTC_TIMESTAMP(), 'ACTIVE', 0, 0, 'CLEAN')");
+            }
+            // Historical submitted attempt with 1 persisted violation but legacy is_flagged=0, proctoring_status='CLEAN'
+            stmt.executeUpdate("INSERT INTO exam_attempts "
+                    + "(id, exam_id, student_id, start_time, end_time, score, status, focus_lost_count, is_flagged, proctoring_status) "
+                    + "VALUES (" + historicalFlaggedId + ", 5, 101, UTC_TIMESTAMP(), UTC_TIMESTAMP(), 1, 'SUBMITTED', 1, 0, 'CLEAN')");
+            stmt.executeUpdate("INSERT INTO proctor_events (attempt_id, event_type, recorded_at, client_event_id) "
+                    + "VALUES (" + historicalFlaggedId + ", 'FOCUS_LOST', UTC_TIMESTAMP(), 'hist-" + historicalFlaggedId + "')");
+        }
+
+        // 0 incidents + submitted -> CLEAN
+        assertThat(sendJson(client, "POST", "/api/v1/student/attempts/" + cleanAttemptId + "/submit", "token-stu1", null)
+                .statusCode()).isEqualTo(200);
+
+        // 1 incident without screenshot upload + submitted -> FLAGGED (and score preserved)
+        assertThat(sendJson(client, "POST", "/api/v1/student/attempts/" + oneStrikeNoEvidenceId + "/answers", "token-stu1",
+                "{\"questionId\":405,\"selectedOptions\":[1]}").statusCode()).isEqualTo(200);
+        var oneStrikeResp = incidentHttp(client, oneStrikeNoEvidenceId, UUID.randomUUID().toString(), "FOCUS_LOST");
+        assertThat(oneStrikeResp.statusCode()).isEqualTo(200);
+        assertThat(mapper.readTree(oneStrikeResp.body()).required("flagged").asBoolean()).isFalse();
+        assertThat(sendJson(client, "POST", "/api/v1/student/attempts/" + oneStrikeNoEvidenceId + "/submit", "token-stu1", null)
+                .statusCode()).isEqualTo(200);
+
+        // 2 incidents + duplicate retry + submitted -> FLAGGED with 2 strikes
+        String k1 = UUID.randomUUID().toString();
+        String k2 = UUID.randomUUID().toString();
+        assertThat(incidentHttp(client, twoStrikesWithRetryId, k1, "FOCUS_LOST").statusCode()).isEqualTo(200);
+        assertThat(incidentHttp(client, twoStrikesWithRetryId, k2, "FOCUS_LOST").statusCode()).isEqualTo(200);
+        assertThat(incidentHttp(client, twoStrikesWithRetryId, k2, "FOCUS_LOST").statusCode()).isEqualTo(200);
+        assertThat(sendJson(client, "POST", "/api/v1/student/attempts/" + twoStrikesWithRetryId + "/submit", "token-stu1", null)
+                .statusCode()).isEqualTo(200);
+
+        // Rejected event only -> CLEAN
+        assertThat(incidentHttp(client, rejectedOnlyId, UUID.randomUUID().toString(), "OTHER").statusCode()).isEqualTo(400);
+        assertThat(sendJson(client, "POST", "/api/v1/student/attempts/" + rejectedOnlyId + "/submit", "token-stu1", null)
+                .statusCode()).isEqualTo(200);
+
+        // Verify Student History API
+        var stuHistoryRes = sendJson(client, "GET", "/api/v1/student/history", "token-stu1", null);
+        assertThat(stuHistoryRes.statusCode()).isEqualTo(200);
+        var stuMap = new java.util.HashMap<Integer, com.fasterxml.jackson.databind.JsonNode>();
+        for (var item : mapper.readTree(stuHistoryRes.body())) {
+            stuMap.put(item.required("attemptId").asInt(), item);
+        }
+        assertThat(stuMap.get(cleanAttemptId).required("flagged").asBoolean()).isFalse();
+        assertThat(stuMap.get(rejectedOnlyId).required("flagged").asBoolean()).isFalse();
+        assertThat(stuMap.get(oneStrikeNoEvidenceId).required("flagged").asBoolean()).isTrue();
+        assertThat(stuMap.get(oneStrikeNoEvidenceId).required("score").asInt()).isEqualTo(1);
+        assertThat(stuMap.get(twoStrikesWithRetryId).required("flagged").asBoolean()).isTrue();
+        assertThat(stuMap.get(historicalFlaggedId).required("flagged").asBoolean()).isTrue();
+        assertThat(stuMap.get(historicalFlaggedId).required("score").asInt()).isEqualTo(1);
+
+        // Verify Admin Attempts API
+        var adminRes = sendJson(client, "GET", "/api/v1/admin/exams/5/attempts", "token-admin1", null);
+        assertThat(adminRes.statusCode()).isEqualTo(200);
+        var adminMap = new java.util.HashMap<Integer, com.fasterxml.jackson.databind.JsonNode>();
+        for (var item : mapper.readTree(adminRes.body())) {
+            adminMap.put(item.required("id").asInt(), item);
+        }
+        assertThat(adminMap.get(cleanAttemptId).required("flagged").asBoolean()).isFalse();
+        assertThat(adminMap.get(cleanAttemptId).required("proctoringStatus").asText()).isEqualTo("CLEAN");
+        assertThat(adminMap.get(rejectedOnlyId).required("flagged").asBoolean()).isFalse();
+        assertThat(adminMap.get(rejectedOnlyId).required("proctoringStatus").asText()).isEqualTo("CLEAN");
+        assertThat(adminMap.get(oneStrikeNoEvidenceId).required("flagged").asBoolean()).isTrue();
+        assertThat(adminMap.get(oneStrikeNoEvidenceId).required("proctoringStatus").asText()).isEqualTo("FLAGGED");
+        assertThat(adminMap.get(oneStrikeNoEvidenceId).required("focusLostCount").asInt()).isEqualTo(1);
+        assertThat(adminMap.get(oneStrikeNoEvidenceId).required("score").asInt()).isEqualTo(1);
+        assertThat(adminMap.get(twoStrikesWithRetryId).required("flagged").asBoolean()).isTrue();
+        assertThat(adminMap.get(twoStrikesWithRetryId).required("proctoringStatus").asText()).isEqualTo("FLAGGED");
+        assertThat(adminMap.get(twoStrikesWithRetryId).required("focusLostCount").asInt()).isEqualTo(2);
+        assertThat(adminMap.get(historicalFlaggedId).required("flagged").asBoolean()).isTrue();
+        assertThat(adminMap.get(historicalFlaggedId).required("proctoringStatus").asText()).isEqualTo("FLAGGED");
+        assertThat(adminMap.get(historicalFlaggedId).required("score").asInt()).isEqualTo(1);
+    }
 }

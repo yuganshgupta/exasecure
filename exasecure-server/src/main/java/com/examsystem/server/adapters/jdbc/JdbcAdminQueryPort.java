@@ -8,6 +8,7 @@ import com.examsystem.application.query.AdminExamResult;
 import com.examsystem.application.query.AdminExamStatisticsResult;
 import com.examsystem.application.query.AdminProctorEventResult;
 import com.examsystem.application.query.AdminUserResult;
+import com.examsystem.domain.proctor.ProctoringIntegrityPolicy;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -76,18 +77,20 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT a.id, a.student_id, u.full_name, u.enrollment_number, a.start_time, a.status, a.score, "
-                             + "a.focus_lost_count, a.is_flagged, a.proctoring_status "
+                             + "a.focus_lost_count, a.is_flagged, a.proctoring_status, "
+                             + "EXISTS (SELECT 1 FROM proctor_events pe "
+                             + "WHERE pe.attempt_id = a.id AND pe.event_type = 'FOCUS_LOST') AS has_qualifying_incident "
                              + "FROM exam_attempts a JOIN users u ON a.student_id = u.id "
                              + "WHERE a.exam_id = ? ORDER BY a.start_time DESC")) {
             ps.setInt(1, examId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
                     int focusLost = rs.getInt("focus_lost_count");
-                    boolean isFlagged = rs.getBoolean("is_flagged") || focusLost >= 3;
-                    String proctorStatus = isFlagged ? "FLAGGED" : rs.getString("proctoring_status");
-                    if (proctorStatus == null || proctorStatus.isBlank()) {
-                        proctorStatus = isFlagged ? "FLAGGED" : "CLEAN";
-                    }
+                    var integrity = ProctoringIntegrityPolicy.classify(
+                            focusLost,
+                            rs.getBoolean("has_qualifying_incident"),
+                            rs.getBoolean("is_flagged"),
+                            rs.getString("proctoring_status"));
 
                     attempts.add(new AdminAttemptResult(
                             rs.getInt("id"),
@@ -98,8 +101,8 @@ public class JdbcAdminQueryPort implements AdminQueryPort {
                             rs.getString("status"),
                             (Integer) rs.getObject("score"),
                             focusLost,
-                            isFlagged,
-                            proctorStatus));
+                            integrity.flagged(),
+                            integrity.proctoringStatus()));
                 }
             }
         } catch (Exception e) {

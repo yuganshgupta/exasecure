@@ -3,6 +3,7 @@ package com.examsystem.server.adapters.jdbc;
 import com.examsystem.application.ports.StudentQueryPort;
 import com.examsystem.application.query.StudentAttemptHistoryResult;
 import com.examsystem.application.query.StudentExamResult;
+import com.examsystem.domain.proctor.ProctoringIntegrityPolicy;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -23,13 +24,19 @@ public class JdbcStudentQueryPort implements StudentQueryPort {
         try (Connection conn = dataSource.getConnection();
              PreparedStatement ps = conn.prepareStatement(
                      "SELECT e.title, a.id, a.start_time, a.end_time, a.score, a.status, "
-                             + "a.focus_lost_count, a.is_flagged, a.proctoring_status "
+                             + "a.focus_lost_count, a.is_flagged, a.proctoring_status, "
+                             + "EXISTS (SELECT 1 FROM proctor_events pe "
+                             + "WHERE pe.attempt_id = a.id AND pe.event_type = 'FOCUS_LOST') AS has_qualifying_incident "
                              + "FROM exam_attempts a JOIN exams e ON a.exam_id = e.id "
                              + "WHERE a.student_id = ? ORDER BY a.start_time DESC")) {
             ps.setInt(1, studentId);
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
-                    boolean isFlagged = rs.getBoolean("is_flagged") || rs.getInt("focus_lost_count") >= 3;
+                    boolean isFlagged = ProctoringIntegrityPolicy.classify(
+                            rs.getInt("focus_lost_count"),
+                            rs.getBoolean("has_qualifying_incident"),
+                            rs.getBoolean("is_flagged"),
+                            rs.getString("proctoring_status")).flagged();
                     history.add(new StudentAttemptHistoryResult(
                             rs.getString("title"),
                             rs.getInt("id"),
