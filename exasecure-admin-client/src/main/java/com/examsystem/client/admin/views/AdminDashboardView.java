@@ -25,7 +25,6 @@ import javafx.stage.Stage;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
-import java.io.FileWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -1339,9 +1338,10 @@ public class AdminDashboardView {
         attemptsStatusLabel.setText("Exporting attempts to CSV...");
         AsyncRunner.runAsync(
                 () -> {
-                    try (FileWriter writer = new FileWriter(file)) {
+                    CsvExport.write(file.toPath(), writer -> {
                         writer.write("Attempt ID,Student ID,Student Name,Enrollment,Start Time,Status,Score,Violations,Flagged,Proctoring Status\n");
                         for (AdminAttemptDto a : items) {
+                            CsvExport.checkInterrupted();
                             String studentName = escapeCsvCell(a.studentName());
                             String enrollment = escapeCsvCell(a.enrollmentNumber() != null ? a.enrollmentNumber() : "");
                             String startTime = escapeCsvCell(a.startTime() != null ? a.startTime().toString() : "");
@@ -1362,7 +1362,7 @@ public class AdminDashboardView {
                                     flagged,
                                     proctoringStatus));
                         }
-                    }
+                    });
                     return items.size();
                 },
                 (Integer count) -> {
