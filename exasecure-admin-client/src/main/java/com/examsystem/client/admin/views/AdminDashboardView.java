@@ -3,6 +3,7 @@ package com.examsystem.client.admin.views;
 import com.examsystem.client.admin.AdminApp;
 import com.examsystem.client.api.ApiClient;
 import com.examsystem.client.async.AsyncRunner;
+import com.examsystem.client.session.SessionState;
 import com.examsystem.client.ui.AppIcon;
 import com.examsystem.client.ui.UiFeedback;
 import com.examsystem.contracts.AdminAttemptDetailDto;
@@ -22,6 +23,7 @@ import javafx.scene.layout.*;
 import javafx.stage.FileChooser;
 import javafx.stage.Modality;
 import javafx.stage.Stage;
+import javafx.stage.WindowEvent;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -87,15 +89,24 @@ public class AdminDashboardView {
     private long currentProctorAttemptsReqId = 0;
     private long currentProctorEventsReqId = 0;
     private long currentEvidenceReqId = 0;
+    private final SessionState.UserSession evidenceOwner;
+    private final javafx.event.EventHandler<WindowEvent> evidenceWindowHidden = event -> disposeEvidenceContext();
+    private Stage enlargedEvidenceStage;
+    private boolean evidenceContextClosed;
 
     public AdminDashboardView(AdminApp app, ApiClient apiClient) {
         this.app = app;
         this.apiClient = apiClient;
+        this.evidenceOwner = apiClient.getSessionState().get();
         this.primaryStage = app.getPrimaryStage();
         this.view = new BorderPane();
         this.tabPane = new TabPane();
 
         buildUI();
+        view.sceneProperty().addListener((observable, oldScene, newScene) -> {
+            if (oldScene != null && newScene == null) disposeEvidenceContext();
+        });
+        primaryStage.addEventHandler(WindowEvent.WINDOW_HIDDEN, evidenceWindowHidden);
         loadUsers();
         loadExams();
     }
@@ -137,7 +148,10 @@ public class AdminDashboardView {
 
         Button logoutBtn = new Button("Sign Out");
         logoutBtn.getStyleClass().add("btn-header");
-        logoutBtn.setOnAction(e -> com.examsystem.client.ui.SignOutAction.run(apiClient, view, app::showLogin));
+        logoutBtn.setOnAction(e -> {
+            disposeEvidenceContext();
+            com.examsystem.client.ui.SignOutAction.run(apiClient, view, app::showLogin);
+        });
 
         var themeSelector = com.examsystem.client.theme.ThemeManager.getInstance().createThemeSelector();
         topBar.getChildren().addAll(brand, adminBadge, spacer, themeSelector, userLabel, logoutBtn);
@@ -1409,6 +1423,10 @@ public class AdminDashboardView {
         proctorExamCombo.valueProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null) {
                 loadProctorAttempts(newVal.id());
+            } else {
+                currentProctorAttemptsReqId++;
+                proctorAttemptsTable.getItems().clear();
+                clearAttemptEvidence();
             }
         });
 
@@ -1586,8 +1604,7 @@ public class AdminDashboardView {
             if (sel != null) {
                 loadProctorEventsForAttempt(sel);
             } else {
-                proctorEventsTable.getItems().clear();
-                clearEvidenceViewer();
+                clearAttemptEvidence();
             }
         });
     }
@@ -1670,16 +1687,18 @@ public class AdminDashboardView {
             if (sel != null) {
                 loadEvidenceImage(sel);
             } else {
+                currentEvidenceReqId++;
                 clearEvidenceViewer();
+                updateEvidenceContext(null);
             }
         });
     }
 
     private void loadProctorAttempts(int examId) {
-        long reqId = ++currentProctorAttemptsReqId;
+        if (evidenceContextClosed) return;
+        var request = new EvidenceRequest(++currentProctorAttemptsReqId, evidenceOwner);
         proctorAttemptsTable.getItems().clear();
-        proctorEventsTable.getItems().clear();
-        clearEvidenceViewer();
+        clearAttemptEvidence();
         AdminExamDto selectedExam = proctorExamCombo.getValue();
         String selectedTitle = selectedExam != null ? selectedExam.title() : "selected examination";
         setStatus(evidenceStatusLabel, "Loading student attempts for “" + selectedTitle + "”...", null);
@@ -1687,7 +1706,7 @@ public class AdminDashboardView {
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetAttemptHistory(examId),
                 (List<AdminAttemptDto> attempts) -> {
-                    if (reqId != currentProctorAttemptsReqId) return;
+                    if (!canDisplayEvidence(request, currentProctorAttemptsReqId)) return;
                     setStatus(evidenceStatusLabel,
                             "Loaded " + (attempts != null ? attempts.size() : 0) + " attempt(s).", "status-success");
                     if (attempts != null && !attempts.isEmpty()) {
@@ -1697,7 +1716,7 @@ public class AdminDashboardView {
                     }
                 },
                 (Throwable err) -> {
-                    if (reqId != currentProctorAttemptsReqId) return;
+                    if (!canDisplayEvidence(request, currentProctorAttemptsReqId)) return;
                     setStatus(evidenceStatusLabel,
                             "Unable to load attempts for evidence review. Check the server connection and retry.", "status-error");
                 }
@@ -1705,18 +1724,16 @@ public class AdminDashboardView {
     }
 
     private void loadProctorEventsForAttempt(AdminAttemptDto attempt) {
+        if (evidenceContextClosed) return;
         int attemptId = attempt.id();
-        long reqId = ++currentProctorEventsReqId;
-        proctorEventsTable.getItems().clear();
-        clearEvidenceViewer();
-        evidenceCache.clear();
-        updateEvidenceContext(null);
+        clearAttemptEvidence();
+        var request = new EvidenceRequest(++currentProctorEventsReqId, evidenceOwner);
         setStatus(evidenceStatusLabel, "Loading incidents for " + attempt.studentName() + "...", null);
 
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetProctorEvents(attemptId),
                 (List<AdminProctorEventDto> events) -> {
-                    if (reqId != currentProctorEventsReqId) return;
+                    if (!canDisplayEvidence(request, currentProctorEventsReqId)) return;
                     setStatus(evidenceStatusLabel, events == null || events.isEmpty()
                             ? "No proctoring incidents recorded for this attempt."
                             : "Loaded " + events.size() + " incident(s).", events == null || events.isEmpty() ? null : "status-success");
@@ -1731,14 +1748,42 @@ public class AdminDashboardView {
                     }
                 },
                 (Throwable err) -> {
-                    if (reqId != currentProctorEventsReqId) return;
+                    if (!canDisplayEvidence(request, currentProctorEventsReqId)) return;
                     setStatus(evidenceStatusLabel,
                             "Unable to load proctoring incidents. Check the server connection and retry.", "status-error");
                 }
         );
     }
 
+    private boolean canDisplayEvidence(EvidenceRequest request, long generation) {
+        return !evidenceContextClosed && request.isCurrent(generation, apiClient.getSessionState().get());
+    }
+
+    private void clearAttemptEvidence() {
+        currentProctorEventsReqId++;
+        currentEvidenceReqId++;
+        proctorEventsTable.getItems().clear();
+        evidenceCache.clear();
+        clearEvidenceViewer();
+        updateEvidenceContext(null);
+    }
+
+    private void disposeEvidenceContext() {
+        if (evidenceContextClosed) return;
+        evidenceContextClosed = true;
+        currentProctorAttemptsReqId++;
+        clearAttemptEvidence();
+        primaryStage.removeEventHandler(WindowEvent.WINDOW_HIDDEN, evidenceWindowHidden);
+    }
+
+    private void closeEnlargedEvidence() {
+        Stage viewer = enlargedEvidenceStage;
+        enlargedEvidenceStage = null;
+        if (viewer != null) viewer.close();
+    }
+
     private void clearEvidenceViewer() {
+        closeEnlargedEvidence();
         evidenceImageView.setImage(null);
         currentEvidenceBytes = null;
         currentEvidenceEventId = -1;
@@ -1799,8 +1844,10 @@ public class AdminDashboardView {
     }
 
     private void loadEvidenceImage(AdminProctorEventDto event) {
+        if (evidenceContextClosed) return;
         int eventId = event.id();
-        long reqId = ++currentEvidenceReqId;
+        clearEvidenceViewer();
+        var request = new EvidenceRequest(++currentEvidenceReqId, evidenceOwner);
         updateEvidenceContext(event);
 
         List<EvidenceChoice> choices = EvidenceChoice.forTypes(event.evidenceTypes());
@@ -1840,7 +1887,7 @@ public class AdminDashboardView {
         AsyncRunner.runAsync(
                 () -> apiClient.adminGetEvidence(eventId, selectedType),
                 (byte[] imageBytes) -> {
-                    if (reqId != currentEvidenceReqId) return;
+                    if (!canDisplayEvidence(request, currentEvidenceReqId)) return;
                     AdminProctorEventDto currentSel = proctorEventsTable.getSelectionModel().getSelectedItem();
                     if (currentSel == null || currentSel.id() != eventId) return;
 
@@ -1854,7 +1901,7 @@ public class AdminDashboardView {
                     displayEvidenceBytes(eventId, imageBytes, selectedType);
                 },
                 (Throwable err) -> {
-                    if (reqId != currentEvidenceReqId) return;
+                    if (!canDisplayEvidence(request, currentEvidenceReqId)) return;
                     evidenceStatusLabel.setText("Failed to retrieve evidence: " + err.getMessage());
                 }
         );
@@ -1882,7 +1929,12 @@ public class AdminDashboardView {
             return;
         }
 
+        closeEnlargedEvidence();
         Stage viewerStage = new Stage();
+        enlargedEvidenceStage = viewerStage;
+        viewerStage.setOnHidden(e -> {
+            if (enlargedEvidenceStage == viewerStage) enlargedEvidenceStage = null;
+        });
         viewerStage.initOwner(primaryStage);
         viewerStage.initModality(Modality.NONE);
         viewerStage.setTitle("ExaSecure Evidence Inspector");
