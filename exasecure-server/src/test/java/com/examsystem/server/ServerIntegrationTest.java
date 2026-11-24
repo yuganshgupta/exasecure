@@ -35,6 +35,7 @@ import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -43,6 +44,41 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @EnabledIfEnvironmentVariable(named = "EXASECURE_MYSQL_TEST_URL", matches = ".+")
 class ServerIntegrationTest {
+
+    @Test
+    void loadsExamQuestionsAndActiveOptionsInOneQuery() throws SQLException {
+        int examId = createAttemptStartExam();
+        int firstQuestion;
+        int emptyQuestion;
+        try (var conn = server.getDataSource().getConnection(); var stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO questions (exam_id, question_text, correct_option_number, question_type) "
+                    + "VALUES (" + examId + ", 'With options', 3, 'MULTI')", Statement.RETURN_GENERATED_KEYS);
+            firstQuestion = generatedId(stmt);
+            stmt.executeUpdate("INSERT INTO questions (exam_id, question_text, correct_option_number) "
+                    + "VALUES (" + examId + ", 'Without active options', 1)", Statement.RETURN_GENERATED_KEYS);
+            emptyQuestion = generatedId(stmt);
+            stmt.executeUpdate("INSERT INTO questions (exam_id, question_text, correct_option_number, is_active) "
+                    + "VALUES (" + examId + ", 'Inactive', 1, 0)");
+            stmt.executeUpdate("""
+                    INSERT INTO options (question_id, option_number, option_text, is_correct, is_active)
+                    VALUES (%1$d, 9, 'Nine', 1, 1), (%1$d, 3, 'Three', 1, 1),
+                           (%1$d, 7, 'Disabled', 0, 0), (%2$d, 1, 'Also disabled', 1, 0)
+                    """.formatted(firstQuestion, emptyQuestion));
+        }
+
+        var statements = new AtomicInteger();
+        var source = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (!after && sql.startsWith("SELECT")) statements.incrementAndGet();
+        });
+        var batch = new JdbcQuestionRepository(source).findByExamId(examId);
+        var individual = new JdbcQuestionRepository(server.getDataSource());
+        assertThat(batch).containsExactly(individual.findById(firstQuestion).orElseThrow(),
+                individual.findById(emptyQuestion).orElseThrow());
+        assertThat(batch.getFirst().options()).extracting(com.examsystem.domain.models.Option::number)
+                .containsExactly(3, 9);
+        assertThat(batch.getLast().options()).isEmpty();
+        assertThat(statements.get()).isEqualTo(1);
+    }
 
     private static final Instant ANSWER_START = Instant.parse("2025-01-01T10:00:00Z");
     private static final Instant ANSWER_DEADLINE = ANSWER_START.plus(Duration.ofHours(1));
