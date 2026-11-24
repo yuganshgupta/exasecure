@@ -56,8 +56,12 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
                     ));
                 }
             }
-        } catch (Exception e) {
-            // Fallback for earlier schema if is_flagged column not yet created
+        } catch (SQLException e) {
+            String message = e.getMessage();
+            if (!"42S22".equals(e.getSQLState()) || message == null
+                    || (!message.contains("is_flagged") && !message.contains("proctoring_status"))) {
+                throw new RuntimeException("DB error", e);
+            }
             try (Connection conn = dataSource.getConnection();
                  PreparedStatement ps = conn.prepareStatement(
                          "SELECT id, exam_id, student_id, start_time, end_time, score, status, focus_lost_count FROM exam_attempts WHERE id = ?")) {
@@ -82,10 +86,10 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
                         ));
                     }
                 }
-            } catch (Exception ex) {
-                throw new RuntimeException("DB error", ex);
+            } catch (SQLException fallbackFailure) {
+                fallbackFailure.addSuppressed(e);
+                throw new RuntimeException("DB error", fallbackFailure);
             }
-            throw new RuntimeException("DB error", e);
         }
         return Optional.empty();
     }
@@ -280,8 +284,11 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
                         "DELETE FROM legacy_proctor_logs WHERE attempt_id = ?")) {
                     ps.setInt(1, attemptId);
                     ps.executeUpdate();
-                } catch (Exception ignored) {
-                    // Legacy table may not exist in all environments
+                } catch (SQLException failure) {
+                    if (!"42S02".equals(failure.getSQLState()) || failure.getMessage() == null
+                            || !failure.getMessage().contains("legacy_proctor_logs")) {
+                        throw failure;
+                    }
                 }
 
                 // 4. Delete student answer options owned by this attempt's answers
@@ -310,11 +317,9 @@ public class JdbcExamAttemptRepository implements ExamAttemptRepository {
 
                 conn.commit();
                 return deleted > 0;
-            } catch (Exception e) {
-                conn.rollback();
-                throw new RuntimeException("Failed to delete attempt " + attemptId, e);
-            } finally {
-                conn.setAutoCommit(true);
+            } catch (SQLException | RuntimeException | Error failure) {
+                rollback(conn, failure);
+                throw failure;
             }
         } catch (SQLException e) {
             throw new RuntimeException("Database error deleting attempt " + attemptId, e);

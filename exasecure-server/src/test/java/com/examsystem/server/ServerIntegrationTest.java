@@ -581,6 +581,53 @@ class ServerIntegrationTest {
         return client.send(request.GET().build(), HttpResponse.BodyHandlers.ofString());
     }
 
+    @Test
+    void legacyCleanupFailureRollsBackAttemptDeletion() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        try (var conn = server.getDataSource().getConnection(); var stmt = conn.createStatement()) {
+            stmt.executeUpdate("INSERT INTO proctor_events(attempt_id,event_type,recorded_at) VALUES ("
+                    + fixture.attemptId() + ",'FOCUS_LOST',CURRENT_TIMESTAMP)");
+        }
+        var source = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (!after && sql.startsWith("DELETE FROM legacy_proctor_logs")) {
+                throw new SQLException("injected legacy cleanup permission denied", "42000", 1142);
+            }
+        });
+        assertThatThrownBy(() -> new JdbcExamAttemptRepository(source).deleteAttempt(fixture.attemptId()))
+                .hasRootCauseMessage("injected legacy cleanup permission denied");
+        assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE id = " + fixture.attemptId(), 1);
+        assertDatabaseCount("SELECT COUNT(*) FROM proctor_events WHERE attempt_id = " + fixture.attemptId(), 1);
+        assertStoredAnswer(fixture, 1, PREVIOUS_ANSWER_TIME);
+    }
+
+    @Test
+    void missingLegacyCleanupTableStillAllowsAuthorizedDeletion() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        var source = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (!after && sql.startsWith("DELETE FROM legacy_proctor_logs")) {
+                throw new SQLException("Table 'exasecure_test.legacy_proctor_logs' doesn't exist", "42S02", 1146);
+            }
+        });
+        var attempts = new JdbcExamAttemptRepository(source);
+        assertThat(attempts.deleteAttempt(fixture.attemptId())).isTrue();
+        assertThat(attempts.deleteAttempt(fixture.attemptId())).isFalse();
+        assertDatabaseCount("SELECT COUNT(*) FROM exam_attempts WHERE id = " + fixture.attemptId(), 0);
+        assertDatabaseCount("SELECT COUNT(*) FROM student_answers WHERE attempt_id = " + fixture.attemptId(), 0);
+    }
+
+    @Test
+    void failedModernAttemptReadDoesNotRetryLegacyQuery() throws Exception {
+        var fixture = createDeadlineAnswerFixture();
+        var source = JdbcTestProbe.wrap(server.getDataSource(), (sql, after) -> {
+            if (!after && sql.startsWith("SELECT id, exam_id, student_id")) {
+                if (!sql.contains("proctoring_status")) throw new AssertionError("unexpected legacy fallback");
+                throw new SQLException("injected attempt query permission denied", "42000", 1142);
+            }
+        });
+        assertThatThrownBy(() -> new JdbcExamAttemptRepository(source).findById(fixture.attemptId()))
+                .hasRootCauseMessage("injected attempt query permission denied");
+    }
+
     @Test void atomicSameKeyContentionStartingAtZero() throws Exception { atomicContention(0); }
     @Test void atomicSameKeyContentionStartingAtOne() throws Exception { atomicContention(1); }
     @Test void atomicSameKeyContentionStartingAtTwo() throws Exception { atomicContention(2); }
@@ -1824,10 +1871,7 @@ class ServerIntegrationTest {
         assertDatabaseCount("SELECT COUNT(*) FROM exams WHERE id = 2 AND is_active = 1", 0);
 
         // Student available exams does not include exam 2
-        HttpResponse<String> listBefore = sendJson(
-                client, "GET", "/api/v1/student/exams", "token-stu1", null);
-        assertThat(listBefore.statusCode()).isEqualTo(200);
-        assertThat(listBefore.body()).doesNotContain("\"id\":2");
+        assertThat(listedStudentExam(client, "token-stu1", 2)).isEmpty();
 
         // 2. Reactivate exam 2
         HttpResponse<String> reactivateRes = sendJson(
@@ -1839,10 +1883,7 @@ class ServerIntegrationTest {
         assertDatabaseCount("SELECT COUNT(*) FROM exams WHERE id = 2 AND version_number = 1", 1);
 
         // Student available exams now includes exam 2
-        HttpResponse<String> listAfter = sendJson(
-                client, "GET", "/api/v1/student/exams", "token-stu1", null);
-        assertThat(listAfter.statusCode()).isEqualTo(200);
-        assertThat(listAfter.body()).contains("\"id\":2");
+        assertThat(listedStudentExam(client, "token-stu1", 2)).isPresent();
     }
 
     @Test

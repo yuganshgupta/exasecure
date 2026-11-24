@@ -1253,8 +1253,10 @@ public class AdminDashboardView {
                 "Student: " + attempt.studentName() + " (Enrollment: " + (attempt.enrollmentNumber() != null ? attempt.enrollmentNumber() : "N/A") + ")\n"
                         + "Score: " + (attempt.score() != null ? attempt.score() + " pts" : "Pending") + "\n"
                         + "Violations: " + attempt.focusLostCount() + " (" + (attempt.flagged() ? "FLAGGED" : "CLEAN") + ")\n\n"
-                        + "WARNING: This will permanently remove this student attempt, all associated answers, and proctoring evidence. "
-                        + "The exam definition and question bank will remain completely untouched."
+                        + "This permanently removes the attempt, its answers, and its proctoring evidence.\n\n"
+                        + ("ACTIVE".equals(attempt.status())
+                        ? "This attempt is in progress. The student can start again if the exam is open to new starts."
+                        : "This also removes the recorded attempt from exam history.")
         );
         if (!confirmed) return;
 
