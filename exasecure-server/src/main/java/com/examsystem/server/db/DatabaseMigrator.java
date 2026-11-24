@@ -10,6 +10,7 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -124,24 +125,22 @@ public class DatabaseMigrator {
             }
     }
 
-    private int getCurrentVersion(Connection conn) {
-        try (Statement stmt = conn.createStatement()) {
-            try (ResultSet rs = stmt.executeQuery("SELECT MAX(version) FROM schema_versions")) {
-                if (rs.next()) {
-                    return rs.getInt(1);
-                }
+    private int getCurrentVersion(Connection conn) throws Exception {
+        try (Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT MAX(version) FROM schema_versions")) {
+            if (!rs.next()) throw new SQLException("Schema version query returned no result");
+            return rs.getInt(1);
+        } catch (SQLException failure) {
+            // MySQL and existing H2 compatibility mode report a missing table as 42S02.
+            // H2 reports 42S04 for a completely empty database.
+            String state = failure.getSQLState();
+            if (!"42S02".equals(state) && !("42S04".equals(state) && failure.getErrorCode() == 42104)) {
+                throw failure;
             }
-        } catch (Exception e) {
-            log.warn("schema_versions table not found. Attempting full v3 initialization...", e);
-            try {
-                executeScript(conn, "db/migration/schema-v3.sql");
-                return 3;
-            } catch (Exception ex) {
-                log.error("Failed to initialize base schema", ex);
-            }
-            return 0;
         }
-        return 0;
+        log.info("schema_versions table is absent. Initializing base schema.");
+        executeScript(conn, "db/migration/schema-v3.sql");
+        return 3;
     }
 
     private boolean columnExists(Connection conn, String tableName, String columnName) throws Exception {

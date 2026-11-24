@@ -65,6 +65,28 @@ class MySqlMigrationIntegrationTest {
     }
 
     @Test
+    void failedVersionReadDoesNotStartBootstrapOrAdvanceMarkers() throws Exception {
+        seedV3AnswerFixture();
+        dataSource = dataSource();
+        var failure = new SQLException("injected version-read permission failure", "42000", 1142);
+        var faulty = JdbcTestProbe.wrap(dataSource, (sql, after) -> {
+            if (!after && sql.equals("SELECT MAX(version) FROM schema_versions")) throw failure;
+        });
+
+        assertThatThrownBy(() -> new DatabaseMigrator(faulty).migrate())
+                .hasRootCauseMessage("injected version-read permission failure");
+        try (var conn = connection()) {
+            assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 3);
+            assertOriginalLegacyAnswer(conn);
+        }
+        new DatabaseMigrator(dataSource).migrate();
+        try (var conn = connection()) {
+            assertSingleInt(conn, "SELECT MAX(version) FROM schema_versions", 11);
+            assertOriginalLegacyAnswer(conn);
+        }
+    }
+
+    @Test
     void migratesImmutableV1SchemaAndRepresentativeDataIdempotently() throws Exception {
         byte[] v1Schema = readResource("db/migration/schema-v3.sql");
         assertThat(normalizedSha256(v1Schema)).isEqualTo(V1_SCHEMA_SHA256);

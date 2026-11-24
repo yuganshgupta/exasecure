@@ -7,6 +7,14 @@ The automated destructive fixtures accept only `exasecure_test` on localhost:330
 The migrator holds a MySQL named lock for the database across inspection, DDL,
 data updates, and version markers. A competing migrator waits at this lock.
 
+Base initialization requires a missing `schema_versions` table. A permission,
+connectivity, or other version-read error stops startup before any migration.
+Correct the database connection or permissions, then rerun startup. If a
+historical V6 marker exists but the legacy proctor copy or rename was interrupted,
+stop writers and compare a restored backup with the live schema and record
+counts. Keep both copies of the evidence while verifying the association between
+events and screenshots, especially when several events share a timestamp.
+
 V7 commits the legacy answer backfill and its version marker in the same
 transaction. The server retries an interrupted V7 backfill on a pre-V7 database.
 On V7 or later it requires the exact V7 marker before serving requests. If the
